@@ -125,7 +125,7 @@ mergeFuncResults(handshake::FuncOp funcOp, ConversionPatternRewriter &rewriter,
     SmallVector<Value, 4> mergeOperands;
     for (ValueRange operands : returnsOperands)
       mergeOperands.push_back(operands[i]);
-    auto mergeOp = rewriter.create<handshake::MergeOp>(loc, mergeOperands);
+    auto mergeOp = handshake::MergeOp::create(rewriter, loc, mergeOperands);
     results.push_back(mergeOp.getResult());
     mergeOp->setAttr(BB_ATTR_NAME, rewriter.getUI32IntegerAttr(exitBlockID));
   }
@@ -387,8 +387,8 @@ FailureOr<handshake::FuncOp> LowerFuncToHandshake::lowerSignature(
   rewriter.setInsertionPoint(funcOp);
   FunctionType funTy = rewriter.getFunctionType(argTypes, resTypes);
   SmallVector<NamedAttribute> attrs = deriveNewAttributes(funcOp);
-  auto newFuncOp = rewriter.create<handshake::FuncOp>(
-      funcOp.getLoc(), funcOp.getName(), funTy, attrs);
+  auto newFuncOp = handshake::FuncOp::create(rewriter, funcOp.getLoc(),
+                                             funcOp.getName(), funTy, attrs);
   if (funcOp.isExternal()) {
     rewriter.eraseOp(funcOp);
     return newFuncOp;
@@ -434,19 +434,20 @@ FailureOr<handshake::FuncOp> LowerFuncToHandshake::lowerSignature(
 
       trueOperands.push_back(blockCtrl);
       falseOperands.push_back(blockCtrl);
-      rewriter.replaceOp(termOp,
-                         rewriter.create<cf::CondBranchOp>(
-                             condBrOp->getLoc(), condBrOp.getCondition(),
-                             condBrOp.getTrueDest(), trueOperands,
-                             condBrOp.getFalseDest(), falseOperands));
+      rewriter.replaceOp(termOp, cf::CondBranchOp::create(
+                                     rewriter, condBrOp->getLoc(),
+                                     condBrOp.getCondition(),
+                                     condBrOp.getTrueDest(), trueOperands,
+                                     condBrOp.getFalseDest(), falseOperands));
 
     } else if (auto brOp = dyn_cast<cf::BranchOp>(termOp)) {
       SmallVector<Value> operands;
       if (failed(rewriter.getRemappedValues(brOp.getDestOperands(), operands)))
         return failure();
       operands.push_back(blockCtrl);
-      rewriter.replaceOp(termOp, rewriter.create<cf::BranchOp>(
-                                     brOp->getLoc(), brOp.getDest(), operands));
+      rewriter.replaceOp(termOp,
+                         cf::BranchOp::create(rewriter, brOp->getLoc(),
+                                              brOp.getDest(), operands));
     }
   }
 
@@ -538,10 +539,10 @@ void LowerFuncToHandshake::insertMerge(BlockArgument blockArg,
   // Every block needs to feed it's entry control into a control merge
   if (blockArg == getBlockControl(block)) {
     addFromAllPredecessors(handshake::ControlType::get(rewriter.getContext()));
-    iMerge.op = rewriter.create<handshake::ControlMergeOp>(loc, operands);
+    iMerge.op = handshake::ControlMergeOp::create(rewriter, loc, operands);
   } else if (predecessors.size() == 1) {
     addFromAllPredecessors(blockArg.getType());
-    iMerge.op = rewriter.create<handshake::MergeOp>(loc, operands);
+    iMerge.op = handshake::MergeOp::create(rewriter, loc, operands);
   } else {
     // Create a backedge for the index operand, and another one for each data
     // operand. The index operand will eventually resolve to the current block's
@@ -569,8 +570,8 @@ void LowerFuncToHandshake::insertMerge(BlockArgument blockArg,
 
     // Since none of the operands have extra signals, the result type matches
     // the first operand.
-    iMerge.op = rewriter.create<handshake::MuxOp>(
-        loc, /*resultType=*/operands[0].getType(), index, operands);
+    iMerge.op = handshake::MuxOp::create(
+        rewriter, loc, /*resultType=*/operands[0].getType(), index, operands);
   }
 }
 
@@ -681,8 +682,8 @@ void LowerFuncToHandshake::addBranchOps(
       if (isConditional) {
         cf::CondBranchOp condBranchOp = cast<cf::CondBranchOp>(termOp);
 
-        auto newCondBranchOp = rewriter.create<handshake::ConditionalBranchOp>(
-            loc, isConditional, branchOprd);
+        auto newCondBranchOp = handshake::ConditionalBranchOp::create(
+            rewriter, loc, isConditional, branchOprd);
         Block *trueSucc = condBranchOp.getTrueDest();
         Block *falseSucc = condBranchOp.getFalseDest();
 
@@ -763,7 +764,7 @@ void LowerFuncToHandshake::addBranchOps(
 
       } else {
         auto newBranchOp =
-            rewriter.create<handshake::BranchOp>(loc, branchOprd);
+            handshake::BranchOp::create(rewriter, loc, branchOprd);
 
         Block *succ = block.getSuccessors()[0];
 
@@ -889,7 +890,7 @@ LogicalResult LowerFuncToHandshake::convertMemoryOps(
               assert(addr && "failed to remap address");
               Type dataTy = cast<MemRefType>(memref.getType()).getElementType();
               Value data = edgeBuilder.get(channelifyType(dataTy));
-              auto newOp = rewriter.create<handshake::LoadOp>(loc, addr, data);
+              auto newOp = handshake::LoadOp::create(rewriter, loc, addr, data);
 
               copyDialectAttr<handshake::MemDependenceArrayAttr>(loadOp, newOp);
               namer.replaceOp(loadOp, newOp);
@@ -905,7 +906,8 @@ LogicalResult LowerFuncToHandshake::convertMemoryOps(
               Value addr = rewriter.getRemappedValue(indices.front());
               Value data = rewriter.getRemappedValue(storeOp.getValueToStore());
               assert((addr && data) && "failed to remap address or data");
-              auto newOp = rewriter.create<handshake::StoreOp>(loc, addr, data);
+              auto newOp =
+                  handshake::StoreOp::create(rewriter, loc, addr, data);
 
               copyDialectAttr<handshake::MemDependenceArrayAttr>(storeOp,
                                                                  newOp);
@@ -997,7 +999,7 @@ LogicalResult LowerFuncToHandshake::verifyAndCreateMemInterfaces(
     }
     rewriter.setInsertionPointToStart(lastRetOp->getBlock());
     auto mergeOp =
-        rewriter.create<handshake::MergeOp>(lastRetOp.getLoc(), controls);
+        handshake::MergeOp::create(rewriter, lastRetOp.getLoc(), controls);
     ctrlEnd = mergeOp.getResult();
 
     // The merge goes into an extra "end block" after all others, this will be
@@ -1147,7 +1149,7 @@ LogicalResult LowerFuncToHandshake::flattenAndTerminate(
     if (arg.getUsers().empty()) {
       // When the memory region is not accessed, just a create a constant source
       // of valid "memory end" tokens for ir
-      auto sourceOp = rewriter.create<handshake::SourceOp>(lastOp->getLoc());
+      auto sourceOp = handshake::SourceOp::create(rewriter, lastOp->getLoc());
       sourceOp->setAttr(BB_ATTR_NAME, rewriter.getUI32IntegerAttr(exitBlockID));
       endOprds.push_back(sourceOp.getResult());
     } else {
@@ -1162,7 +1164,7 @@ LogicalResult LowerFuncToHandshake::flattenAndTerminate(
   }
   endOprds.push_back(getBlockControl(funcOp.getBodyBlock()));
 
-  auto endOp = rewriter.create<handshake::EndOp>(lastOp->getLoc(), endOprds);
+  auto endOp = handshake::EndOp::create(rewriter, lastOp->getLoc(), endOprds);
   endOp->setAttr(BB_ATTR_NAME, rewriter.getUI32IntegerAttr(exitBlockID));
   return success();
 }
@@ -1226,8 +1228,8 @@ LogicalResult OneToOneConversion<SrcOp, DstOp>::matchAndRewrite(
   for (Type resType : srcOp->getResultTypes())
     newTypes.push_back(channelifyType(resType));
   auto newOp =
-      rewriter.create<DstOp>(srcOp->getLoc(), newTypes, adaptor.getOperands(),
-                             getTransferableAttributes<SrcOp, DstOp>(srcOp));
+      DstOp::create(rewriter, srcOp->getLoc(), newTypes, adaptor.getOperands(),
+                    getTransferableAttributes<SrcOp, DstOp>(srcOp));
   namer.replaceOp(srcOp, newOp);
   rewriter.replaceOp(srcOp, newOp);
   return success();
@@ -1250,13 +1252,13 @@ LogicalResult ConvertIndexCast<CastOp, ExtOp>::matchAndRewrite(
   Operation *newOp;
   if (srcWidth < dstWidth) {
     // This is an extension
-    newOp = rewriter.create<ExtOp>(
-        castOp.getLoc(), dstType, adaptor.getOperands(),
-        getTransferableAttributes<CastOp, ExtOp>(castOp));
+    newOp =
+        ExtOp::create(rewriter, castOp.getLoc(), dstType, adaptor.getOperands(),
+                      getTransferableAttributes<CastOp, ExtOp>(castOp));
   } else {
     // This is a truncation
-    newOp = rewriter.create<handshake::TruncIOp>(
-        castOp.getLoc(), dstType, adaptor.getOperands(),
+    newOp = handshake::TruncIOp::create(
+        rewriter, castOp.getLoc(), dstType, adaptor.getOperands(),
         getTransferableAttributes<CastOp, handshake::TruncIOp>(castOp));
   }
   namer.replaceOp(castOp, newOp);
@@ -1448,8 +1450,9 @@ ConvertCalls::matchAndRewrite(func::CallOp callOp, OpAdaptor adaptor,
       handshake::ControlType::get(rewriter.getContext()));
 
   rewriter.setInsertionPoint(callOp);
-  auto instOp = rewriter.create<handshake::InstanceOp>(
-      callOp.getLoc(), callOp.getCallee(), handshakeResultTypes, operands);
+  auto instOp = handshake::InstanceOp::create(rewriter, callOp.getLoc(),
+                                              callOp.getCallee(),
+                                              handshakeResultTypes, operands);
   instOp->setDialectAttrs(callOp->getDialectAttrs());
 
   // attach parameters to the new Instance as attributes
@@ -1550,7 +1553,7 @@ ConvertConstants::matchAndRewrite(arith::ConstantOp cstOp,
   // Determine the new constant's control input
   Value controlVal;
   if (isCstSourcable(cstOp)) {
-    auto sourceOp = rewriter.create<handshake::SourceOp>(cstOp.getLoc());
+    auto sourceOp = handshake::SourceOp::create(rewriter, cstOp.getLoc());
     inheritBB(cstOp, sourceOp);
     controlVal = sourceOp.getResult();
   } else {
@@ -1564,8 +1567,8 @@ ConvertConstants::matchAndRewrite(arith::ConstantOp cstOp,
     cstAttr = IntegerAttr::get(intType,
                                cast<IntegerAttr>(cstAttr).getValue().trunc(32));
   }
-  auto newCstOp = rewriter.create<handshake::ConstantOp>(cstOp.getLoc(),
-                                                         cstAttr, controlVal);
+  auto newCstOp = handshake::ConstantOp::create(rewriter, cstOp.getLoc(),
+                                                cstAttr, controlVal);
   newCstOp->setDialectAttrs(cstOp->getDialectAttrs());
   namer.replaceOp(cstOp, newCstOp);
   rewriter.replaceOp(cstOp, newCstOp->getResults());
@@ -1591,8 +1594,8 @@ LogicalResult ConvertUndefinedValues::matchAndRewrite(
 
   // Create a constant with a default value and replace the undefined value
   rewriter.setInsertionPoint(undefOp);
-  auto cstOp = rewriter.create<handshake::ConstantOp>(undefOp.getLoc(), cstAttr,
-                                                      getBlockControl(undefOp));
+  auto cstOp = handshake::ConstantOp::create(rewriter, undefOp.getLoc(),
+                                             cstAttr, getBlockControl(undefOp));
   cstOp->setDialectAttrs(undefOp->getAttrDictionary());
   namer.replaceOp(cstOp, cstOp);
   rewriter.replaceOp(undefOp, cstOp.getResult());

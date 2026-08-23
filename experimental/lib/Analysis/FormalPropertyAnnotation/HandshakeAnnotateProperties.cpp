@@ -1013,7 +1013,7 @@ void HandshakeAnnotatePropertiesPass::runDynamaticPass() {
   for (SinkOp sink : sinks) {
     OpBuilder builder(sink);
     DeadBufferOp deadBuffer =
-        builder.create<DeadBufferOp>(sink.getLoc(), sink.getOperand());
+        DeadBufferOp::create(builder, sink.getLoc(), sink.getOperand());
     sink.erase();
     for (auto &iog : iogs) {
       if (iog.contains(sink)) {

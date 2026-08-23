@@ -176,13 +176,13 @@ LogicalResult FtdConvertIndexCast<CastOp, ExtOp>::matchAndRewrite(
   if (srcWidth < dstWidth) {
     // This is an extension
     newOp =
-        rewriter.create<ExtOp>(castOp.getLoc(), dstType, adaptor.getOperands(),
-                               castOp->getAttrDictionary().getValue());
+        ExtOp::create(rewriter, castOp.getLoc(), dstType, adaptor.getOperands(),
+                      castOp->getAttrDictionary().getValue());
   } else {
     // This is a truncation
-    newOp = rewriter.create<handshake::TruncIOp>(
-        castOp.getLoc(), dstType, adaptor.getOperands(),
-        castOp->getAttrDictionary().getValue());
+    newOp = handshake::TruncIOp::create(rewriter, castOp.getLoc(), dstType,
+                                        adaptor.getOperands(),
+                                        castOp->getAttrDictionary().getValue());
   }
   this->namer.replaceOp(castOp, newOp);
   rewriter.replaceOp(castOp, newOp);
@@ -262,7 +262,7 @@ static ftd::ShadowCFG buildShadowCFG(OpBuilder &builder,
     builder.setInsertionPointAfter(realFuncOp);
     auto funcType = builder.getFunctionType({}, {});
     shadow.shadowFunc =
-        builder.create<func::FuncOp>(loc, "__ftd_shadow_cfg__", funcType);
+        func::FuncOp::create(builder, loc, "__ftd_shadow_cfg__", funcType);
 
     Region &R = shadow.shadowFunc.getBody();
     SmallVector<Block *> blocks;
@@ -275,14 +275,14 @@ static ftd::ShadowCFG buildShadowCFG(OpBuilder &builder,
 
       if (edge.isConditional) {
         auto dummyCond =
-            builder.create<arith::ConstantOp>(loc, builder.getBoolAttr(true));
-        builder.create<cf::CondBranchOp>(
-            loc, dummyCond, blocks[edge.trueSuccIdx], ValueRange{},
-            blocks[edge.falseSuccIdx], ValueRange{});
+            arith::ConstantOp::create(builder, loc, builder.getBoolAttr(true));
+        cf::CondBranchOp::create(builder, loc, dummyCond,
+                                 blocks[edge.trueSuccIdx], ValueRange{},
+                                 blocks[edge.falseSuccIdx], ValueRange{});
       } else if (edge.hasSuccessors) {
-        builder.create<cf::BranchOp>(loc, blocks[edge.uncondSuccIdx]);
+        cf::BranchOp::create(builder, loc, blocks[edge.uncondSuccIdx]);
       } else {
-        builder.create<func::ReturnOp>(loc);
+        func::ReturnOp::create(builder, loc);
       }
     }
   }
@@ -489,8 +489,8 @@ static LogicalResult convertUndefinedValues(ConversionPatternRewriter &rewriter,
 
     // Create a constant with a default value and replace the undefined value
     rewriter.setInsertionPoint(undefOp);
-    auto cstOp = rewriter.create<handshake::ConstantOp>(undefOp.getLoc(),
-                                                        cstAttr, startValue);
+    auto cstOp = handshake::ConstantOp::create(rewriter, undefOp.getLoc(),
+                                               cstAttr, startValue);
     cstOp->setDialectAttrs(undefOp->getAttrDictionary());
     undefOp.getResult().replaceAllUsesWith(cstOp.getResult());
     namer.replaceOp(cstOp, cstOp);
@@ -544,7 +544,7 @@ static LogicalResult convertConstants(ConversionPatternRewriter &rewriter,
     // component, otherwise it remains startValue
     Value controlValue;
     if (isCstSourcable(cstOp)) {
-      auto sourceOp = rewriter.create<handshake::SourceOp>(cstOp.getLoc());
+      auto sourceOp = handshake::SourceOp::create(rewriter, cstOp.getLoc());
       inheritBB(cstOp, sourceOp);
       controlValue = sourceOp.getResult();
     } else {
@@ -560,8 +560,8 @@ static LogicalResult convertConstants(ConversionPatternRewriter &rewriter,
           intType, cast<IntegerAttr>(valueAttr).getValue().trunc(32));
     }
 
-    auto newCstOp = rewriter.create<handshake::ConstantOp>(
-        cstOp.getLoc(), valueAttr, controlValue);
+    auto newCstOp = handshake::ConstantOp::create(rewriter, cstOp.getLoc(),
+                                                  valueAttr, controlValue);
 
     newCstOp->setDialectAttrs(cstOp->getDialectAttrs());
 
@@ -650,8 +650,8 @@ LogicalResult ftd::FtdLowerFuncToHandshake::matchAndRewrite(
       assert(cond && "Failed to remap condition");
       Value ctrl = block.getArguments().back();
       rewriter.setInsertionPoint(condBr);
-      rewriter.create<handshake::ConditionalBranchOp>(condBr.getLoc(), cond,
-                                                      ctrl);
+      handshake::ConditionalBranchOp::create(rewriter, condBr.getLoc(), cond,
+                                             ctrl);
     }
   }
 
