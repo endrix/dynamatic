@@ -20,6 +20,20 @@ gtest_discover_tests(
 
 add_definitions(-DDYNAMATIC_ROOT="${CMAKE_SOURCE_DIR}")
 
+# Simulator the integration tests drive for each HDL. Empty (the default) lets
+# the frontend choose, which is ModelSim. Verilator reads only Verilog and GHDL
+# only VHDL, so the two are configured separately; setting both runs the whole
+# suite with no vendor tooling:
+#
+#   cmake -DDYNAMATIC_VERILOG_SIMULATOR=verilator \
+#         -DDYNAMATIC_VHDL_SIMULATOR=ghdl -B build
+set(DYNAMATIC_VERILOG_SIMULATOR "" CACHE STRING
+    "Simulator for the Verilog integration tests (e.g. verilator)")
+set(DYNAMATIC_VHDL_SIMULATOR "" CACHE STRING
+    "Simulator for the VHDL integration tests (e.g. ghdl)")
+add_definitions(-DDYNAMATIC_VERILOG_SIMULATOR="${DYNAMATIC_VERILOG_SIMULATOR}")
+add_definitions(-DDYNAMATIC_VHDL_SIMULATOR="${DYNAMATIC_VHDL_SIMULATOR}")
+
 # Default: Execute 8 integration tests in parallel
 # Can be overridden with -DPARALLEL_FACTOR=<n> at configure time
 # e.g. by running 'cmake -DPARALLEL_FACTOR=<n> -B build'

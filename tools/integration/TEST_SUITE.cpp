@@ -163,6 +163,16 @@ struct IntegrationTest {
   }
 };
 
+/// The simulator the integration tests should drive for a given HDL, as a
+/// `simulate` argument. Empty when none is configured, which leaves the choice
+/// to the frontend (ModelSim). Configure with
+/// `-DDYNAMATIC_VERILOG_SIMULATOR=verilator -DDYNAMATIC_VHDL_SIMULATOR=ghdl`
+/// to run the suite without any vendor tooling: Verilator only reads Verilog,
+/// and GHDL only reads VHDL, so each HDL needs its own.
+static std::string simulatorArg(const std::string &simulator) {
+  return simulator.empty() ? "" : " --simulator " + simulator;
+}
+
 int IntegrationTest::run() {
 
   fs::path cSourcePath = this->benchmarkPath / this->name / (this->name + ".c");
@@ -212,14 +222,16 @@ int IntegrationTest::run() {
   // Verify Verilog works correctly
   if (this->testVerilog) {
     scriptFile << "write-hdl --hdl verilog" << std::endl
-               << "simulate" << std::endl;
+               << "simulate" << simulatorArg(DYNAMATIC_VERILOG_SIMULATOR)
+               << std::endl;
   }
   // Verify VHDL works correctly
   if (this->testVHDL) {
     // By default, the report containing the simulation time is re-written
     // during the second simulation (i.e., the VHDL simulation).
     scriptFile << "write-hdl --hdl vhdl" << std::endl
-               << "simulate" << std::endl;
+               << "simulate" << simulatorArg(DYNAMATIC_VHDL_SIMULATOR)
+               << std::endl;
   }
   scriptFile << "exit" << std::endl;
 
