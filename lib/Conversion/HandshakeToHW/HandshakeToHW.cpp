@@ -1256,19 +1256,19 @@ public:
       return lowerType(type);
     });
 
+    // Materialization callbacks return a plain `Value` (a null value signals
+    // "no materialization") since the 1:N conversion rework in LLVM 20.
     addTargetMaterialization([&](OpBuilder &builder, Type resultType,
-                                 ValueRange inputs,
-                                 Location loc) -> std::optional<Value> {
+                                 ValueRange inputs, Location loc) -> Value {
       if (inputs.size() != 1)
-        return std::nullopt;
+        return Value();
       return inputs[0];
     });
 
     addSourceMaterialization([&](OpBuilder &builder, Type resultType,
-                                 ValueRange inputs,
-                                 Location loc) -> std::optional<Value> {
+                                 ValueRange inputs, Location loc) -> Value {
       if (inputs.size() != 1)
-        return std::nullopt;
+        return Value();
       return inputs[0];
     });
   }

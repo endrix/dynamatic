@@ -171,12 +171,11 @@ LogicalResult LowerFuncToHandshake::computeLinearDominance(
 // CfToHandshakeTypeConverter
 //===-----------------------------------------------------------------------==//
 
-static std::optional<Value> oneToOneVoidMaterialization(OpBuilder &builder,
-                                                        Type /*resultType*/,
-                                                        ValueRange inputs,
-                                                        Location /*loc*/) {
+static Value oneToOneVoidMaterialization(OpBuilder &builder,
+                                         Type /*resultType*/, ValueRange inputs,
+                                         Location /*loc*/) {
   if (inputs.size() != 1)
-    return std::nullopt;
+    return Value();
   return inputs[0];
 }
 
@@ -199,7 +198,8 @@ static Type channelifyType(Type type) {
 
 CfToHandshakeTypeConverter::CfToHandshakeTypeConverter() {
   addConversion(channelifyType);
-  addArgumentMaterialization(oneToOneVoidMaterialization);
+  // Argument materializations were folded into source materializations by the
+  // 1:N dialect conversion rework (LLVM 20).
   addSourceMaterialization(oneToOneVoidMaterialization);
   addTargetMaterialization(oneToOneVoidMaterialization);
 }
@@ -398,22 +398,25 @@ FailureOr<handshake::FuncOp> LowerFuncToHandshake::lowerSignature(
 
   const TypeConverter *typeConv = getTypeConverter();
 
+  // `applySignatureConversion` replaces the block it is handed, so collect the
+  // blocks to convert before touching any of them.
+  Block *entryBlock = &oldBody->front();
+  SmallVector<Block *> nonEntryBlocks;
+  for (Block &block : llvm::drop_begin(*oldBody))
+    nonEntryBlocks.push_back(&block);
+
   // Convert the entry block's signature
-  Block *entryBlock = &funcOp.getBody().front();
   TypeConverter::SignatureConversion entryConversion(
       entryBlock->getNumArguments());
   setupEntryBlockConversion(entryBlock, numMemories, rewriter, entryConversion);
-  rewriter.applySignatureConversion(oldBody, entryConversion, typeConv);
+  rewriter.applySignatureConversion(entryBlock, entryConversion, typeConv);
 
   // Convert the non entry blocks' signatures
-  SmallVector<TypeConverter::SignatureConversion> nonEntryConversions;
-  for (Block &block : llvm::drop_begin(funcOp)) {
-    auto &conv = nonEntryConversions.emplace_back(block.getNumArguments());
-    setupBlockConversion(&block, rewriter, conv);
+  for (Block *block : nonEntryBlocks) {
+    TypeConverter::SignatureConversion conv(block->getNumArguments());
+    setupBlockConversion(block, rewriter, conv);
+    rewriter.applySignatureConversion(block, conv, typeConv);
   }
-  if (failed(rewriter.convertNonEntryRegionTypes(oldBody, *typeConv,
-                                                 nonEntryConversions)))
-    return failure();
 
   // Modify branch-like terminators to forward the new control value through
   // all blocks
@@ -632,6 +635,28 @@ static SetVector<Value> getBranchOperands(Operation *termOp) {
   return SetVector<Value>{oprds.begin(), oprds.end()};
 }
 
+/// Reroutes the uses of `oldValue` for which `shouldReplace` returns true to
+/// `newValue` by modifying the users in place.
+///
+/// The conversion driver's own value replacement APIs are unsuitable here.
+/// While pattern rollback is enabled (the default), `replaceUsesWithIf` is
+/// rejected outright, and `replaceAllUsesWith` deliberately leaves alone the
+/// uses that appear, within the same block, before the operation defining the
+/// replacement value. That heuristic is wrong for `handshake.func` bodies,
+/// which are graph regions in which such uses are perfectly legal (memory
+/// interfaces sit at the top of the block and are fed by values produced
+/// further down). Modifying the users in place is supported in both driver
+/// modes and replaces exactly the uses we ask it to.
+static void rerouteUsesIf(ConversionPatternRewriter &rewriter, Value oldValue,
+                          Value newValue,
+                          function_ref<bool(OpOperand &)> shouldReplace) {
+  for (OpOperand &use : llvm::make_early_inc_range(oldValue.getUses())) {
+    if (!shouldReplace(use))
+      continue;
+    rewriter.modifyOpInPlace(use.getOwner(), [&]() { use.set(newValue); });
+  }
+}
+
 void LowerFuncToHandshake::addBranchOps(
     handshake::FuncOp funcOp, ConversionPatternRewriter &rewriter) const {
   for (Block &block : funcOp) {
@@ -691,7 +716,7 @@ void LowerFuncToHandshake::addBranchOps(
 
         // Use the results of the newly added conditional branch to feed the
         // original users (CF operations)
-        rewriter.replaceUsesWithIf(branchOprd, trueRes, [&](OpOperand &oprd) {
+        rerouteUsesIf(rewriter, branchOprd, trueRes, [&](OpOperand &oprd) {
           Operation *user = oprd.getOwner();
           if (alreadyReplaced.count(user)) {
             // NOTE: here we need to be careful of handling parallel edges.
@@ -732,7 +757,7 @@ void LowerFuncToHandshake::addBranchOps(
         Value falseRes = newCondBranchOp.getFalseResult();
         // Use the results of the newly added conditional branch to feed the
         // original users (CF operations)
-        rewriter.replaceUsesWithIf(branchOprd, falseRes, [&](OpOperand &oprd) {
+        rerouteUsesIf(rewriter, branchOprd, falseRes, [&](OpOperand &oprd) {
           return falseUsers.contains(oprd.getOwner());
         });
 
@@ -752,8 +777,8 @@ void LowerFuncToHandshake::addBranchOps(
 
         // Use the results of the newly added branch to feed the
         // original users (CF operations)
-        rewriter.replaceUsesWithIf(
-            branchOprd, newBranchOp.getResult(),
+        rerouteUsesIf(
+            rewriter, branchOprd, newBranchOp.getResult(),
             [&](OpOperand &oprd) { return users.contains(oprd.getOwner()); });
       }
     }
@@ -1060,6 +1085,7 @@ LogicalResult LowerFuncToHandshake::flattenAndTerminate(
   // Erase all cf-level terminators, accumulating operands to func-level returns
   // as we go
   SmallVector<SmallVector<Value>> returnsOperands;
+  DenseSet<Operation *> erasedTerminators;
   for (Block &block : funcOp) {
     Operation *termOp = &block.back();
     if (auto retOp = dyn_cast<func::ReturnOp>(termOp)) {
@@ -1067,6 +1093,7 @@ LogicalResult LowerFuncToHandshake::flattenAndTerminate(
       if (failed(rewriter.getRemappedValues(retOp->getOperands(), retOperands)))
         return failure();
     }
+    erasedTerminators.insert(termOp);
     rewriter.eraseOp(termOp);
   }
   assert(!returnsOperands.empty() && "function must have at least one return");
@@ -1092,7 +1119,14 @@ LogicalResult LowerFuncToHandshake::flattenAndTerminate(
     for (BlockArgument blockArg : block.getArguments()) {
       Value mergeRes = argReplacements.at(blockArg);
       replacements.push_back(mergeRes);
-      rewriter.replaceAllUsesWith(blockArg, mergeRes);
+      // Reroute the uses ourselves so that uses appearing before the merge in
+      // the (graph region) block are rerouted too. The terminators erased
+      // above must be left alone: the conversion driver forbids modifying an
+      // operation it has already been told to erase. `inlineBlockBefore` also
+      // replaces the block arguments, which takes care of those leftovers.
+      rerouteUsesIf(rewriter, blockArg, mergeRes, [&](OpOperand &use) {
+        return !erasedTerminators.contains(use.getOwner());
+      });
     }
     rewriter.inlineBlockBefore(&block, lastOp, replacements);
   }

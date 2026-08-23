@@ -2054,8 +2054,15 @@ OpFoldResult TruncIOp::fold(FoldAdaptor adaptor) {
       getInMutable().assign(src);
       return getResult();
     }
-    // Bypass the preceeding extension operation and the truncation
-    return src;
+    if (srcWidth == dstWidth) {
+      // Bypass the preceeding extension operation and the truncation
+      return src;
+    }
+    // The extension followed by the truncation amounts to a narrower
+    // extension, which a folder cannot create: a folded result must have the
+    // type of the result it replaces. `ArithExtToTruncOpt` (in the bitwidth
+    // optimization pass) rewrites this case.
+    return nullptr;
   }
 
   // Identical operand and result types mean that the trunc is a no-op
