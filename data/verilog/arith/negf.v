@@ -7,11 +7,11 @@ module negf #(
   input  rst,
   input  [DATA_TYPE - 1 : 0] ins,
   input  ins_valid,
-  input  ins_ready,
+  output ins_ready,
   // outputs
   output [DATA_TYPE - 1 : 0] outs,
   output outs_valid,
-  output outs_ready
+  input  outs_ready
 );
 
   assign outs[DATA_TYPE-1] = ins[DATA_TYPE-1] ^ 1'b1;
