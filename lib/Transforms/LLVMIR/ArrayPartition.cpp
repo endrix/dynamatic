@@ -5,9 +5,17 @@
 // on top of this.
 // -----------------------------------------------------------------------
 
+#include "polly/ScopDetection.h"
 #include "polly/ScopInfo.h"
-#include "polly/ScopPass.h"
 #include "polly/Support/ISLTools.h"
+
+#include "llvm/Analysis/AssumptionCache.h"
+#include "llvm/Analysis/OptimizationRemarkEmitter.h"
+#include "llvm/Analysis/RegionInfo.h"
+#include "llvm/Analysis/ScalarEvolution.h"
+#include "llvm/IR/Dominators.h"
+#include "llvm/IR/IRBuilder.h"
+#include <deque>
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/AliasAnalysis.h"
@@ -16,7 +24,7 @@
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/Passes/PassBuilder.h"
-#include "llvm/Passes/PassPlugin.h"
+#include "llvm/Plugins/PassPlugin.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -639,11 +647,26 @@ PreservedAnalyses ArrayPartition::run(Function &f,
 
   auto islCtx = isl::ctx(isl_ctx_alloc());
 
-  auto &regionInfoAnalysis = fam.getResult<RegionInfoAnalysis>(f);
-
-  auto &scopInfoAnalysis = fam.getResult<ScopInfoAnalysis>(f);
-
   auto &aliasAnalysis = fam.getResult<AAManager>(f);
+
+  // Polly removed its `ScopPass`/`ScopInfoAnalysis` infrastructure in LLVM 22;
+  // SCoP detection and construction are now driven explicitly. `ScopDetection`
+  // mutates the `RegionInfo` it is handed, so a private copy is computed
+  // instead of using the one cached by the analysis manager (this mirrors what
+  // Polly's own `PhaseManager` does).
+  DominatorTree &domTree = fam.getResult<DominatorTreeAnalysis>(f);
+  LoopInfo &loopInfo = fam.getResult<LoopAnalysis>(f);
+  ScalarEvolution &scalarEvolution = fam.getResult<ScalarEvolutionAnalysis>(f);
+  AssumptionCache &assumptionCache = fam.getResult<AssumptionAnalysis>(f);
+  OptimizationRemarkEmitter &remarkEmitter =
+      fam.getResult<OptimizationRemarkEmitterAnalysis>(f);
+
+  RegionInfo regionInfo = RegionInfoAnalysis().run(f, fam);
+  ScopDetection scopDetection(domTree, scalarEvolution, loopInfo, regionInfo,
+                              aliasAnalysis, remarkEmitter);
+  scopDetection.detect(f);
+  ScopInfo scopInfo(f.getDataLayout(), scopDetection, scalarEvolution, loopInfo,
+                    aliasAnalysis, domTree, assumptionCache, remarkEmitter);
 
   // Needed for constructing the global constants
   Module *mod = f.getParent();
@@ -651,7 +674,7 @@ PreservedAnalyses ArrayPartition::run(Function &f,
   AccessInfo info;
 
   std::deque<Region *> rq;
-  getAllRegions(*regionInfoAnalysis.getTopLevelRegion(), rq);
+  getAllRegions(*regionInfo.getTopLevelRegion(), rq);
 
   for (auto &bb : f) {
     for (auto &inst : bb) {
@@ -665,7 +688,7 @@ PreservedAnalyses ArrayPartition::run(Function &f,
   Scop *s;
   unsigned scopId = 0;
   for (Region *r : rq) {
-    if ((s = scopInfoAnalysis.getScop(r))) {
+    if ((s = scopInfo.getScop(r))) {
       for (auto &stmt : *s) {
         for (auto *memAccess : stmt) {
           auto *inst = memAccess->getAccessInstruction();

@@ -30,8 +30,15 @@
 ///
 ///
 //===----------------------------------------------------------------------===//
+#include "polly/ScopDetection.h"
 #include "polly/ScopInfo.h"
-#include "polly/ScopPass.h"
+
+#include "llvm/Analysis/AssumptionCache.h"
+#include "llvm/Analysis/OptimizationRemarkEmitter.h"
+#include "llvm/Analysis/RegionInfo.h"
+#include "llvm/Analysis/ScalarEvolution.h"
+#include "llvm/IR/Dominators.h"
+#include <deque>
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/AliasAnalysis.h"
@@ -39,7 +46,7 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/Passes/PassBuilder.h"
-#include "llvm/Passes/PassPlugin.h"
+#include "llvm/Plugins/PassPlugin.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include "llvm/Analysis/LoopInfo.h"
@@ -1162,20 +1169,44 @@ PreservedAnalyses MemDepAnalysisPass::runPollyBasedInLegacyDynamatic(
     Function &llvmFunction, FunctionAnalysisManager &fam) {
   llvm::LLVMContext &ctx = llvmFunction.getContext();
 
-  auto &regionInfoAnalysis = fam.getResult<RegionInfoAnalysis>(llvmFunction);
+  aliasAnalysis = &fam.getResult<AAManager>(llvmFunction);
 
-  auto &scopInfoAnalysis = fam.getResult<ScopInfoAnalysis>(llvmFunction);
+  // Polly removed its `ScopPass`/`ScopInfoAnalysis` infrastructure in LLVM 22;
+  // SCoP detection and construction are now driven explicitly. `ScopDetection`
+  // mutates the `RegionInfo` it is handed, so a private copy is computed
+  // instead of using the one cached by the analysis manager (this mirrors what
+  // Polly's own `PhaseManager` does).
+  //
+  // These objects own the SCoPs, and hence the `isl` context the analysis
+  // results below refer to. They are declared first on purpose so that they
+  // outlive every consumer of those results: `ScopInfoAnalysis` used to keep
+  // the SCoPs alive in the analysis manager, well past the end of this
+  // function.
+  DominatorTree &domTree = fam.getResult<DominatorTreeAnalysis>(llvmFunction);
+  LoopInfo &loopInfo = fam.getResult<LoopAnalysis>(llvmFunction);
+  ScalarEvolution &scalarEvolution =
+      fam.getResult<ScalarEvolutionAnalysis>(llvmFunction);
+  AssumptionCache &assumptionCache =
+      fam.getResult<AssumptionAnalysis>(llvmFunction);
+  OptimizationRemarkEmitter &remarkEmitter =
+      fam.getResult<OptimizationRemarkEmitterAnalysis>(llvmFunction);
+
+  RegionInfo regionInfo = RegionInfoAnalysis().run(llvmFunction, fam);
+  ScopDetection scopDetection(domTree, scalarEvolution, loopInfo, regionInfo,
+                              *aliasAnalysis, remarkEmitter);
+  scopDetection.detect(llvmFunction);
+  ScopInfo scopInfo(llvmFunction.getDataLayout(), scopDetection,
+                    scalarEvolution, loopInfo, *aliasAnalysis, domTree,
+                    assumptionCache, remarkEmitter);
 
   std::vector<ScopAnalysisInfo> scopMetaInfos;
 
-  aliasAnalysis = &fam.getResult<AAManager>(llvmFunction);
-
   std::deque<Region *> regionQueue;
-  getAllRegions(*regionInfoAnalysis.getTopLevelRegion(), regionQueue);
+  getAllRegions(*regionInfo.getTopLevelRegion(), regionQueue);
 
   Scop *scop;
   for (Region *region : regionQueue) {
-    if ((scop = scopInfoAnalysis.getScop(region)))
+    if ((scop = scopInfo.getScop(region)))
       processScop(*scop, scopMetaInfos);
   }
 
