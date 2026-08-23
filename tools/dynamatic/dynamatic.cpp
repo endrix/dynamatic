@@ -827,9 +827,16 @@ CommandResult WriteHDL::execute(CommandArguments &args) {
       state.hdl = VERILOG;
     } else if (it->second == "verilog-beta") {
       hdl = "verilog-beta";
+      state.hdl = VERILOG;
     } else if (it->second == "smv") {
       hdl = "smv";
-    } else if (it->second != "vhdl") {
+    } else if (it->second == "vhdl") {
+      // Recording this matters when a session writes more than one HDL: the
+      // simulator compatibility check reads `state.hdl`, so leaving it at a
+      // previous `--hdl verilog` makes a later `simulate --simulator ghdl`
+      // refuse a design that is in fact VHDL.
+      state.hdl = VHDL;
+    } else {
       llvm::errs() << "Unknow HDL '" << it->second
                    << "', possible options are 'vhdl',"
                       "'verilog', and 'smv'.\n";
