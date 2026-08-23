@@ -1196,6 +1196,28 @@ static Value getBlockControl(Operation *op) {
   return nullptr;
 }
 
+/// Returns the attributes of `srcOp` that should be carried over to an
+/// equivalent `DstOp`. Discardable attributes are always kept, as are inherent
+/// attributes that both operations share (e.g. a comparison's `predicate`).
+/// Inherent attributes that only the source operation knows about are dropped:
+/// they are meaningless on the dataflow unit that replaces it. `arith`'s
+/// integer overflow flags and floating-point fast-math flags are the ones that
+/// occur in practice.
+template <typename SrcOp, typename DstOp>
+static SmallVector<NamedAttribute> getTransferableAttributes(SrcOp srcOp) {
+  ArrayRef<StringRef> srcInherent = SrcOp::getAttributeNames();
+  ArrayRef<StringRef> dstInherent = DstOp::getAttributeNames();
+  SmallVector<NamedAttribute> attrs;
+  for (const NamedAttribute &attr : srcOp->getAttrDictionary()) {
+    StringRef name = attr.getName().strref();
+    if (llvm::is_contained(srcInherent, name) &&
+        !llvm::is_contained(dstInherent, name))
+      continue;
+    attrs.push_back(attr);
+  }
+  return attrs;
+}
+
 template <typename SrcOp, typename DstOp>
 LogicalResult OneToOneConversion<SrcOp, DstOp>::matchAndRewrite(
     SrcOp srcOp, OpAdaptor adaptor, ConversionPatternRewriter &rewriter) const {
@@ -1205,7 +1227,7 @@ LogicalResult OneToOneConversion<SrcOp, DstOp>::matchAndRewrite(
     newTypes.push_back(channelifyType(resType));
   auto newOp =
       rewriter.create<DstOp>(srcOp->getLoc(), newTypes, adaptor.getOperands(),
-                             srcOp->getAttrDictionary().getValue());
+                             getTransferableAttributes<SrcOp, DstOp>(srcOp));
   namer.replaceOp(srcOp, newOp);
   rewriter.replaceOp(srcOp, newOp);
   return success();
@@ -1228,14 +1250,14 @@ LogicalResult ConvertIndexCast<CastOp, ExtOp>::matchAndRewrite(
   Operation *newOp;
   if (srcWidth < dstWidth) {
     // This is an extension
-    newOp =
-        rewriter.create<ExtOp>(castOp.getLoc(), dstType, adaptor.getOperands(),
-                               castOp->getAttrDictionary().getValue());
+    newOp = rewriter.create<ExtOp>(
+        castOp.getLoc(), dstType, adaptor.getOperands(),
+        getTransferableAttributes<CastOp, ExtOp>(castOp));
   } else {
     // This is a truncation
     newOp = rewriter.create<handshake::TruncIOp>(
         castOp.getLoc(), dstType, adaptor.getOperands(),
-        castOp->getAttrDictionary().getValue());
+        getTransferableAttributes<CastOp, handshake::TruncIOp>(castOp));
   }
   namer.replaceOp(castOp, newOp);
   rewriter.replaceOp(castOp, newOp);

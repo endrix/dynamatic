@@ -48,8 +48,19 @@ Type ArgType::getMlirType(OpBuilder &builder, bool flattenArray) const {
       break;
     }
   } else {
-    baseMLIRElemType =
-        builder.getIntegerType(std::get<BitIntType>(baseElemType).bitWidth);
+    unsigned bitWidth = std::get<BitIntType>(baseElemType).bitWidth;
+    if (!arrayDimensions.empty()) {
+      // As for `bool` above, the in-memory representation of a `_BitInt(N)` is
+      // padded out to the smallest power-of-two number of bytes that holds N
+      // bits (x86-64 psABI). Clang loads and stores array elements at that
+      // width and masks off the padding bits, so the memref element type has
+      // to be the storage width rather than the declared one.
+      unsigned storageWidth = 8;
+      while (storageWidth < bitWidth)
+        storageWidth *= 2;
+      bitWidth = storageWidth;
+    }
+    baseMLIRElemType = builder.getIntegerType(bitWidth);
   }
 
   if (arrayDimensions.empty()) {
