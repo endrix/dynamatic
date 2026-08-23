@@ -33,8 +33,9 @@ def HWDialect : Dialect {
   let hasConstantMaterializer = 1;
   let useDefaultTypePrinterParser = 1;
 
-  // Opt-out of properties for now, must migrate by LLVM 19.  #5273.
-  let usePropertiesForAttributes = 0;
+  // Inherent attributes are stored as properties (the only supported mode
+  // since LLVM 22; the opt-out generates ill-formed code).
+  let usePropertiesForAttributes = 1;
 
   let extraClassDeclaration = [{
     /// Register all HW types.

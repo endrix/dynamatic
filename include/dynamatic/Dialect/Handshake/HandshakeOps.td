@@ -180,7 +180,11 @@ def InstanceOp : Handshake_Op<"instance", [
     ```
   }];
 
-  let arguments = (ins FlatSymbolRefAttr:$module, Variadic<AnyType>:$opOperands);
+  // `arg_attrs`/`res_attrs` are mandated by `ArgAndResultAttrsOpInterface`,
+  // which `CallOpInterface` inherits from since LLVM 21.
+  let arguments = (ins FlatSymbolRefAttr:$module, Variadic<AnyType>:$opOperands,
+                   OptionalAttr<DictArrayAttr>:$arg_attrs,
+                   OptionalAttr<DictArrayAttr>:$res_attrs);
   let results = (outs Variadic<AnyType>);
   let skipDefaultBuilders = 1;
   let builders = [OpBuilder<

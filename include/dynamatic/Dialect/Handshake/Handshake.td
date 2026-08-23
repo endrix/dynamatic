@@ -40,7 +40,9 @@ def Handshake_Dialect : Dialect {
 
   let useDefaultTypePrinterParser = 1;
   let useDefaultAttributePrinterParser = 1;
-  let usePropertiesForAttributes = 0;
+  // Inherent attributes are stored as properties (the only supported mode
+  // since LLVM 22; the opt-out generates ill-formed code).
+  let usePropertiesForAttributes = 1;
   let hasCanonicalizer = 1;
 }
 

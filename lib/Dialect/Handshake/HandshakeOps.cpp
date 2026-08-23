@@ -624,9 +624,10 @@ LogicalResult ConstantOp::inferReturnTypes(
     DictionaryAttr attributes, mlir::OpaqueProperties properties,
     mlir::RegionRange regions,
     SmallVectorImpl<mlir::Type> &inferredReturnTypes) {
-  OperationName opName = OperationName(getOperationName(), context);
-  StringAttr attrName = getValueAttrName(opName);
-  auto attr = cast<TypedAttr>(attributes.get(attrName));
+  // `value` is an inherent attribute and therefore lives in the op's
+  // properties, not in the discardable attribute dictionary.
+  ConstantOpAdaptor adaptor(operands, attributes, properties, regions);
+  TypedAttr attr = adaptor.getValueAttr();
 
   auto controlType = cast<ControlType>(operands[0].getType());
 
