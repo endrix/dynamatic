@@ -37,7 +37,7 @@ These are optional tools which you can see how to [install](../UserGuide/Advance
 > Before moving on to the next step, refresh your environment variables in your current terminal to make sure that all newly installed tools are visible in your PATH. Alternatively, open a new terminal and proceed to cloning the project.
 
 **2. Cloning the Project and Its Submodules**  
-Dynamatic depends on a fork of [LLVM/MLIR](https://github.com/EPFL-LAP/llvm-project). To instruct git to clone the appropriate versions submodules used by Dynamatic, we enable the `--recurse-submodules` flag.  
+Dynamatic builds against [LLVM/MLIR](https://github.com/llvm/llvm-project) release `llvmorg-22.1.7`, pinned as a git submodule. To instruct git to clone the appropriate versions submodules used by Dynamatic, we enable the `--recurse-submodules` flag.  
 ```sh
 git clone --recurse-submodules https://github.com/EPFL-LAP/dynamatic.git
 ```
@@ -52,15 +52,17 @@ chmod +x ./build.sh
 ./build.sh --release
 ```
 
-**Using prebuilt LLVM.** The commands above might take quite some time to finish since we need to build LLVM. Alternatively, the `build.sh` script can download a prebuilt LLVM and link Dynamatic against that instead. If this is preferred, you could run the following command:
+**Using an existing LLVM build.** The command above might take quite some time to finish since we need to build LLVM. If you already have an LLVM/MLIR 22.1.7 build (or install) around, point the build script at it instead:
 
 ```sh
-./build.sh --release --use-prebuilt-llvm
+./build.sh --release --llvm-dir /path/to/llvm-project/build
 ```
 
+The directory must contain `lib/cmake/llvm`, `lib/cmake/mlir` and `lib/cmake/clang`. That LLVM must be configured with `-DLLVM_ENABLE_PROJECTS="mlir;clang;polly"`: Polly backs the memory dependence analysis and the array partitioning pass plugins that the C frontend runs. Without it, Dynamatic still builds (and `dynamatic-opt` works on MLIR input), but the `compile` command of the frontend cannot lower C.
+
 > [!NOTE]  
-> You need at least 6GB of free disk space for Dynamatic (if you enable the `--use-prebuilt-llvm` option).
-> If you need to build `llvm-project` from scratch, you will need at least 50GB
+> The `--use-prebuilt-llvm` option is currently unavailable: the published prebuilt archives predate the move to LLVM 22.
+> If you build `llvm-project` from scratch, you will need at least 50GB
 > of free disk space and 16GB+ of RAM.
 
 **4. Run the Dynamatic Testsuite**  

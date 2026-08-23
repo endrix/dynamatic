@@ -2,11 +2,18 @@ set(LLVM_LINK_COMPONENTS
   Support
 )
 
+# The Polly-based pass plugins are only available when Dynamatic is built
+# against an LLVM installation that includes Polly.
+set(DYNAMATIC_POLLY_PLUGIN_DEPS "")
+if (DYNAMATIC_ENABLE_POLLY)
+  list(APPEND DYNAMATIC_POLLY_PLUGIN_DEPS MemDepAnalysis ArrayPartition)
+endif()
+
 add_llvm_tool(dynamatic
   dynamatic.cpp
   DEPENDS
   # Required by compile.sh
-  dynamatic-opt opt clang MemDepAnalysis ArrayPartition translate-llvm-to-std
+  dynamatic-opt opt clang ${DYNAMATIC_POLLY_PLUGIN_DEPS} translate-llvm-to-std
   export-dot export-cfg exp-frequency-profiler source-rewriter DynPragmasPlugin
   # Required by simulate.sh
   hls-verifier

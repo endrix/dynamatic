@@ -68,8 +68,18 @@ endif()
 #-------------------------------------------------------------------------------
 
 option(DYNAMATIC_BUILD_LLVM "Build LLVM as part of the Dynamatic build" OFF)
+
+# Polly is only needed by the LLVM-IR level memory analysis/array partitioning
+# pass plugins (lib/Transforms/LLVMIR). It is optional so that Dynamatic can be
+# built against an out-of-tree LLVM install that was configured without Polly.
+option(DYNAMATIC_ENABLE_POLLY "Build the Polly-based LLVM IR pass plugins" ON)
+
 if (DYNAMATIC_BUILD_LLVM)
-  set(LLVM_ENABLE_PROJECTS "mlir;clang;polly" CACHE STRING "" FORCE)
+  if (DYNAMATIC_ENABLE_POLLY)
+    set(LLVM_ENABLE_PROJECTS "mlir;clang;polly" CACHE STRING "" FORCE)
+  else()
+    set(LLVM_ENABLE_PROJECTS "mlir;clang" CACHE STRING "" FORCE)
+  endif()
   set(LLVM_TARGETS_TO_BUILD "host"  CACHE STRING "" FORCE)
   add_subdirectory(llvm-project/llvm "llvm-project" EXCLUDE_FROM_ALL)
 
@@ -100,15 +110,30 @@ if (DYNAMATIC_BUILD_LLVM)
           ${CMAKE_BINARY_DIR}/llvm-project/tools/polly/lib/External/isl/include
   )
 else ()
-  set(LLVM_EXTERNAL_LIT "${CMAKE_CURRENT_SOURCE_DIR}/llvm-project/llvm/utils/lit/lit.py" CACHE STRING "" FORCE)
+  # When building against an out-of-tree LLVM, the `llvm-project` submodule is
+  # usually not checked out; fall back on the `llvm-lit` shipped with the LLVM
+  # installation in that case.
+  if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/llvm-project/llvm/utils/lit/lit.py")
+    set(LLVM_EXTERNAL_LIT "${CMAKE_CURRENT_SOURCE_DIR}/llvm-project/llvm/utils/lit/lit.py" CACHE STRING "" FORCE)
+  endif()
   message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
   message(STATUS "Using MLIRConfig.cmake in: ${MLIR_DIR}")
   message(STATUS "Using ClangConfig.cmake in: ${CLANG_DIR}")
-  message(STATUS "Using PollyConfig.cmake in: ${Polly_DIR}")
   set(Clang_DIR ${CLANG_DIR})
   find_package(Clang REQUIRED CONFIG)
-  find_package(Polly REQUIRED CONFIG)
   find_package(MLIR REQUIRED CONFIG)
+  if (DYNAMATIC_ENABLE_POLLY)
+    message(STATUS "Using PollyConfig.cmake in: ${Polly_DIR}")
+    find_package(Polly CONFIG)
+    if (NOT Polly_FOUND)
+      message(WARNING "Polly was not found in the LLVM installation. The \
+                       Polly-based LLVM IR pass plugins (MemDepAnalysis, \
+                       ArrayPartition) will not be built. Re-configure LLVM \
+                       with -DLLVM_ENABLE_PROJECTS=\"mlir;clang;polly\" and \
+                       point Polly_DIR at it to enable them.")
+      set(DYNAMATIC_ENABLE_POLLY OFF CACHE BOOL "" FORCE)
+    endif()
+  endif()
 endif ()
 
 set(LLVM_TABLEGEN_EXE "llvm-tblgen")

@@ -31,7 +31,13 @@ List of options:
   --experimental-enable-xls            : enable experimental xls integration
   --enable-leq-binaries                : download binaries for elastic-miter equivalence
                                          checking
-  --use-prebuilt-llvm                  : download and use the prebuilt LLVM
+  --use-prebuilt-llvm                  : download and use the prebuilt LLVM (currently
+                                         unavailable: the published archives predate the
+                                         move to LLVM 22)
+  --llvm-dir <path>                    : build against an existing LLVM/MLIR build or
+                                         install directory instead of building LLVM
+                                         (the directory must contain lib/cmake/llvm,
+                                         lib/cmake/mlir and lib/cmake/clang)
   --enable-cbc                         : enable the CBC milp solver
   --enable-abc                         : enable the ABC logic synthesis tool
   --build-legacy-lsq                   : build the legacy chisel-based lsq
@@ -144,10 +150,12 @@ BUILD_VISUAL_DATAFLOW=0
 GODOT_PATH=""
 ENABLE_XLS_INTEGRATION=0
 PREBUILT_LLVM=0
+EXTERNAL_LLVM=0
 BUILD_CHIESEL_LSQ=0
 ENABLE_CBC=0
 CMAKE_DYNAMATIC_ENABLE_CBC=""
 CMAKE_DYNAMATIC_ENABLE_ABC=""
+CMAKE_DYNAMATIC_ENABLE_POLLY=""
 CMAKE_LLVM_ENABLE_ASSERTIONS=""
 LLVM_DIR="$PWD/build/llvm-project"
 
@@ -169,6 +177,10 @@ do
       PARSE_ARG=""
     elif [[ $PARSE_ARG == "llvm-parallel-link-jobs" ]]; then
       LLVM_PARALLEL_LINK_JOBS="$arg"
+      PARSE_ARG=""
+    elif [[ $PARSE_ARG == "llvm-dir" ]]; then
+      EXTERNAL_LLVM=1
+      LLVM_DIR="$(cd "$arg" && pwd)"
       PARSE_ARG=""
     else
       case "$arg" in
@@ -199,7 +211,14 @@ do
               PARSE_ARG="llvm-parallel-link-jobs"
               ;;
           "--use-prebuilt-llvm")
-              PREBUILT_LLVM=1
+              echo "The published prebuilt LLVM archives are still LLVM 18 based and no"
+              echo "longer match the LLVM version Dynamatic targets (22.1.7). Either let"
+              echo "this script build the llvm-project submodule, or point it at an"
+              echo "existing LLVM 22 build with --llvm-dir <path>."
+              exit 1
+              ;;
+          "--llvm-dir")
+              PARSE_ARG="llvm-dir"
               ;;
           "--export-godot" | "-e")
               PARSE_ARG="godot-path"
@@ -243,8 +262,18 @@ echo "##########################################################################
 echo "############# DYNAMATIC - DHLS COMPILER INFRASTRUCTURE - EPFL/LAP ##############"
 echo "################################################################################"
 
-if [[ $PREBUILT_LLVM -eq 1 ]]; then
+if [[ $EXTERNAL_LLVM -eq 1 ]]; then
+  #### llvm-project (external) ####
+  echo_section "Using the LLVM/MLIR installation at $LLVM_DIR"
+  if [ ! -f "$LLVM_DIR/lib/cmake/llvm/LLVMConfig.cmake" ]; then
+    echo "No LLVMConfig.cmake under $LLVM_DIR/lib/cmake/llvm."
+    echo "--llvm-dir must point at an LLVM build or install directory."
+    exit 1
+  fi
+elif [[ $PREBUILT_LLVM -eq 1 ]]; then
   #### llvm-project (prebuilt) ####
+  # NOTE: the archives downloaded below must match the LLVM version Dynamatic
+  # targets (see the `llvm-project` submodule).
   prepare_to_build_project "Dynamatic (prebuilt-llvm)" "build"
 
   if [[ "$(uname -s)" != "Linux" || "$(uname -m)" != "x86_64" ]]; then
@@ -350,19 +379,36 @@ fi
 prepare_to_build_project "Dynamatic" "build"
 
 
-# The location of the cmake configurations of polly is different after installed
-if [[ $PREBUILT_LLVM -eq 0 ]]; then
+# The location of the cmake configuration of polly differs between a build tree
+# and an install tree. Polly is optional: without it the LLVM-IR level memory
+# analysis and array partitioning pass plugins are simply not built.
+if [ -f "$LLVM_DIR/tools/polly/lib/cmake/polly/PollyConfig.cmake" ]; then
   POLLY_CMAKE_DIR="$LLVM_DIR/tools/polly/lib/cmake/polly"
-else 
+elif [ -f "$LLVM_DIR/lib/cmake/polly/PollyConfig.cmake" ]; then
   POLLY_CMAKE_DIR="$LLVM_DIR/lib/cmake/polly"
+else
+  POLLY_CMAKE_DIR=""
+fi
+
+if [[ $PREBUILT_LLVM -eq 0 && $EXTERNAL_LLVM -eq 0 ]]; then
+  # LLVM is built as part of Dynamatic, with Polly enabled.
+  POLLY_CMAKE_DIR="$LLVM_DIR/tools/polly/lib/cmake/polly"
+  CMAKE_DYNAMATIC_ENABLE_POLLY="-DDYNAMATIC_ENABLE_POLLY=ON"
+elif [ -n "$POLLY_CMAKE_DIR" ]; then
+  CMAKE_DYNAMATIC_ENABLE_POLLY="-DDYNAMATIC_ENABLE_POLLY=ON"
+else
+  echo "Polly was not found in $LLVM_DIR; the MemDepAnalysis and ArrayPartition"
+  echo "pass plugins will not be built (the C frontend needs them)."
+  CMAKE_DYNAMATIC_ENABLE_POLLY="-DDYNAMATIC_ENABLE_POLLY=OFF"
 fi
 
 # CMake
 if should_run_cmake ; then
-  if [[ $PREBUILT_LLVM -eq 0 ]]; then
+  if [[ $PREBUILT_LLVM -eq 0 && $EXTERNAL_LLVM -eq 0 ]]; then
     cmake -G Ninja .. \
             -DDYNAMATIC_BUILD_LLVM=ON \
             -DLLVM_ENABLE_RTTI=ON \
+            $CMAKE_DYNAMATIC_ENABLE_POLLY \
             -DDYNAMATIC_PARALLEL_LINK_JOBS=$LLVM_PARALLEL_LINK_JOBS \
             -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
             -DCMAKE_EXPORT_COMPILE_COMMANDS="ON" \
@@ -383,6 +429,7 @@ if should_run_cmake ; then
         -DLLVM_TARGETS_TO_BUILD="host" \
         -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
         -DCMAKE_EXPORT_COMPILE_COMMANDS="ON" \
+        $CMAKE_DYNAMATIC_ENABLE_POLLY \
         $CMAKE_COMPILERS \
         $CMAKE_DYNAMATIC_BUILD_OPTIMIZATIONS \
         $CMAKE_DYNAMATIC_ENABLE_XLS \
@@ -496,8 +543,20 @@ if [[ ENABLE_CBC -eq 1 ]]; then
   create_symlink "../build/cbc/bin/cbc"
 fi 
 
-# Create symbolic links to clang headers (standard c library for clang)
-create_include_symlink "$LLVM_DIR/lib/clang/18/include"
+# Create symbolic links to clang headers (standard c library for clang). The
+# directory is named after clang's major version, so it is discovered rather
+# than hardcoded.
+CLANG_RESOURCE_DIR=""
+for candidate in "$LLVM_DIR"/lib/clang/*/include; do
+  if [ -d "$candidate" ]; then
+    CLANG_RESOURCE_DIR="$candidate"
+  fi
+done
+if [ -n "$CLANG_RESOURCE_DIR" ]; then
+  create_include_symlink "$CLANG_RESOURCE_DIR"
+else
+  echo "Warning: no clang resource headers found under $LLVM_DIR/lib/clang"
+fi
 
 
 if [[ $GODOT_PATH != "" ]]; then
