@@ -85,14 +85,17 @@ static Any readValueWithType(mlir::Type type, std::stringstream &arg) {
     int64_t x;
     arg >> x;
     int64_t width = IndexType::kInternalStorageBitWidth;
-    APInt aparg(width, x);
+    // `x` was parsed as a signed decimal, so it must be handed to APInt as
+    // one: since LLVM 20 the constructor asserts that the value fits the
+    // requested width, and a negative reinterpreted as unsigned never does.
+    APInt aparg(width, x, /*isSigned=*/true);
     return aparg;
   }
   if (isa<mlir::IntegerType>(type)) {
     int64_t x;
     arg >> x;
     int64_t width = type.getIntOrFloatBitWidth();
-    APInt aparg(width, x);
+    APInt aparg(width, x, /*isSigned=*/true);
     return aparg;
   }
   if (type.isF32()) {
