@@ -172,7 +172,7 @@ void HandshakeSizeLSQsPass::runDynamaticPass() {
       ArrayAttr bbList = llvm::dyn_cast<ArrayAttr>(attr.getValue());
       llvm::SetVector<unsigned> cfdfcBBs;
       for (auto bb : bbList)
-        cfdfcBBs.insert(bb.cast<IntegerAttr>().getUInt());
+        cfdfcBBs.insert(cast<IntegerAttr>(bb).getUInt());
 
       unsigned index;
       if (attr.getName().getValue().getAsInteger(10, index))

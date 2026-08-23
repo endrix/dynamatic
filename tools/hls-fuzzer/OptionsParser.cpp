@@ -20,14 +20,17 @@ enum ID {
 
 } // namespace
 
-using namespace llvm::opt;
-
-#define PREFIX(NAME, VALUE)                                                    \
-  static constexpr llvm::StringLiteral NAME##_init[] = VALUE;                  \
-  static constexpr llvm::ArrayRef<llvm::StringLiteral> NAME(                   \
-      NAME##_init, std::size(NAME##_init) - 1);
+// Since LLVM 20 the option table is backed by a generated string table and a
+// generated prefixes table instead of the old PREFIX() macro expansion.
+#define OPTTABLE_STR_TABLE_CODE
 #include "Opts.inc"
-#undef PREFIX
+#undef OPTTABLE_STR_TABLE_CODE
+
+#define OPTTABLE_PREFIXES_TABLE_CODE
+#include "Opts.inc"
+#undef OPTTABLE_PREFIXES_TABLE_CODE
+
+using namespace llvm::opt;
 
 static constexpr OptTable::Info InfoTable[] = {
 #define OPTION(...) LLVM_CONSTRUCT_OPT_INFO(__VA_ARGS__),
@@ -37,7 +40,8 @@ static constexpr OptTable::Info InfoTable[] = {
 };
 
 dynamatic::OptionsParser::OptionsParser(llvm::ArrayRef<char *> args)
-    : GenericOptTable(InfoTable), stringSaver(allocator),
+    : GenericOptTable(OptionStrTable, OptionPrefixesTable, InfoTable),
+      stringSaver(allocator),
       args(parseArgs(
           args.size(), args.data(), OPT_UNKNOWN, stringSaver,
           [](llvm::StringRef error) { llvm::report_fatal_error(error); })) {}

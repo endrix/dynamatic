@@ -29,6 +29,7 @@
 #include "mlir/Support/LogicalResult.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
@@ -457,7 +458,8 @@ public:
 std::string FrontendState::makeAbsolutePath(StringRef path) {
   SmallString<128> str;
   path::append(str, path);
-  fs::make_absolute(cwd, str);
+  // The two-argument overload lives in `llvm::sys::path` since LLVM 21.
+  path::make_absolute(cwd, str);
   return str.str().str();
 }
 
@@ -705,7 +707,7 @@ CommandResult SetOutputDir::execute(CommandArguments &args) {
 
   // reject trivial bad cases
   if (outputDir.empty() || outputDir == "." || outputDir == ".." ||
-      outputDir.endswith("/"))
+      outputDir.ends_with("/"))
     return CommandResult::FAIL;
 
   // reject illegal chars

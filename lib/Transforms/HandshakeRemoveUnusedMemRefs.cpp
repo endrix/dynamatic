@@ -40,7 +40,11 @@ struct HandshakeRemoveUnusedMemRefsPass
       if (!arg.use_empty() || !isa<MemRefType>(arg.getType()))
         continue;
 
-      func.eraseArgument(arg.getArgNumber());
+      // The argument has no uses, so erasing it cannot fail.
+      if (failed(func.eraseArgument(arg.getArgNumber()))) {
+        func.emitError() << "failed to erase unused memref argument";
+        return signalPassFailure();
+      }
       argNames.erase(argNames.begin() + arg.getArgNumber());
     }
     // Update the argument names as well.

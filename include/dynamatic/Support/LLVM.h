@@ -22,8 +22,10 @@
 #include "mlir/Support/LLVM.h"
 
 // Can not forward declare inline functions with default arguments, so we
-// include the header directly.
-#include "mlir/Support/LogicalResult.h"
+// include the header directly. Since LLVM 20 `LogicalResult`, `FailureOr` and
+// `ParseResult` are declared in `llvm` and merely imported into `mlir`, so they
+// must not be forward declared in the `mlir` namespace below.
+#include "llvm/Support/LogicalResult.h"
 
 // Import classes from the `mlir` namespace into the `dynamatic` namespace.  All
 // of the following classes have been already forward declared and imported from
@@ -90,7 +92,6 @@ class AsmParser;
 class AsmPrinter;
 class Attribute;
 class Block;
-class BlockAndValueMapping;
 class BlockArgument;
 class BoolAttr;
 class Builder;
@@ -134,7 +135,6 @@ class OpOperand;
 class OpResult;
 template <typename OpTy>
 class OwningOpRef;
-class ParseResult;
 class Pass;
 class PatternRewriter;
 class Region;
@@ -160,13 +160,10 @@ class VectorType;
 class WalkResult;
 enum class RegionKind;
 struct CallInterfaceCallable;
-struct LogicalResult;
 struct MemRefAccess;
 struct OperationState;
 class OperationName;
 
-template <typename T>
-class FailureOr;
 template <typename SourceOp>
 class OpConversionPattern;
 template <typename T>
@@ -183,12 +180,18 @@ namespace OpTrait {}
 
 // Import things we want into our namespace.
 namespace dynamatic {
+using llvm::failed;
+using llvm::failure;
+using llvm::FailureOr;
+using llvm::LogicalResult;
+using llvm::ParseResult;
+using llvm::succeeded;
+using llvm::success;
 using mlir::ArrayAttr;
 using mlir::AsmParser;
 using mlir::AsmPrinter;
 using mlir::Attribute;
 using mlir::Block;
-using mlir::BlockAndValueMapping;
 using mlir::BlockArgument;
 using mlir::BoolAttr;
 using mlir::Builder;
@@ -204,9 +207,6 @@ using mlir::DialectAsmParser;
 using mlir::DialectAsmPrinter;
 using mlir::DictionaryAttr;
 using mlir::ElementsAttr;
-using mlir::failed;
-using mlir::failure;
-using mlir::FailureOr;
 using mlir::FileLineColLoc;
 using mlir::FlatSymbolRefAttr;
 using mlir::FloatAttr;
@@ -218,7 +218,6 @@ using mlir::InFlightDiagnostic;
 using mlir::IntegerAttr;
 using mlir::IntegerType;
 using mlir::Location;
-using mlir::LogicalResult;
 using mlir::MemRefAccess;
 using mlir::MemRefType;
 using mlir::MLIRContext;
@@ -243,7 +242,6 @@ using mlir::OpOperand;
 using mlir::OpResult;
 using mlir::OpRewritePattern;
 using mlir::OwningOpRef;
-using mlir::ParseResult;
 using mlir::Pass;
 using mlir::PatternRewriter;
 using mlir::Region;
@@ -252,8 +250,6 @@ using mlir::RewritePatternSet;
 using mlir::ShapedType;
 using mlir::SplatElementsAttr;
 using mlir::StringAttr;
-using mlir::succeeded;
-using mlir::success;
 using mlir::SymbolRefAttr;
 using mlir::SymbolTable;
 using mlir::SymbolTableCollection;

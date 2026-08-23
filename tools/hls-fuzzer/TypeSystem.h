@@ -12,6 +12,13 @@
 
 namespace dynamatic::gen {
 
+/// Empty tag type used to explicitly pass a type to a constructor whose
+/// template parameter could not otherwise be deduced. This used to be spelled
+/// `llvm::identity<T>`, which stopped being a class template in LLVM 22 (it is
+/// now the transparent functor mirroring `std::identity`).
+template <typename T>
+struct TypeTag {};
+
 /// Opaque wrapper which type-erases a context used during type checking.
 /// It allows users of 'AbstractTypeSystem' to pass contexts around between
 /// methods without needing to know the real context type used by the underlying
@@ -340,7 +347,7 @@ public:
   /*implicit*/ OpaqueTransferFn(
       TransferFn<TypingContext, ASTNode, inputIndices...> dep)
       : OpaqueTransferFn(
-            llvm::identity<TypingContext>{},
+            TypeTag<TypingContext>{},
             []() -> llvm::ArrayRef<std::size_t> {
               // Since the number (and values) of input indices are known at
               // compile time we can define and reference a statically allocated
@@ -394,7 +401,7 @@ public:
   ///                 const TypedContextTuple<ASTNode, TypingContext> &)
   template <typename TypingContext, typename ConcreteTransferFn>
   explicit OpaqueTransferFn(
-      llvm::identity<TypingContext>,
+      TypeTag<TypingContext>,
       std::variant<llvm::ArrayRef<std::size_t>, std::vector<std::size_t>>
           inputIndices,
       ConcreteTransferFn &&f)
@@ -530,7 +537,7 @@ public:
   /*implicit*/ OpaqueOutputTransferFn(
       OutputTransferFn<TypingContext, ASTNode, inputIndices...> &&dep)
       : OpaqueOutputTransferFn(
-            llvm::identity<TypingContext>{},
+            TypeTag<TypingContext>{},
             [dep = std::move(dep)](
                 const ASTNode &astNode,
                 const TypedContextTuple<ASTNode, TypingContext> &contexts)
@@ -552,7 +559,7 @@ public:
   ///   TypingContext(const ASTNode &,
   ///                 const TypedContextTuple<ASTNode, TypingContext> &)
   template <typename TypingContext, typename ConcreteTransferFn>
-  OpaqueOutputTransferFn(llvm::identity<TypingContext>, ConcreteTransferFn &&f)
+  OpaqueOutputTransferFn(TypeTag<TypingContext>, ConcreteTransferFn &&f)
       : computationFn(
             [f = std::forward<ConcreteTransferFn>(f)](
                 const ASTNode &astNode,

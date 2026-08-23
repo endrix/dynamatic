@@ -330,11 +330,10 @@ private:
           using T = std::decay_t<decltype(element)>;
           if constexpr (std::is_same_v<T, OpaqueTransferFn<ASTNode>>) {
             std::vector<std::size_t> indices = element.getInputDependencies();
-            return OpaqueTransferFn<ASTNode>(llvm::identity<Context>{},
-                                             std::move(indices),
-                                             std::move(unwrapFn));
+            return OpaqueTransferFn<ASTNode>(
+                TypeTag<Context>{}, std::move(indices), std::move(unwrapFn));
           } else {
-            return OpaqueOutputTransferFn<ASTNode>(llvm::identity<Context>{},
+            return OpaqueOutputTransferFn<ASTNode>(TypeTag<Context>{},
                                                    std::move(unwrapFn));
           }
         },

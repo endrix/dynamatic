@@ -881,8 +881,8 @@ struct HandshakeCombineSteeringLogicPass
     MLIRContext *ctx = &getContext();
     ModuleOp mod = getOperation();
     GreedyRewriteConfig config;
-    config.useTopDownTraversal = true;
-    config.enableRegionSimplification = false;
+    config.setUseTopDownTraversal(true);
+    config.setRegionSimplificationLevel(GreedySimplifyRegionLevel::Disabled);
     RewritePatternSet patterns(ctx);
     patterns.add<RemoveUnusedOp<handshake::MuxOp>,
                  RemoveUnusedOp<handshake::ConditionalBranchOp>,
@@ -895,7 +895,7 @@ struct HandshakeCombineSteeringLogicPass
                  EliminateConstantCondBranch, CombineEquivalentMuxes,
                  CombineEquivalentBranches, EliminateMuxWithIdenticalInputs>(
         ctx);
-    if (failed(applyPatternsAndFoldGreedily(mod, std::move(patterns), config)))
+    if (failed(applyPatternsGreedily(mod, std::move(patterns), config)))
       return signalPassFailure();
   };
 };

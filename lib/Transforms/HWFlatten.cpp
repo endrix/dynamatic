@@ -50,13 +50,32 @@ struct HWInliner : public mlir::InlinerInterface {
   }
 
   void handleTerminator(Operation *op,
-                        ArrayRef<Value> valuesToReplace) const override {
+                        ValueRange valuesToReplace) const override {
     assert(isa<hw::OutputOp>(op));
     for (auto [toReplace, replacement] :
-         llvm::zip(valuesToReplace, op->getOperands()))
-      toReplace.replaceAllUsesWith(replacement);
+         llvm::zip(valuesToReplace, op->getOperands())) {
+      Value value = toReplace;
+      value.replaceAllUsesWith(replacement);
+    }
   }
 };
+
+/// Default region cloning strategy used by `mlir::inlineRegion`, which since
+/// LLVM 21 requires the caller to provide one explicitly.
+static void cloneInlinedRegion(mlir::OpBuilder &builder, mlir::Region *src,
+                               mlir::Block *inlineBlock,
+                               mlir::Block *postInsertBlock,
+                               mlir::IRMapping &mapper,
+                               bool shouldCloneInlinedRegion) {
+  mlir::Region *insertRegion = inlineBlock->getParent();
+  if (shouldCloneInlinedRegion) {
+    src->cloneInto(insertRegion, postInsertBlock->getIterator(), mapper);
+  } else {
+    insertRegion->getBlocks().splice(postInsertBlock->getIterator(),
+                                     src->getBlocks(), src->begin(),
+                                     src->end());
+  }
+}
 
 struct FlattenModulesPass
     : public dynamatic::impl::FlattenModulesBase<FlattenModulesPass> {
@@ -88,9 +107,10 @@ void FlattenModulesPass::runOnOperation() {
       // Mark this module as instantiated so we know to erase it later.
       instantiated.insert(target.getNameAttr());
 
-      if (failed(mlir::inlineRegion(inliner, &target.getBody(), inst,
-                                    inst.getOperands(), inst.getResults(),
-                                    std::nullopt, /*shouldClone=*/true))) {
+      if (failed(mlir::inlineRegion(inliner, cloneInlinedRegion,
+                                    &target.getBody(), inst, inst.getOperands(),
+                                    inst.getResults(), std::nullopt,
+                                    /*shouldClone=*/true))) {
         inst.emitError("failed to inline '") << target.getName() << "'";
         signalPassFailure();
         return WalkResult::interrupt();

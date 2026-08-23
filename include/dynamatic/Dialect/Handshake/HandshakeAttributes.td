@@ -88,7 +88,7 @@ class OperandContainerAttr<string name, string attrMnemonic, list<Trait> traits 
       size_t numProps = operandAttrs.size();
       for (auto [idx, attr] : llvm::enumerate(operandAttrs)) {
         odsPrinter << attr.getName() << ": ";
-        attr.getValue().cast<$cppClass::OperandAttr>().print(odsPrinter);
+        cast<$cppClass::OperandAttr>(attr.getValue()).print(odsPrinter);
         if (idx != numProps - 1)
           odsPrinter << ", ";
       }
@@ -140,7 +140,7 @@ class OperandContainerAttr<string name, string attrMnemonic, list<Trait> traits 
                             << attr.getName();
 
         // Value must be channel buffering properties
-        if (!attr.getValue().isa<$cppClass::OperandAttr>())
+        if (!isa<$cppClass::OperandAttr>(attr.getValue()))
           return emitError() << "map values are not of the correct type";
       }
       return success();
@@ -405,7 +405,7 @@ def CFDFCThroughputAttr : Handshake_Attr<
       llvm::SmallVector<mlir::NamedAttribute, 10> attrs;
       mlir::Builder builder(context);
       for (const auto &pair: cfdfcThroughputMap) {
-        mlir::Type doubleType = mlir::FloatType::getF64(context);
+        mlir::Type doubleType = mlir::Float64Type::get(context);
         auto tmpCFDFCThroughputAttr = builder.getFloatAttr(doubleType, pair.second);
         attrs.push_back({builder.getStringAttr(std::to_string(pair.first)), tmpCFDFCThroughputAttr});
       }

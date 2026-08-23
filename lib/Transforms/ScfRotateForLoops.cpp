@@ -136,14 +136,14 @@ struct ScfForLoopRotationPass
   void runDynamaticPass() override {
     auto *ctx = &getContext();
     mlir::GreedyRewriteConfig config;
-    config.useTopDownTraversal = true;
-    config.enableRegionSimplification = false;
+    config.setUseTopDownTraversal(true);
+    config.setRegionSimplificationLevel(GreedySimplifyRegionLevel::Disabled);
 
     RewritePatternSet patterns{ctx};
     patterns.add<RotateLoop>(ctx);
 
-    if (failed(applyPatternsAndFoldGreedily(getOperation(), std::move(patterns),
-                                            config)))
+    if (failed(
+            applyPatternsGreedily(getOperation(), std::move(patterns), config)))
       signalPassFailure();
   };
 };

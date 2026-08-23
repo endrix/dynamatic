@@ -409,7 +409,7 @@ LogicalResult FuncOp::verify() {
                            << ".";
 
     if (llvm::any_of(portNames,
-                     [&](Attribute attr) { return !attr.isa<StringAttr>(); }))
+                     [&](Attribute attr) { return !isa<StringAttr>(attr); }))
       return emitOpError() << "expected all entries in attribute '" << attrName
                            << "' to be strings.";
 
@@ -485,15 +485,15 @@ LogicalResult BufferOp::verify() {
 }
 
 /// Parses a FuncOp signature using
-/// mlir::function_interface_impl::parseFunctionSignature while getting access
-/// to the parsed SSA names to store as attributes.
+/// mlir::function_interface_impl::parseFunctionSignatureWithArguments while
+/// getting access to the parsed SSA names to store as attributes.
 static ParseResult
 parseFuncOpArgs(OpAsmParser &parser,
                 SmallVectorImpl<OpAsmParser::Argument> &entryArgs,
                 SmallVectorImpl<Type> &resTypes,
                 SmallVectorImpl<DictionaryAttr> &resAttrs) {
   bool isVariadic;
-  if (mlir::function_interface_impl::parseFunctionSignature(
+  if (mlir::function_interface_impl::parseFunctionSignatureWithArguments(
           parser, /*allowVariadic=*/true, entryArgs, isVariadic, resTypes,
           resAttrs)
           .failed())
@@ -550,7 +550,7 @@ ParseResult FuncOp::parse(OpAsmParser &parser, OperationState &result) {
                              result.attributes) ||
       parseFuncOpArgs(parser, args, resTypes, resAttributes))
     return failure();
-  mlir::function_interface_impl::addArgAndResultAttrs(
+  mlir::call_interface_impl::addArgAndResultAttrs(
       builder, result, args, resAttributes,
       handshake::FuncOp::getArgAttrsAttrName(result.name),
       handshake::FuncOp::getResAttrsAttrName(result.name));
@@ -764,7 +764,7 @@ void MemoryControllerOp::build(OpBuilder &odsBuilder, OperationState &odsState,
   odsState.addOperands(ctrlEnd);
 
   // Data outputs (get their type from memref)
-  MemRefType memrefType = memRef.getType().cast<MemRefType>();
+  MemRefType memrefType = cast<MemRefType>(memRef.getType());
   MLIRContext *ctx = odsBuilder.getContext();
   odsState.types.append(numLoads, wrapChannel(memrefType.getElementType()));
   odsState.types.push_back(handshake::ControlType::get(ctx));
@@ -1031,7 +1031,7 @@ void LSQOp::build(OpBuilder &odsBuilder, OperationState &odsState, Value memref,
   odsState.addOperands(ctrlEnd);
 
   // Data outputs (get their type from memref)
-  MemRefType memrefType = memref.getType().cast<MemRefType>();
+  MemRefType memrefType = cast<MemRefType>(memref.getType());
   MLIRContext *ctx = odsBuilder.getContext();
   odsState.types.append(numLoads, wrapChannel(memrefType.getElementType()));
   odsState.types.push_back(handshake::ControlType::get(ctx));
@@ -1945,7 +1945,7 @@ CmpFOp::inferReturnTypes(MLIRContext *context, std::optional<Location> location,
       // - operand[0] is a channel type
       // - all operands have the same extra signals
       // Note that this cast throws an error if the assumption is not met
-      operands[0].getType().cast<ChannelType>().getExtraSignals()));
+      cast<ChannelType>(operands[0].getType()).getExtraSignals()));
   return success();
 }
 
@@ -1967,7 +1967,7 @@ CmpIOp::inferReturnTypes(MLIRContext *context, std::optional<Location> location,
       // - operand[0] is a channel type
       // - all operands have the same extra signals
       // Note that this cast throws an error if the assumption is not met
-      operands[0].getType().cast<ChannelType>().getExtraSignals()));
+      cast<ChannelType>(operands[0].getType()).getExtraSignals()));
   return success();
 }
 
