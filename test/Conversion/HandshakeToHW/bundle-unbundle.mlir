@@ -18,10 +18,10 @@
 // Both forms of each op share an op name but have incompatible port lists, so
 // FORM has to reach the discriminator or the two would collide on a single
 // external module.
-// CHECK-DAG: hw.module.extern @handshake_unbundle_0(in %ins : !handshake.channel<i32>{{.*}}out ctrl : !handshake.control<>, out data : i32){{.*}}DATA_WIDTH = 32 : ui32, FORM = "channel"
-// CHECK-DAG: hw.module.extern @handshake_unbundle_1(in %ins : !handshake.control<>, in %ready : i1{{.*}}out valid : i1){{.*}}DATA_WIDTH = 0 : ui32, FORM = "control"
-// CHECK-DAG: hw.module.extern @handshake_bundle_0(in %valid : i1{{.*}}out ctrl : !handshake.control<>, out ready : i1){{.*}}DATA_WIDTH = 0 : ui32, FORM = "control"
-// CHECK-DAG: hw.module.extern @handshake_bundle_1(in %ctrl : !handshake.control<>, in %data : i32{{.*}}out outs : !handshake.channel<i32>){{.*}}DATA_WIDTH = 32 : ui32, FORM = "channel"
+// CHECK-DAG: hw.module.extern @handshake_unbundle_0(in %ins : !handshake.channel<i32>{{.*}}out ctrl : !handshake.control<>, out data : i32){{.*}}DATA_WIDTH = 32 : ui32{{.*}}FORM = "channel"
+// CHECK-DAG: hw.module.extern @handshake_unbundle_1(in %ins : !handshake.control<>, in %ready : i1{{.*}}out valid : i1){{.*}}DATA_WIDTH = 0 : ui32{{.*}}FORM = "control"
+// CHECK-DAG: hw.module.extern @handshake_bundle_0(in %valid : i1{{.*}}out ctrl : !handshake.control<>, out ready : i1){{.*}}DATA_WIDTH = 0 : ui32{{.*}}FORM = "control"
+// CHECK-DAG: hw.module.extern @handshake_bundle_1(in %ctrl : !handshake.control<>, in %data : i32{{.*}}out outs : !handshake.channel<i32>){{.*}}DATA_WIDTH = 32 : ui32{{.*}}FORM = "channel"
 handshake.func @tap(%L: !handshake.channel<i32>, ...) -> !handshake.channel<i32>
     attributes {argNames = ["L"], resNames = ["out0"]} {
   %ctrl, %data = unbundle %L : <i32> to _
@@ -36,8 +36,8 @@ handshake.func @tap(%L: !handshake.channel<i32>, ...) -> !handshake.channel<i32>
 // A control-only channel has no data signal, so DATA_WIDTH is 0 and the
 // generators emit no data port at all.
 // CHECK-LABEL: hw.module @tapControl(
-// CHECK-DAG: hw.module.extern @handshake_unbundle_0(in %ins : !handshake.control<>, in %ready : i1{{.*}}out valid : i1){{.*}}DATA_WIDTH = 0 : ui32, FORM = "control"
-// CHECK-DAG: hw.module.extern @handshake_bundle_0(in %valid : i1{{.*}}out ctrl : !handshake.control<>, out ready : i1){{.*}}DATA_WIDTH = 0 : ui32, FORM = "control"
+// CHECK-DAG: hw.module.extern @handshake_unbundle_0(in %ins : !handshake.control<>, in %ready : i1{{.*}}out valid : i1){{.*}}DATA_WIDTH = 0 : ui32{{.*}}FORM = "control"
+// CHECK-DAG: hw.module.extern @handshake_bundle_0(in %valid : i1{{.*}}out ctrl : !handshake.control<>, out ready : i1){{.*}}DATA_WIDTH = 0 : ui32{{.*}}FORM = "control"
 handshake.func @tapControl(%C: !handshake.control<>, ...) -> !handshake.control<>
     attributes {argNames = ["C"], resNames = ["out0"]} {
   %valid = unbundle %C [%ready] : <> to _
@@ -50,3 +50,28 @@ handshake.func @tapControl(%C: !handshake.control<>, ...) -> !handshake.control<
 // dropping them silently would corrupt the channel. That path is not covered
 // here: such IR does not currently survive parsing, which is a pre-existing
 // UnbundleOp issue unrelated to this lowering.
+
+// -----
+
+//===----------------------------------------------------------------------===//
+// Extra signals
+//===----------------------------------------------------------------------===//
+
+// Extra signals are split out INDIVIDUALLY, each keeping its own name, rather
+// than concatenated the way the signal-manager units tunnel them -- the point
+// is to read one by name. This is what lets a channel carry queue occupancy:
+// `size` downstream says how many tokens are queued, so "are there >= k?"
+// becomes a comparison rather than a question the protocol cannot answer.
+
+// Direction decides which side a signal sits on, and it must reach the
+// generator: the shared EXTRA_SIGNALS serialization carries only
+// name -> bitwidth, so the two directions are serialized separately.
+// CHECK-LABEL: hw.module @occupancy(
+// CHECK:         hw.instance "unbundle0" @handshake_unbundle_0(ins: %L
+// CHECK-DAG: hw.module.extern @handshake_unbundle_0(in %ins : !handshake.channel<i32, [size: i4]>{{.*}}out ctrl : !handshake.control<>, out data : i32, out size : i4){{.*}}EXTRA_DOWN = "{\22size\22: 4}"{{.*}}EXTRA_UP = "{}"
+handshake.func @occupancy(%L: !handshake.channel<i32, [size: i4]>, ...)
+    -> !handshake.control<>
+    attributes {argNames = ["L"], resNames = ["out0"]} {
+  %ctrl, %data, %size = unbundle %L : <i32, [size: i4]> to _
+  end %ctrl : <>
+}

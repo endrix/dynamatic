@@ -2189,18 +2189,44 @@ def BundleOp : Handshake_Op<"bundle", [Pure, NamedIOInterface]> {
       return ::mlir::isa<ChannelType>(getResult(0).getType());
     }
 
+    /// The mirror of UnbundleOp: downstream extras are consumed as operands,
+    /// upstream ones handed back as results.
+    ::llvm::SmallVector<::dynamatic::handshake::ExtraSignal>
+    extraSignalsByDirection(bool downstream) {
+      ::llvm::SmallVector<::dynamatic::handshake::ExtraSignal> picked;
+      auto iface = ::mlir::cast<ExtraSignalsTypeInterface>(
+          getChannelLike().getType());
+      for (const auto &extra : iface.getExtraSignals())
+        if (extra.downstream == downstream)
+          picked.push_back(extra);
+      return picked;
+    }
+
     std::string getOperandName(unsigned idx) {
       assert(idx < getNumOperands() && "index too high");
       if (!bundlesChannel())
         return "valid";
-      return idx == 0 ? "ctrl" : "data";
+      if (idx == 0)
+        return "ctrl";
+      if (idx == 1)
+        return "data";
+      auto downs = extraSignalsByDirection(/*downstream=*/true);
+      unsigned pos = idx - 2;
+      return pos < downs.size() ? downs[pos].name.str()
+                                : ("ins_" + std::to_string(idx));
     }
 
     std::string getResultName(unsigned idx) {
       assert(idx < getNumResults() && "index too high");
-      if (bundlesChannel())
-        return "outs";
-      return idx == 0 ? "ctrl" : "ready";
+      if (idx == 0)
+        return bundlesChannel() ? "outs" : "ctrl";
+      unsigned firstExtra = bundlesChannel() ? 1 : 2;
+      if (!bundlesChannel() && idx == 1)
+        return "ready";
+      auto ups = extraSignalsByDirection(/*downstream=*/false);
+      unsigned pos = idx - firstExtra;
+      return pos < ups.size() ? ups[pos].name.str()
+                              : ("outs_" + std::to_string(idx));
     }
   }];
 }
@@ -2286,18 +2312,46 @@ def UnbundleOp : Handshake_Op<"unbundle", [
       return ::mlir::isa<ChannelType>(getChannelLike().getType());
     }
 
+    /// Extra signals split out individually, each keeping its own name, so a
+    /// circuit can read one by name rather than unpacking a concatenation.
+    /// Upstream extras are driven INTO the unbundle (they travel against the
+    /// data), so they are operands; downstream ones come out as results.
+    ::llvm::SmallVector<::dynamatic::handshake::ExtraSignal>
+    extraSignalsByDirection(bool downstream) {
+      ::llvm::SmallVector<::dynamatic::handshake::ExtraSignal> picked;
+      auto iface = ::mlir::cast<ExtraSignalsTypeInterface>(
+          getChannelLike().getType());
+      for (const auto &extra : iface.getExtraSignals())
+        if (extra.downstream == downstream)
+          picked.push_back(extra);
+      return picked;
+    }
+
     std::string getOperandName(unsigned idx) {
       assert(idx < getNumOperands() && "index too high");
       if (idx == 0)
         return "ins";
-      return "ready";
+      // A control being split takes the ready to drive back as operand 1.
+      unsigned firstExtra = unbundlesChannel() ? 1 : 2;
+      if (idx < firstExtra)
+        return "ready";
+      auto ups = extraSignalsByDirection(/*downstream=*/false);
+      unsigned pos = idx - firstExtra;
+      return pos < ups.size() ? ups[pos].name.str()
+                              : ("ins_" + std::to_string(idx));
     }
 
     std::string getResultName(unsigned idx) {
       assert(idx < getNumResults() && "index too high");
-      if (!unbundlesChannel())
-        return "valid";
-      return idx == 0 ? "ctrl" : "data";
+      unsigned firstExtra = unbundlesChannel() ? 2 : 1;
+      if (idx == 0)
+        return unbundlesChannel() ? "ctrl" : "valid";
+      if (idx == 1 && unbundlesChannel())
+        return "data";
+      auto downs = extraSignalsByDirection(/*downstream=*/true);
+      unsigned pos = idx - firstExtra;
+      return pos < downs.size() ? downs[pos].name.str()
+                                : ("outs_" + std::to_string(idx));
     }
   }];
 }

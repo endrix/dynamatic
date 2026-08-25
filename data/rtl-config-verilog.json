@@ -1917,6 +1917,18 @@
       {
         "name": "DATA_WIDTH",
         "type": "unsigned"
+      },
+      {
+        "name": "EXTRA_DOWN",
+        "type": "string",
+        "eq": "{}",
+        "generic": false
+      },
+      {
+        "name": "EXTRA_UP",
+        "type": "string",
+        "eq": "{}",
+        "generic": false
       }
     ],
     "generic": "$DYNAMATIC/data/verilog/handshake/unbundle_channel.v",
@@ -1930,6 +1942,18 @@
         "name": "FORM",
         "type": "string",
         "eq": "control",
+        "generic": false
+      },
+      {
+        "name": "EXTRA_DOWN",
+        "type": "string",
+        "eq": "{}",
+        "generic": false
+      },
+      {
+        "name": "EXTRA_UP",
+        "type": "string",
+        "eq": "{}",
         "generic": false
       }
     ],
@@ -1949,6 +1973,18 @@
       {
         "name": "DATA_WIDTH",
         "type": "unsigned"
+      },
+      {
+        "name": "EXTRA_DOWN",
+        "type": "string",
+        "eq": "{}",
+        "generic": false
+      },
+      {
+        "name": "EXTRA_UP",
+        "type": "string",
+        "eq": "{}",
+        "generic": false
       }
     ],
     "generic": "$DYNAMATIC/data/verilog/handshake/bundle_channel.v",
@@ -1962,6 +1998,18 @@
         "name": "FORM",
         "type": "string",
         "eq": "control",
+        "generic": false
+      },
+      {
+        "name": "EXTRA_DOWN",
+        "type": "string",
+        "eq": "{}",
+        "generic": false
+      },
+      {
+        "name": "EXTRA_UP",
+        "type": "string",
+        "eq": "{}",
         "generic": false
       }
     ],

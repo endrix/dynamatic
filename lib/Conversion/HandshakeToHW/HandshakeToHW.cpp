@@ -781,18 +781,29 @@ ModuleDiscriminator::ModuleDiscriminator(Operation *op) {
         Type channelLike = isa<handshake::UnbundleOp>(op.getOperation())
                                ? op->getOperand(0).getType()
                                : op->getResult(0).getType();
+        // Extra signals get one port each, keeping their own name, so a
+        // circuit can read one by name. That needs their DIRECTION, which the
+        // shared EXTRA_SIGNALS serialization drops -- it carries only
+        // name -> bitwidth -- so the two directions are serialized separately
+        // here. Direction is what decides whether a signal is a port in or
+        // out, so getting it from a lookup that does not record it is not an
+        // option.
         auto extras = cast<handshake::ExtraSignalsTypeInterface>(channelLike)
                           .getExtraSignals();
-        if (!extras.empty()) {
-          // The RTL only rewires data/valid/ready. Extra signals would each
-          // need their own wire in every form, and silently dropping them
-          // would corrupt the channel rather than fail.
-          op->emitError() << "cannot lower a bundle/unbundle whose channel "
-                             "carries extra signals; it has "
-                          << extras.size();
-          unsupported = true;
-          return;
+        std::string downStr = "{", upStr = "{";
+        bool firstDown = true, firstUp = true;
+        for (const handshake::ExtraSignal &extra : extras) {
+          std::string &into = extra.downstream ? downStr : upStr;
+          bool &first = extra.downstream ? firstDown : firstUp;
+          if (!first)
+            into += ", ";
+          first = false;
+          into += "\"" + extra.name.str() +
+                  "\": " + std::to_string(extra.getBitWidth());
         }
+        addString("EXTRA_DOWN", downStr + "}");
+        addString("EXTRA_UP", upStr + "}");
+
         if (auto channelType = dyn_cast<handshake::ChannelType>(channelLike)) {
           addString("FORM", "channel");
           addUnsigned("DATA_WIDTH", channelType.getDataBitWidth());
