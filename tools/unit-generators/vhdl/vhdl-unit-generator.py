@@ -124,6 +124,8 @@ if __name__ == "__main__":
     generators.add("handshake", "shrsi")
     generators.add("handshake", "shrui")
     generators.add("handshake", "blocker")
+    generators.add("handshake", "bundle")
+    generators.add("handshake", "unbundle")
     generators.add("handshake", "uitofp")
     generators.add("handshake", "sitofp")
     generators.add("handshake", "maxsi")

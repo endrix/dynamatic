@@ -768,6 +768,39 @@ ModuleDiscriminator::ModuleDiscriminator(Operation *op) {
         addUnsigned("DATA_WIDTH", resType.getElementTypeBitWidth());
         addUnsigned("SIZE", resType.getNumElements());
       })
+      .Case<handshake::UnbundleOp, handshake::BundleOp>([&](auto op) {
+        // Both ops come in two forms -- one that splits/joins a channel into a
+        // control and a data signal, and one that splits/joins a control into
+        // its valid and ready wires. They share an op name, so the form has to
+        // reach the discriminator or the two would collide on one external
+        // module with incompatible port lists.
+        //
+        // The port list itself is derived from the operand and result types by
+        // ConvertToHWInstance, so all that is needed here is a name that
+        // distinguishes them and the width the generator has to emit.
+        Type channelLike = isa<handshake::UnbundleOp>(op.getOperation())
+                               ? op->getOperand(0).getType()
+                               : op->getResult(0).getType();
+        auto extras = cast<handshake::ExtraSignalsTypeInterface>(channelLike)
+                          .getExtraSignals();
+        if (!extras.empty()) {
+          // The RTL only rewires data/valid/ready. Extra signals would each
+          // need their own wire in every form, and silently dropping them
+          // would corrupt the channel rather than fail.
+          op->emitError() << "cannot lower a bundle/unbundle whose channel "
+                             "carries extra signals; it has "
+                          << extras.size();
+          unsupported = true;
+          return;
+        }
+        if (auto channelType = dyn_cast<handshake::ChannelType>(channelLike)) {
+          addString("FORM", "channel");
+          addUnsigned("DATA_WIDTH", channelType.getDataBitWidth());
+        } else {
+          addString("FORM", "control");
+          addUnsigned("DATA_WIDTH", 0);
+        }
+      })
       .Case<handshake::InitOp>([&](handshake::InitOp initOp) {
         auto paramsAttr =
             initOp->getAttrOfType<mlir::DictionaryAttr>("hw.parameters");
@@ -2421,6 +2454,8 @@ public:
         ConvertToHWInstance<handshake::MuxOp>,
         ConvertToHWInstance<handshake::JoinOp>,
         ConvertToHWInstance<handshake::BlockerOp>,
+        ConvertToHWInstance<handshake::UnbundleOp>,
+        ConvertToHWInstance<handshake::BundleOp>,
         ConvertToHWInstance<handshake::InitOp>,
         ConvertToHWInstance<handshake::SourceOp>,
         ConvertToHWInstance<handshake::ConstantOp>,
