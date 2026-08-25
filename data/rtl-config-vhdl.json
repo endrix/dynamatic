@@ -700,5 +700,23 @@
       }
     ],
     "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t bundle -p form='\"$FORM\"' data_width=$DATA_WIDTH extra_down='$EXTRA_DOWN' extra_up='$EXTRA_UP'"
+  },
+  {
+    "name": "handshake.queue",
+    "parameters": [
+      {
+        "name": "NUM_SLOTS",
+        "type": "unsigned"
+      },
+      {
+        "name": "SIZE_WIDTH",
+        "type": "unsigned"
+      },
+      {
+        "name": "SPACE_WIDTH",
+        "type": "unsigned"
+      }
+    ],
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t queue -p num_slots=$NUM_SLOTS bitwidth=$BITWIDTH size_width=$SIZE_WIDTH space_width=$SPACE_WIDTH"
   }
 ]

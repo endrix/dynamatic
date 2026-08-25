@@ -423,6 +423,72 @@ LogicalResult FuncOp::verify() {
   return success();
 }
 
+//===----------------------------------------------------------------------===//
+// QueueOp
+//===----------------------------------------------------------------------===//
+
+/// Looks up one of the occupancy signals on a channel, checking that it runs
+/// in the direction that makes sense for it.
+static std::optional<handshake::ExtraSignal>
+findOccupancySignal(ChannelType channel, StringRef name, bool downstream) {
+  for (const handshake::ExtraSignal &extra : channel.getExtraSignals())
+    if (extra.name == name && extra.downstream == downstream)
+      return extra;
+  return std::nullopt;
+}
+
+std::optional<handshake::ExtraSignal> QueueOp::getSizeSignal() {
+  return findOccupancySignal(cast<ChannelType>(getOuts().getType()), kSizeName,
+                             /*downstream=*/true);
+}
+
+std::optional<handshake::ExtraSignal> QueueOp::getSpaceSignal() {
+  return findOccupancySignal(cast<ChannelType>(getIns().getType()), kSpaceName,
+                             /*downstream=*/false);
+}
+
+LogicalResult QueueOp::verify() {
+  auto insType = cast<ChannelType>(getIns().getType());
+  auto outsType = cast<ChannelType>(getOuts().getType());
+
+  // A queue carries tokens through unchanged; only the occupancy signals
+  // differ between its two sides.
+  if (insType.getDataType() != outsType.getDataType())
+    return emitOpError("passes tokens through unchanged, so its input and "
+                       "output data types must match, but got ")
+           << insType.getDataType() << " and " << outsType.getDataType();
+
+  unsigned width = getOccupancyWidth();
+  auto checkWidth = [&](const handshake::ExtraSignal &extra,
+                        StringRef what) -> LogicalResult {
+    if (extra.getBitWidth() != width)
+      return emitOpError()
+             << "'" << what << "' counts from 0 to " << getNumSlots()
+             << " inclusive, which needs " << width << " bits, but it is "
+             << extra.getBitWidth() << " wide";
+    return success();
+  };
+
+  if (auto size = getSizeSignal())
+    if (failed(checkWidth(*size, kSizeName)))
+      return failure();
+  if (auto space = getSpaceSignal())
+    if (failed(checkWidth(*space, kSpaceName)))
+      return failure();
+
+  // A signal carried in the wrong direction is almost certainly a mistake
+  // rather than an unrelated signal that happens to share the name: `size` is
+  // published by the queue to whoever reads from it, `space` back to whoever
+  // writes.
+  if (findOccupancySignal(insType, kSizeName, /*downstream=*/true) ||
+      findOccupancySignal(outsType, kSpaceName, /*downstream=*/false))
+    return emitOpError("'size' belongs on the output channel and 'space' on "
+                       "the input channel; they are published in opposite "
+                       "directions");
+
+  return success();
+}
+
 LogicalResult BufferOp::verify() {
   // this is additional verification
   // so both attributes have already been verified as present

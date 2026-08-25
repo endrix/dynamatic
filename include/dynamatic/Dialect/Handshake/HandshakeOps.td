@@ -252,6 +252,89 @@ def InstanceOp : Handshake_Op<"instance", [
   }];
 }
 
+def QueueOp : Handshake_Op<"queue", [
+  HasClock,
+  SimpleNamedIO
+]> {
+  let summary = "elastic FIFO whose occupancy is observable";
+  let description = [{
+    A FIFO of declared depth that publishes how full it is: `size` on its
+    output channel says how many tokens are queued, `space` on its input
+    channel how many more it can take. Both are extra signals, so a consumer
+    reads one with `handshake.unbundle` like any other.
+
+    **Distinct from `handshake.buffer`, deliberately.** A buffer's slot count
+    is an optimization: buffer placement inserts and resizes buffers to hit a
+    throughput target, and is free to change it. A queue's depth is part of
+    what the program means -- it is the channel between two dataflow actors,
+    and a rate of `k` tokens per firing is only satisfiable if the channel can
+    hold `k`. Expressing both with one op would let a throughput pass silently
+    alter a semantic quantity.
+
+    **Why occupancy has to be published at all.** Every channel operation
+    consumes its data operands, so the bare protocol can answer "is there a
+    token?" and nothing more -- a `valid` is one bit. Asking whether `k` are
+    available, without consuming any, is not expressible over data/valid/ready.
+    That is not a gap in the dialect so much as Kahn determinism showing
+    through: a network that cannot test for presence is determinate, and
+    testing for presence is exactly what an actor's firing rule needs. Reading
+    a count published by the FIFO is how that question gets an answer.
+
+    Both signals come off a **register** that counts up on a write and down on
+    a read, rather than being derived combinationally from the head and tail
+    pointers -- which are in any case ambiguous between empty and full at equal
+    values. That registration matters beyond tidiness: a consumer that steers
+    on `space` would otherwise close a combinational loop, its decision driving
+    the `valid` that the `ready` behind `space` is answering.
+
+    The signals are optional. A queue nobody queries is a FIFO, and carries no
+    occupancy wires.
+
+    ```mlir
+    %out = handshake.queue %in {numSlots = 4 : i64}
+      : <i32, [space: i3 (U)]> to <i32, [size: i3]>
+    ```
+  }];
+
+  let arguments = (ins ChannelType:$ins,
+                       ConfinedAttr<I64Attr, [IntMinValue<1>]>:$numSlots);
+  let results = (outs ChannelType:$outs);
+
+  let assemblyFormat = [{
+    $ins attr-dict `:` qualified(type($ins)) `to` qualified(type($outs))
+  }];
+  let hasVerifier = 1;
+
+  let extraClassDeclaration = [{
+    /// Bits needed to count 0..numSlots inclusive; both occupancy signals are
+    /// this wide because both range over the same span.
+    unsigned getOccupancyWidth() {
+      return ::llvm::Log2_64_Ceil((uint64_t)getNumSlots() + 1);
+    }
+
+    /// The `size` extra signal on the output channel, or nullopt.
+    ::std::optional<::dynamatic::handshake::ExtraSignal> getSizeSignal();
+    /// The `space` extra signal on the input channel, or nullopt.
+    ::std::optional<::dynamatic::handshake::ExtraSignal> getSpaceSignal();
+
+    /// The names this op reserves on its channels.
+    static constexpr ::llvm::StringLiteral kSizeName = "size";
+    static constexpr ::llvm::StringLiteral kSpaceName = "space";
+  }];
+
+  let extraClassDefinition = [{
+    ::mlir::FailureOr<::llvm::SmallVector<::mlir::NamedAttribute>>
+    QueueOp::getRTLParameters() {
+      ::mlir::MLIRContext *ctx = (*this)->getContext();
+      ::mlir::Type ui32 = ::mlir::IntegerType::get(ctx, 32, ::mlir::IntegerType::Unsigned);
+      return ::llvm::SmallVector<::mlir::NamedAttribute>{
+        {::mlir::StringAttr::get(ctx, "NUM_SLOTS"),
+         ::mlir::IntegerAttr::get(ui32, (unsigned)getNumSlots())}
+      };
+    }
+  }];
+}
+
 def BufferOp : Handshake_Op<"buffer", [
   HasClock,
   SameOperandsAndResultType,
