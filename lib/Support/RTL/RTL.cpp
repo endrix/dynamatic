@@ -303,6 +303,7 @@ LogicalResult RTLMatch::registerBitwidthParameter(hw::HWModuleExternOp &modOp,
       handshakeOp == "handshake.addi" ||
       handshakeOp == "handshake.andi" ||
       handshakeOp == "handshake.buffer" ||
+      handshakeOp == "handshake.queue" ||
       handshakeOp == "handshake.cmpi" ||
       handshakeOp == "handshake.fork" ||
       handshakeOp == "handshake.lazy_fork" ||
@@ -559,7 +560,10 @@ RTLMatch::registerExtraSignalParameters(hw::HWModuleExternOp &modOp,
       // Rejected earlier, in the module discriminator, if the channel
       // actually carries extra signals -- these two only rewire.
       handshakeOp == "handshake.bundle" ||
-      handshakeOp == "handshake.unbundle"
+      handshakeOp == "handshake.unbundle" ||
+      // A queue's extra signals are its own occupancy, described by
+      // SIZE_WIDTH/SPACE_WIDTH rather than tunneled through.
+      handshakeOp == "handshake.queue"
       // clang-format on
   ) {
     // Skip

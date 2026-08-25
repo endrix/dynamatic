@@ -768,6 +768,17 @@ ModuleDiscriminator::ModuleDiscriminator(Operation *op) {
         addUnsigned("DATA_WIDTH", resType.getElementTypeBitWidth());
         addUnsigned("SIZE", resType.getNumElements());
       })
+      .Case<handshake::QueueOp>([&](handshake::QueueOp queueOp) {
+        addUnsigned("NUM_SLOTS", queueOp.getNumSlots());
+        addType("DATA_TYPE", queueOp.getIns());
+        // Occupancy is optional -- a queue nobody queries is a FIFO -- so the
+        // generator is told which signals to publish rather than assuming
+        // both. Zero means absent; the two share a width because they count
+        // over the same span.
+        unsigned width = queueOp.getOccupancyWidth();
+        addUnsigned("SIZE_WIDTH", queueOp.getSizeSignal() ? width : 0);
+        addUnsigned("SPACE_WIDTH", queueOp.getSpaceSignal() ? width : 0);
+      })
       .Case<handshake::UnbundleOp, handshake::BundleOp>([&](auto op) {
         // Both ops come in two forms -- one that splits/joins a channel into a
         // control and a data signal, and one that splits/joins a control into
@@ -2465,6 +2476,7 @@ public:
         ConvertToHWInstance<handshake::MuxOp>,
         ConvertToHWInstance<handshake::JoinOp>,
         ConvertToHWInstance<handshake::BlockerOp>,
+        ConvertToHWInstance<handshake::QueueOp>,
         ConvertToHWInstance<handshake::UnbundleOp>,
         ConvertToHWInstance<handshake::BundleOp>,
         ConvertToHWInstance<handshake::InitOp>,
