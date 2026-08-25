@@ -407,6 +407,12 @@ LogicalResult RTLMatch::registerBitwidthParameter(hw::HWModuleExternOp &modOp,
     serializedParams["RIGHT_BITWIDTH"] =
         getBitwidthString(modType.getInputType(1));
   } else if (handshakeOp == "handshake.source" ||
+             // bundle/unbundle carry their width as an explicit DATA_WIDTH
+             // parameter, set by the module discriminator, because the generic
+             // machinery here cannot read it off a port list that mixes
+             // channels with bare signals.
+             handshakeOp == "handshake.bundle" ||
+             handshakeOp == "handshake.unbundle" ||
              handshakeOp == "mem_controller" ||
              handshakeOp == "handshake.truncf" ||
              handshakeOp == "handshake.extf" ||
@@ -549,7 +555,11 @@ RTLMatch::registerExtraSignalParameters(hw::HWModuleExternOp &modOp,
       handshakeOp == "mem_to_bram" ||
       handshakeOp == "handshake.lsq" ||
       handshakeOp == "handshake.sharing_wrapper" ||
-      handshakeOp == "handshake.ram"
+      handshakeOp == "handshake.ram" ||
+      // Rejected earlier, in the module discriminator, if the channel
+      // actually carries extra signals -- these two only rewire.
+      handshakeOp == "handshake.bundle" ||
+      handshakeOp == "handshake.unbundle"
       // clang-format on
   ) {
     // Skip

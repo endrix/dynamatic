@@ -2103,7 +2103,7 @@ def SharingWrapperOp : Handshake_Op<"sharing_wrapper", [
 // Type manipulation
 //===----------------------------------------------------------------------===//
 
-def BundleOp : Handshake_Op<"bundle", [Pure]> {
+def BundleOp : Handshake_Op<"bundle", [Pure, NamedIOInterface]> {
   let summary = [{
     Bundles individual signals into a `handshake::ChannelType` or
     `handshake::ControlType`.
@@ -2170,10 +2170,44 @@ def BundleOp : Handshake_Op<"bundle", [Pure]> {
       };
     }
   }];
+
+  let extraClassDeclaration = [{
+    //===------------------------------------------------------------------===//
+    // NamedIOInterface Methods
+    //===------------------------------------------------------------------===//
+
+    /// Ports are named individually rather than through SimpleNamedIO. That
+    /// trait numbers them `ins_0`, `ins_1`, ... and the netlist printer reads
+    /// the suffix as 2D vector packing, which only makes sense when every port
+    /// has the same type. These deliberately do not -- a control sits next to a
+    /// bare data signal -- so they take names the printer leaves alone.
+    ///
+    /// The form is decided by the first result: a channel means signals are
+    /// being joined into one; a control means a valid is being turned into a
+    /// control plus the ready that comes back.
+    bool bundlesChannel() {
+      return ::mlir::isa<ChannelType>(getResult(0).getType());
+    }
+
+    std::string getOperandName(unsigned idx) {
+      assert(idx < getNumOperands() && "index too high");
+      if (!bundlesChannel())
+        return "valid";
+      return idx == 0 ? "ctrl" : "data";
+    }
+
+    std::string getResultName(unsigned idx) {
+      assert(idx < getNumResults() && "index too high");
+      if (bundlesChannel())
+        return "outs";
+      return idx == 0 ? "ctrl" : "ready";
+    }
+  }];
 }
 
 def UnbundleOp : Handshake_Op<"unbundle", [
-  Pure, DeclareOpInterfaceMethods<InferTypeOpInterface, ["inferReturnTypes"]>
+  Pure, NamedIOInterface,
+  DeclareOpInterfaceMethods<InferTypeOpInterface, ["inferReturnTypes"]>
 ]> {
   let summary = [{
     Unbundles a `handshake::ChannelType` or `handshake::ControlType` into
@@ -2237,6 +2271,33 @@ def UnbundleOp : Handshake_Op<"unbundle", [
     UnbundleOp::getRTLParameters() {
       return ::llvm::SmallVector<::mlir::NamedAttribute>{
       };
+    }
+  }];
+
+  let extraClassDeclaration = [{
+    //===------------------------------------------------------------------===//
+    // NamedIOInterface Methods
+    //===------------------------------------------------------------------===//
+
+    /// See BundleOp for why these are named by hand. The form is decided by the
+    /// operand: a channel is being split into a control and its data; a control
+    /// is being split into the valid it carries, given the ready to drive back.
+    bool unbundlesChannel() {
+      return ::mlir::isa<ChannelType>(getChannelLike().getType());
+    }
+
+    std::string getOperandName(unsigned idx) {
+      assert(idx < getNumOperands() && "index too high");
+      if (idx == 0)
+        return "ins";
+      return "ready";
+    }
+
+    std::string getResultName(unsigned idx) {
+      assert(idx < getNumResults() && "index too high");
+      if (!unbundlesChannel())
+        return "valid";
+      return idx == 0 ? "ctrl" : "data";
     }
   }];
 }
