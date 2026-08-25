@@ -1,74 +1,91 @@
 from generators.support.utils import data
 
-def _raw_port(name, direction, width):
-    """Declaration for a BARE data port, one not part of a channel.
 
-    The exporter declares a raw signal of width 1 as a scalar `std_logic`,
-    reserving `std_logic_vector` for wider ones -- unlike a channel's data,
-    which is always a vector, `std_logic_vector(0 downto 0)` included. Getting
-    this wrong fails in GHDL with "can't associate ... with port", so the two
-    conventions have to be kept apart.
-    """
+def _raw_port(name, direction, width):
+    """See unbundle.py: a bare port of width 1 is a scalar, unlike a channel's
+    data or extra signals, which are always vectors."""
     if width == 1:
         return f"{name} : {direction} std_logic"
     return f"{name} : {direction} std_logic_vector({width} - 1 downto 0)"
 
+
+def _chan_extra_port(channel, signal, direction, width):
+    """A channel's extra signal, which is always a vector."""
+    return f"{channel}_{signal} : {direction} std_logic_vector({width} - 1 downto 0)"
 
 
 def generate_bundle(name, params):
     """`handshake.bundle` joins individual signals back into a channel-like
     value. The exact inverse of `handshake.unbundle`; see that generator.
 
-      control: valid -> (control, ready)    -- valid -> ctrl, ready
-      channel: (control, data) -> channel   -- ctrl, data -> outs
+      control: valid -> (control, ready)             -- valid -> ctrl, ready
+      channel: (control, data, extras) -> channel    -- ctrl, data, ... -> outs
     """
     form = params["form"]
     data_width = params["data_width"]
+    extra_down = params.get("extra_down", {}) or {}
+    extra_up = params.get("extra_up", {}) or {}
 
     if form == "channel":
-        return _generate_bundle_channel(name, data_width)
+        return _generate_bundle_channel(name, data_width, extra_down, extra_up)
     return _generate_bundle_control(name)
 
 
-def _generate_bundle_channel(name, data_width):
-    entity = f"""
+def _generate_bundle_channel(name, data_width, extra_down, extra_up):
+    ports = ["ctrl_valid : in std_logic", "ctrl_ready : out std_logic"]
+    if data_width > 0:
+        ports.append(_raw_port("data", "in", data_width))
+    # Mirror of unbundle: a downstream extra is consumed and sent on with the
+    # data, an upstream one arrives from the consumer and is handed back.
+    for sig, width in extra_down.items():
+        ports.append(_raw_port(sig, "in", width))
+    for sig, width in extra_up.items():
+        ports.append(_raw_port(sig, "out", width))
+    if data_width > 0:
+        ports.append(f"outs : out std_logic_vector({data_width} - 1 downto 0)")
+    ports.append("outs_valid : out std_logic")
+    ports.append("outs_ready : in std_logic")
+    for sig, width in extra_down.items():
+        ports.append(_chan_extra_port("outs", sig, "out", width))
+    for sig, width in extra_up.items():
+        ports.append(_chan_extra_port("outs", sig, "in", width))
+
+    body = ["outs_valid <= ctrl_valid;", "ctrl_ready <= outs_ready;"]
+    if data_width > 0:
+        body.append("outs(0) <= data;" if data_width == 1 else "outs <= data;")
+    for sig, width in extra_down.items():
+        body.append(f"outs_{sig}(0) <= {sig};" if width == 1
+                    else f"outs_{sig} <= {sig};")
+    for sig, width in extra_up.items():
+        body.append(f"{sig} <= outs_{sig}(0);" if width == 1
+                    else f"{sig} <= outs_{sig};")
+
+    port_block = ";\n    ".join(ports)
+    body_block = "\n  ".join(body)
+    return f"""
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
--- Entity of bundle (control + data -> channel)
+-- Entity of bundle (control + data + extras -> channel)
 entity {name} is
   port (
     clk : in std_logic;
     rst : in std_logic;
-    -- input control
-    ctrl_valid : in std_logic;
-    ctrl_ready : out std_logic;
-    -- input data, a bare signal with no handshake of its own
-    {data(_raw_port("data", "in", data_width) + ";", data_width)}
-    -- output channel
-    {data(f"outs : out std_logic_vector({data_width} - 1 downto 0);", data_width)}
-    outs_valid : out std_logic;
-    outs_ready : in std_logic
+    {port_block}
   );
 end entity;
-"""
 
-    architecture = f"""
--- Architecture of bundle (control + data -> channel)
+-- Architecture of bundle (control + data + extras -> channel)
 architecture arch of {name} is
 begin
-  outs_valid <= ctrl_valid;
-  ctrl_ready <= outs_ready;
-  {data("outs(0) <= data;" if data_width == 1 else "outs <= data;", data_width)}
+  {body_block}
 end architecture;
 """
 
-    return entity + architecture
-
 
 def _generate_bundle_control(name):
-    entity = f"""
+    return f"""
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -87,9 +104,7 @@ entity {name} is
     ready : out std_logic
   );
 end entity;
-"""
 
-    architecture = f"""
 -- Architecture of bundle (valid -> control, yielding ready)
 architecture arch of {name} is
 begin
@@ -97,5 +112,3 @@ begin
   ready      <= ctrl_ready;
 end architecture;
 """
-
-    return entity + architecture

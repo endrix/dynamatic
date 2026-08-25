@@ -667,9 +667,17 @@
       {
         "name": "DATA_WIDTH",
         "type": "unsigned"
+      },
+      {
+        "name": "EXTRA_DOWN",
+        "type": "string"
+      },
+      {
+        "name": "EXTRA_UP",
+        "type": "string"
       }
     ],
-    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t unbundle -p form='\"$FORM\"' data_width=$DATA_WIDTH"
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t unbundle -p form='\"$FORM\"' data_width=$DATA_WIDTH extra_down='$EXTRA_DOWN' extra_up='$EXTRA_UP'"
   },
   {
     "name": "handshake.bundle",
@@ -681,8 +689,16 @@
       {
         "name": "DATA_WIDTH",
         "type": "unsigned"
+      },
+      {
+        "name": "EXTRA_DOWN",
+        "type": "string"
+      },
+      {
+        "name": "EXTRA_UP",
+        "type": "string"
       }
     ],
-    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t bundle -p form='\"$FORM\"' data_width=$DATA_WIDTH"
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t bundle -p form='\"$FORM\"' data_width=$DATA_WIDTH extra_down='$EXTRA_DOWN' extra_up='$EXTRA_UP'"
   }
 ]
