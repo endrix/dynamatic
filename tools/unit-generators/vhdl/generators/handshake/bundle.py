@@ -1,5 +1,19 @@
 from generators.support.utils import data
 
+def _raw_port(name, direction, width):
+    """Declaration for a BARE data port, one not part of a channel.
+
+    The exporter declares a raw signal of width 1 as a scalar `std_logic`,
+    reserving `std_logic_vector` for wider ones -- unlike a channel's data,
+    which is always a vector, `std_logic_vector(0 downto 0)` included. Getting
+    this wrong fails in GHDL with "can't associate ... with port", so the two
+    conventions have to be kept apart.
+    """
+    if width == 1:
+        return f"{name} : {direction} std_logic"
+    return f"{name} : {direction} std_logic_vector({width} - 1 downto 0)"
+
+
 
 def generate_bundle(name, params):
     """`handshake.bundle` joins individual signals back into a channel-like
@@ -31,7 +45,7 @@ entity {name} is
     ctrl_valid : in std_logic;
     ctrl_ready : out std_logic;
     -- input data, a bare signal with no handshake of its own
-    {data(f"data : in std_logic_vector({data_width} - 1 downto 0);", data_width)}
+    {data(_raw_port("data", "in", data_width) + ";", data_width)}
     -- output channel
     {data(f"outs : out std_logic_vector({data_width} - 1 downto 0);", data_width)}
     outs_valid : out std_logic;
@@ -46,7 +60,7 @@ architecture arch of {name} is
 begin
   outs_valid <= ctrl_valid;
   ctrl_ready <= outs_ready;
-  {data("outs <= data;", data_width)}
+  {data("outs(0) <= data;" if data_width == 1 else "outs <= data;", data_width)}
 end architecture;
 """
 
