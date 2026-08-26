@@ -1766,11 +1766,62 @@ ConvertInstance::matchAndRewrite(handshake::InstanceOp instOp,
   instOperands.push_back(rst);
 
   auto topLevelModOp = instOp->getParentOfType<mlir::ModuleOp>();
-  hw::HWModuleLike modOp = findExternMod(topLevelModOp, instOp.getModule());
-  assert(modOp && "failed to find referenced external module");
   StringAttr instNameAttr = rewriter.getStringAttr(getUniqueName(instOp));
-  rewriter.replaceOpWithNewOp<hw::InstanceOp>(instOp, modOp, instNameAttr,
-                                              instOperands);
+
+  // An external module, or a generated one that has already been converted:
+  // either way the module exists, so its ports can be read off it.
+  hw::HWModuleLike modOp = findExternMod(topLevelModOp, instOp.getModule());
+  if (!modOp)
+    modOp = topLevelModOp.lookupSymbol<hw::HWModuleOp>(instOp.getModule());
+  if (modOp) {
+    rewriter.replaceOpWithNewOp<hw::InstanceOp>(instOp, modOp, instNameAttr,
+                                                instOperands);
+    return success();
+  }
+
+  // A generated module that has NOT been converted yet. Patterns run in no
+  // particular order, so an instance is as likely to be reached before its
+  // callee as after, and waiting is not an option a pattern has. The ports are
+  // therefore computed from the Handshake function instead of read off a
+  // module that is not there yet. The two agree by construction:
+  // getFuncPortInfo builds the module's ports from the same names and the same
+  // lowerType, in the same order, and appends clk and rst last exactly as the
+  // operands were appended above.
+  auto calleeOp =
+      topLevelModOp.lookupSymbol<handshake::FuncOp>(instOp.getModule());
+  if (!calleeOp)
+    return instOp.emitOpError()
+           << "references '" << instOp.getModule()
+           << "', which is neither an external module nor a Handshake "
+              "function in this module";
+
+  // A memref argument expands into a set of load and store ports whose shape
+  // depends on the memory interfaces inside the callee, which is per-module
+  // state this pattern does not have. Refused rather than guessed at.
+  if (llvm::any_of(calleeOp.getArgumentTypes(),
+                   [](Type type) { return isa<MemRefType>(type); }))
+    return instOp.emitOpError()
+           << "instantiating a function with a memref argument is not "
+              "supported; its ports depend on the memory interfaces inside it";
+
+  SmallVector<Type> resultTypes;
+  SmallVector<Attribute> resultNames;
+  for (auto [idx, res] : llvm::enumerate(calleeOp.getResultTypes())) {
+    resultTypes.push_back(lowerType(res));
+    resultNames.push_back(calleeOp.getResName(idx));
+  }
+  SmallVector<Attribute> argNames;
+  for (unsigned idx = 0, e = calleeOp.getNumArguments(); idx < e; ++idx)
+    argNames.push_back(calleeOp.getArgName(idx));
+  argNames.push_back(rewriter.getStringAttr(CLK_PORT));
+  argNames.push_back(rewriter.getStringAttr(RST_PORT));
+
+  rewriter.replaceOpWithNewOp<hw::InstanceOp>(
+      instOp, resultTypes, instNameAttr,
+      FlatSymbolRefAttr::get(rewriter.getContext(), instOp.getModule()),
+      instOperands, rewriter.getArrayAttr(argNames),
+      rewriter.getArrayAttr(resultNames), rewriter.getArrayAttr({}),
+      hw::InnerSymAttr{});
   return success();
 }
 
@@ -2419,23 +2470,26 @@ public:
     mlir::ModuleOp modOp = getOperation();
     MLIRContext *ctx = &getContext();
 
-    // We only support one function per module
-    handshake::FuncOp funcOp = nullptr;
-    for (auto op : modOp.getOps<handshake::FuncOp>()) {
-      if (op.isExternal())
-        continue;
-      if (funcOp) {
-        modOp->emitOpError() << "we currently only support one non-external "
-                                "handshake function per module";
-        return signalPassFailure();
-      }
-      funcOp = op;
-    }
+    // Several non-external functions are allowed, so that a design can be a
+    // hierarchy of generated modules rather than one flat one: each becomes a
+    // `hw::HWModuleOp` and a `handshake::InstanceOp` between them becomes an
+    // `hw::InstanceOp`. Nothing here was ever specific to a single function --
+    // ConvertFunc is a pattern and LoweringState already keys its per-module
+    // state on the created module -- so this is a restriction being lifted
+    // rather than a mechanism being added.
+    SmallVector<handshake::FuncOp> funcOps;
+    for (auto op : modOp.getOps<handshake::FuncOp>())
+      if (!op.isExternal())
+        funcOps.push_back(op);
 
-    if (funcOp) {
+    // Kept for the parts below that are genuinely about one function: the II
+    // monitors instrument a single control network.
+    handshake::FuncOp funcOp = funcOps.empty() ? nullptr : funcOps.front();
+
+    for (handshake::FuncOp f : funcOps) {
       // Check that some preconditions are met before doing anything
-      if (failed(verifyIRMaterialized(funcOp))) {
-        funcOp.emitError() << ERR_NON_MATERIALIZED_FUNC;
+      if (failed(verifyIRMaterialized(f))) {
+        f.emitError() << ERR_NON_MATERIALIZED_FUNC;
         return signalPassFailure();
       }
     }
