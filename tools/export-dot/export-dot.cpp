@@ -45,6 +45,13 @@ static cl::opt<std::string> inputFileName(cl::Positional,
                                           cl::desc("<input file>"),
                                           cl::cat(mainCategory));
 
+static cl::opt<std::string> functionName(
+    "function", cl::Optional,
+    cl::desc("Name of the Handshake function to export. Only needed when the "
+             "module holds more than one, which it does once a design is a "
+             "hierarchy of modules rather than a single flat one."),
+    cl::init(""), cl::cat(mainCategory));
+
 static cl::opt<std::string> timingDBFilepath(
     "timing-models", cl::Optional,
     cl::desc(
@@ -320,6 +327,21 @@ static LogicalResult getDOTGraph(handshake::FuncOp funcOp, DOTGraph &graph) {
     return success();
   };
 
+  // Not every operation names its ports. `handshake.instance` in particular
+  // does not: its ports are the callee's, so they are known but not through
+  // this interface, and asking for them by interface used to abort. A diagram
+  // is happy with positions when names are unavailable.
+  auto resultName = [](Operation *op, unsigned idx) -> std::string {
+    if (auto named = dyn_cast<handshake::NamedIOInterface>(op))
+      return named.getResultName(idx);
+    return "out" + std::to_string(idx);
+  };
+  auto operandName = [](Operation *op, unsigned idx) -> std::string {
+    if (auto named = dyn_cast<handshake::NamedIOInterface>(op))
+      return named.getOperandName(idx);
+    return "in" + std::to_string(idx);
+  };
+
   auto addEdge = [&](OpOperand &oprd, DOTGraph::Subgraph &subgraph) -> void {
     Value val = oprd.get();
     Operation *dstOp = oprd.getOwner();
@@ -331,13 +353,11 @@ static LogicalResult getDOTGraph(handshake::FuncOp funcOp, DOTGraph &graph) {
       Operation *srcOp = res.getDefiningOp();
       srcNodeName = getUniqueName(srcOp).str();
       srcIdx = res.getResultNumber();
-      srcPortName =
-          cast<handshake::NamedIOInterface>(srcOp).getResultName(srcIdx);
+      srcPortName = resultName(srcOp, srcIdx);
     } else {
       Operation *parentOp = val.getParentBlock()->getParentOp();
       srcIdx = cast<BlockArgument>(val).getArgNumber();
-      srcNodeName = srcPortName =
-          cast<handshake::NamedIOInterface>(parentOp).getOperandName(srcIdx);
+      srcNodeName = srcPortName = operandName(parentOp, srcIdx);
     }
 
     // Determine the edge's destination
@@ -346,13 +366,11 @@ static LogicalResult getDOTGraph(handshake::FuncOp funcOp, DOTGraph &graph) {
     if (isa<handshake::EndOp>(dstOp)) {
       Operation *parentOp = dstOp->getParentOp();
       dstIdx = oprd.getOperandNumber();
-      dstNodeName = dstPortName =
-          cast<handshake::NamedIOInterface>(parentOp).getResultName(dstIdx);
+      dstNodeName = dstPortName = resultName(parentOp, dstIdx);
     } else {
       dstNodeName = getUniqueName(dstOp).str();
       dstIdx = oprd.getOperandNumber();
-      dstPortName =
-          cast<handshake::NamedIOInterface>(dstOp).getOperandName(dstIdx);
+      dstPortName = operandName(dstOp, dstIdx);
     }
 
     DOTGraph::Edge &edge = builder.addEdge(srcNodeName, dstNodeName, subgraph);
@@ -478,17 +496,35 @@ int main(int argc, char **argv) {
   if (!modOp)
     return 1;
 
-  // We only support one function per module
+  // A module may hold several functions once a design is a hierarchy rather
+  // than a single flat one, and a DOT graph draws one of them. Which one is
+  // only ambiguous when there is a choice, so --function is required exactly
+  // then and stays unnecessary for every existing single-function use.
+  SmallVector<handshake::FuncOp> funcOps;
+  for (auto op : modOp->getOps<handshake::FuncOp>())
+    if (!op.isExternal())
+      funcOps.push_back(op);
+
   handshake::FuncOp funcOp = nullptr;
-  for (auto op : modOp->getOps<handshake::FuncOp>()) {
-    if (op.isExternal())
-      continue;
-    if (funcOp) {
-      modOp->emitOpError() << "we currently only support one non-external "
-                              "handshake function per module";
+  if (!functionName.empty()) {
+    for (handshake::FuncOp op : funcOps)
+      if (op.getName() == functionName)
+        funcOp = op;
+    if (!funcOp) {
+      modOp->emitError() << "no Handshake function named '" << functionName
+                         << "' in the module";
       return 1;
     }
-    funcOp = op;
+  } else if (funcOps.size() == 1) {
+    funcOp = funcOps.front();
+  } else if (funcOps.size() > 1) {
+    auto diag = modOp->emitError()
+                << "the module holds " << funcOps.size()
+                << " Handshake functions; name the one to export with "
+                   "--function. Available:";
+    for (handshake::FuncOp op : funcOps)
+      diag << " " << op.getName();
+    return 1;
   }
 
   if (funcOp == nullptr) {
