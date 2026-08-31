@@ -139,8 +139,18 @@ LogicalResult dynamatic::buffer::mapChannelsToProperties(
     return success();
   };
 
+  // A value with no users has nothing to build a Channel from: dereferencing
+  // `getUsers().begin()` on it is dereferencing the end iterator. Materialized
+  // IR normally has none, because `materializeValue` sinks every unused value
+  // -- but only those satisfying `eligibleForMaterialization`, i.e. ControlType
+  // and ChannelType. A raw signal produced by `handshake.unbundle` is neither,
+  // so it is never sunk (and `handshake.sink` would not accept it), and an
+  // unbundled extra signal that nothing reads reaches here with no users.
+
   // Add channels originating from function arguments to the channel map
   for (auto [idx, arg] : llvm::enumerate(funcOp.getArguments())) {
+    if (arg.use_empty())
+      continue;
     Channel channel(arg, funcOp, *arg.getUsers().begin());
     if (failed(deriveBufferingProperties(channel)))
       return failure();
@@ -149,6 +159,8 @@ LogicalResult dynamatic::buffer::mapChannelsToProperties(
   // Add channels originating from operations' results to the channel map
   for (Operation &op : funcOp.getOps()) {
     for (auto [idx, res] : llvm::enumerate(op.getResults())) {
+      if (res.use_empty())
+        continue;
       Channel channel(res, &op, *res.getUsers().begin());
       if (failed(deriveBufferingProperties(channel)))
         return failure();
