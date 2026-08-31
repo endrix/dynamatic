@@ -80,6 +80,26 @@ public:
   /// them.
   using MemInterfacesInfo = llvm::MapVector<Value, MemAccesses>;
 
+  /// Sets up the signature conversion for a function's entry block: every
+  /// func-level argument maps one-to-one through the type converter, then a
+  /// control argument is added per memory region and one for the start signal.
+  ///
+  /// Exposed because `lowerSignature` is virtual and therefore meant to be
+  /// overridden, which was not possible while its helpers were file-static: an
+  /// override had to reimplement the block conversion to reach them.
+  static void
+  setupEntryBlockConversion(mlir::Block *entryBlock, unsigned numMemories,
+                            mlir::PatternRewriter &rewriter,
+                            const TypeConverter *typeConv,
+                            TypeConverter::SignatureConversion &conv);
+
+  /// The same for a non-entry block: arguments through the converter, plus the
+  /// block's own control.
+  static void
+  setupBlockConversion(mlir::Block *block, mlir::PatternRewriter &rewriter,
+                       const TypeConverter *typeConv,
+                       TypeConverter::SignatureConversion &conv);
+
   /// Creates a Handshake-level equivalent to the matched func-level function,
   /// returning it on success. A `nullptr` return value indicates a failure.
   virtual FailureOr<handshake::FuncOp>

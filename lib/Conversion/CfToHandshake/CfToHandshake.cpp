@@ -336,11 +336,10 @@ LowerFuncToHandshake::deriveNewAttributes(func::FuncOp funcOp) const {
   return attributes;
 }
 
-static void
-setupEntryBlockConversion(Block *entryBlock, unsigned numMemories,
-                          PatternRewriter &rewriter,
-                          const TypeConverter *typeConv,
-                          TypeConverter::SignatureConversion &conv) {
+void LowerFuncToHandshake::setupEntryBlockConversion(
+    Block *entryBlock, unsigned numMemories, PatternRewriter &rewriter,
+    const TypeConverter *typeConv,
+    TypeConverter::SignatureConversion &conv) {
   // All func-level function arguments map one-to-one to the handshake-level
   // function arguments and get channelified in the process.
   //
@@ -359,9 +358,9 @@ setupEntryBlockConversion(Block *entryBlock, unsigned numMemories,
   conv.addInputs(SmallVector<Type>{numMemories + 1, ctrlType});
 }
 
-static void setupBlockConversion(Block *block, PatternRewriter &rewriter,
-                                 const TypeConverter *typeConv,
-                                 TypeConverter::SignatureConversion &conv) {
+void LowerFuncToHandshake::setupBlockConversion(
+    Block *block, PatternRewriter &rewriter, const TypeConverter *typeConv,
+    TypeConverter::SignatureConversion &conv) {
   // As above: the converter decides, not `channelifyType`.
   for (auto [idx, type] : llvm::enumerate(block->getArgumentTypes()))
     conv.addInputs(idx, typeConv->convertType(type));
