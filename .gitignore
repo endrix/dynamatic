@@ -53,3 +53,10 @@ metals.sbt
 
 # ElasticMiter puts external files in this directory
 /ext
+
+# CBC writes its model, log and solution into the CURRENT WORKING DIRECTORY on
+# every MILP solve, so running buffer placement from inside the repo leaves a
+# few hundred untracked files behind.
+cbc_model_*.lp
+cbc_output_*.log
+cbc_solution_*.sol
