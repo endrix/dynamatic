@@ -377,13 +377,17 @@ FailureOr<handshake::FuncOp> LowerFuncToHandshake::lowerSignature(
   SmallVector<Type, 8> argTypes;
   SmallVector<Type, 2> resTypes;
   unsigned numMemories = 0;
+  // Through the converter, for the reason given at setupEntryBlockConversion:
+  // these are the handshake function's own argument and result types, so a
+  // rule an extending caller added has to reach them or it reaches nothing.
+  const TypeConverter *sigConv = getTypeConverter();
   for (Type ogArgType : funcOp.getArgumentTypes()) {
     if (isa<mlir::MemRefType>(ogArgType))
       ++numMemories;
-    argTypes.push_back(channelifyType(ogArgType));
+    argTypes.push_back(sigConv->convertType(ogArgType));
   }
   for (Type ogResType : funcOp.getResultTypes())
-    resTypes.push_back(channelifyType(ogResType));
+    resTypes.push_back(sigConv->convertType(ogResType));
 
   // In addition to the original function's arguments and results, the Handshake
   // function has an extra control-only output port for each memory region and
