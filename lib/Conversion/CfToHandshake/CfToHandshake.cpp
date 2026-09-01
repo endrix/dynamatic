@@ -336,26 +336,34 @@ LowerFuncToHandshake::deriveNewAttributes(func::FuncOp funcOp) const {
   return attributes;
 }
 
-static void
-setupEntryBlockConversion(Block *entryBlock, unsigned numMemories,
-                          PatternRewriter &rewriter,
-                          TypeConverter::SignatureConversion &conv) {
+void LowerFuncToHandshake::setupEntryBlockConversion(
+    Block *entryBlock, unsigned numMemories, PatternRewriter &rewriter,
+    const TypeConverter *typeConv,
+    TypeConverter::SignatureConversion &conv) {
   // All func-level function arguments map one-to-one to the handshake-level
-  // function arguments and get channelified in the process
+  // function arguments and get channelified in the process.
+  //
+  // Through the converter rather than by calling `channelifyType` directly.
+  // The two agree for every type Dynamatic itself lowers -- `channelifyType`
+  // IS the converter's only rule -- but a caller that extends the converter
+  // for a type of its own was previously ignored here, and the null that
+  // `channelifyType` returns for an unknown type asserts inside TypeRange
+  // rather than reporting anything. A pattern that is handed a TypeConverter
+  // should ask it.
   for (auto [idx, type] : llvm::enumerate(entryBlock->getArgumentTypes()))
-    conv.addInputs(idx, channelifyType(type));
+    conv.addInputs(idx, typeConv->convertType(type));
 
   // Add a new control argument for each memory and one for the start signal
   Type ctrlType = handshake::ControlType::get(rewriter.getContext());
   conv.addInputs(SmallVector<Type>{numMemories + 1, ctrlType});
 }
 
-static void setupBlockConversion(Block *block, PatternRewriter &rewriter,
-                                 TypeConverter::SignatureConversion &conv) {
-  // All func-level block arguments map one-to-one to the handshake-level
-  // arguments and get channelified in the process
+void LowerFuncToHandshake::setupBlockConversion(
+    Block *block, PatternRewriter &rewriter, const TypeConverter *typeConv,
+    TypeConverter::SignatureConversion &conv) {
+  // As above: the converter decides, not `channelifyType`.
   for (auto [idx, type] : llvm::enumerate(block->getArgumentTypes()))
-    conv.addInputs(idx, channelifyType(type));
+    conv.addInputs(idx, typeConv->convertType(type));
 
   // Add a new argument for the start in each block
   conv.addInputs(handshake::ControlType::get(rewriter.getContext()));
@@ -368,13 +376,17 @@ FailureOr<handshake::FuncOp> LowerFuncToHandshake::lowerSignature(
   SmallVector<Type, 8> argTypes;
   SmallVector<Type, 2> resTypes;
   unsigned numMemories = 0;
+  // Through the converter, for the reason given at setupEntryBlockConversion:
+  // these are the handshake function's own argument and result types, so a
+  // rule an extending caller added has to reach them or it reaches nothing.
+  const TypeConverter *sigConv = getTypeConverter();
   for (Type ogArgType : funcOp.getArgumentTypes()) {
     if (isa<mlir::MemRefType>(ogArgType))
       ++numMemories;
-    argTypes.push_back(channelifyType(ogArgType));
+    argTypes.push_back(sigConv->convertType(ogArgType));
   }
   for (Type ogResType : funcOp.getResultTypes())
-    resTypes.push_back(channelifyType(ogResType));
+    resTypes.push_back(sigConv->convertType(ogResType));
 
   // In addition to the original function's arguments and results, the Handshake
   // function has an extra control-only output port for each memory region and
@@ -408,13 +420,14 @@ FailureOr<handshake::FuncOp> LowerFuncToHandshake::lowerSignature(
   // Convert the entry block's signature
   TypeConverter::SignatureConversion entryConversion(
       entryBlock->getNumArguments());
-  setupEntryBlockConversion(entryBlock, numMemories, rewriter, entryConversion);
+  setupEntryBlockConversion(entryBlock, numMemories, rewriter, typeConv,
+                            entryConversion);
   rewriter.applySignatureConversion(entryBlock, entryConversion, typeConv);
 
   // Convert the non entry blocks' signatures
   for (Block *block : nonEntryBlocks) {
     TypeConverter::SignatureConversion conv(block->getNumArguments());
-    setupBlockConversion(block, rewriter, conv);
+    setupBlockConversion(block, rewriter, typeConv, conv);
     rewriter.applySignatureConversion(block, conv, typeConv);
   }
 
