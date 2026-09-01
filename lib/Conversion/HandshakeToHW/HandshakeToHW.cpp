@@ -1014,7 +1014,12 @@ ModuleDiscriminator::ModuleDiscriminator(handshake::RAMOp *op,
     } else {
       assert(false && "Unsupported constant type!");
     }
-    addString("INITIAL_VALUES", llvm::join(strValues, ","));
+    // A TRAILING comma, because the RTL config wraps this in parentheses and
+    // the generator reads the result with `ast.literal_eval`. `(0)` is an int
+    // in Python, not a one-element tuple, so a single-element memory fails
+    // with "TypeError: 'int' object is not iterable" from inside the
+    // generator -- a long way from here, and only ever for size 1.
+    addString("INITIAL_VALUES", llvm::join(strValues, ",") + ",");
   }
 }
 

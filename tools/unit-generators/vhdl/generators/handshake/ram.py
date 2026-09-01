@@ -105,4 +105,10 @@ def _gen_intial_block(data_width: int, size: int, init_vals: List[int]):
         for _ in range(int(size) - len(init_vals)):
             init_strings.append('"' + f"{0:0{data_width}b}" + '"')
 
-    return "signal ram : ram_type := (" + ",\n".join(init_strings)  + ");"
+    # NAMED association, always. A positional aggregate of ONE element is
+    # ambiguous in VHDL -- `("0000")` is a string literal, not a one-element
+    # array -- so a size-1 memory produced code GHDL rejects with "can't match
+    # string literal with type array subtype". Naming the index is valid for
+    # every size and removes the special case.
+    named = [f"{addr} => {val}" for addr, val in enumerate(init_strings)]
+    return "signal ram : ram_type := (" + ",\n".join(named) + ");"
