@@ -52,6 +52,43 @@ struct ForceMemoryInterfacePass
     DenseMap<Block *, unsigned> lsqGroups;
     unsigned nextGroupID = 0;
 
+    // A memory nothing STORES to gets a controller even under force-lsq.
+    //
+    // An LSQ exists to order stores against loads, so on a read-only memory it
+    // has nothing to do -- and the backend cannot build one anyway: the
+    // generator sizes its port-index vectors from the store count and asserts
+    // `size > 0`, so a constant lookup table forced through an LSQ fails at
+    // `export-rtl` with a Python AssertionError naming neither the memory nor
+    // the reason.
+    //
+    // Read-only is also the one case where the choice is free: the trap that
+    // makes force-mc wrong -- a store whose data is a load, read back later --
+    // needs a store to happen at all.
+    //
+    // "Nothing stores" is judged conservatively: a memory is read-only only if
+    // EVERY use of it is a load. A store is the obvious writer, but so is a
+    // `memref.copy` into it, a call it is passed to, or a block transfer that
+    // has not been expanded into stores yet -- and mistaking any of those for
+    // read-only would hand a written memory to a controller, which is the
+    // store-then-load value trap under another name.
+    DenseSet<Value> written;
+    getOperation()->walk([&](Operation *op) {
+      for (Value operand : op->getOperands()) {
+        if (!isa<MemRefType>(operand.getType()))
+          continue;
+        if (isa<memref::LoadOp, affine::AffineLoadOp>(op))
+          continue;
+        written.insert(operand);
+      }
+    });
+    auto readOnly = [&](Operation *op) {
+      if (auto load = dyn_cast<memref::LoadOp>(op))
+        return !written.contains(load.getMemRef());
+      if (auto load = dyn_cast<affine::AffineLoadOp>(op))
+        return !written.contains(load.getMemRef());
+      return false;
+    };
+
     // Find all memory operations and adds/modifies the
     // handshake::MemInterfaceAttr on them depending on the pass parameters
     getOperation()->walk([&](Operation *op) {
@@ -60,7 +97,7 @@ struct ForceMemoryInterfacePass
                affine::AffineStoreOp>(op))
         return;
 
-      if (forceMC) {
+      if (forceMC || readOnly(op)) {
         setDialectAttr<handshake::MemInterfaceAttr>(op, ctx);
         return;
       }
