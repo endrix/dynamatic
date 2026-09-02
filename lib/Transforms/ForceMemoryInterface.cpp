@@ -64,18 +64,28 @@ struct ForceMemoryInterfacePass
     // Read-only is also the one case where the choice is free: the trap that
     // makes force-mc wrong -- a store whose data is a load, read back later --
     // needs a store to happen at all.
-    DenseSet<Value> stored;
+    //
+    // "Nothing stores" is judged conservatively: a memory is read-only only if
+    // EVERY use of it is a load. A store is the obvious writer, but so is a
+    // `memref.copy` into it, a call it is passed to, or a block transfer that
+    // has not been expanded into stores yet -- and mistaking any of those for
+    // read-only would hand a written memory to a controller, which is the
+    // store-then-load value trap under another name.
+    DenseSet<Value> written;
     getOperation()->walk([&](Operation *op) {
-      if (auto store = dyn_cast<memref::StoreOp>(op))
-        stored.insert(store.getMemRef());
-      else if (auto store = dyn_cast<affine::AffineStoreOp>(op))
-        stored.insert(store.getMemRef());
+      for (Value operand : op->getOperands()) {
+        if (!isa<MemRefType>(operand.getType()))
+          continue;
+        if (isa<memref::LoadOp, affine::AffineLoadOp>(op))
+          continue;
+        written.insert(operand);
+      }
     });
     auto readOnly = [&](Operation *op) {
       if (auto load = dyn_cast<memref::LoadOp>(op))
-        return !stored.contains(load.getMemRef());
+        return !written.contains(load.getMemRef());
       if (auto load = dyn_cast<affine::AffineLoadOp>(op))
-        return !stored.contains(load.getMemRef());
+        return !written.contains(load.getMemRef());
       return false;
     };
 
