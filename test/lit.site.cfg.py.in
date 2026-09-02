@@ -36,6 +36,7 @@ config.dynamatic_obj_root = "@DYNAMATIC_BINARY_DIR@"
 config.dynamatic_tools_dir = "@DYNAMATIC_TOOLS_DIR@"
 config.dynamatic_shlib_dir = "@LLVM_LIBRARY_OUTPUT_INTDIR@"
 config.cmake_build_type = "@CMAKE_BUILD_TYPE@"
+config.enable_cbc = "@DYNAMATIC_ENABLE_CBC@" in ("ON", "1", "TRUE", "YES")
 
 # Support substitution of the tools_dir with user parameters. This is
 # used when we can't determine the tool dir at configuration time.

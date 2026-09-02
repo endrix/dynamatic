@@ -225,11 +225,30 @@ LogicalResult HandshakePlaceBuffersPass::placeUsingMILP() {
   for (handshake::FuncOp funcOp : modOp.getOps<handshake::FuncOp>()) {
     auto info = FuncInfo(funcOp);
 
-    // Read the CSV containing arch information (number of transitions between
-    // pairs of basic blocks) from disk. While the rest of this pass works if
-    // the module contains multiple functions, this only makes sense if the
-    // module has a single function
-    if (failed(StdProfiler::readCSV(frequencies, info.archs))) {
+    // A function without basic-block annotations has no control-flow graph
+    // for the MILP: no archs, no CFDFC to extract, and possibly no port names
+    // to build variable names from (a network of instances, for example).
+    // Its buffers are left as they are.
+    if (!hasBasicBlocks(funcOp)) {
+      funcOp->emitRemark()
+          << "function has no basic-block annotations, so the MILP has "
+             "nothing to optimize; its buffers are left as they are";
+      continue;
+    }
+
+    // Arch information (number of transitions between pairs of basic blocks):
+    // the function's own attribute first, so that a module holding several
+    // functions with different CFGs can be placed in one run; otherwise the
+    // CSV file from disk, which then applies to every function.
+    if (hasFrequenciesAttr(funcOp)) {
+      if (failed(readFrequenciesAttr(funcOp, info.archs)))
+        return failure();
+    } else if (frequencies.empty()) {
+      return funcOp->emitError()
+             << "no transition frequencies: pass a CSV file with the "
+                "'frequencies' option or set the '"
+             << FREQUENCIES_ATTR_NAME << "' attribute on the function";
+    } else if (failed(StdProfiler::readCSV(frequencies, info.archs))) {
       return funcOp->emitError()
              << "Failed to read profiling information from CSV";
     }
