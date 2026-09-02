@@ -891,8 +891,37 @@ LogicalResult experimental::ftd::addGsaGates(
       if (nullOperand >= 0)
         oneInputGammaList.insert(mux);
 
-      if (gate->isRoot)
-        rewriter.replaceAllUsesWith(gate->result, mux.getResult());
+      if (gate->isRoot) {
+        // Reroute the uses IN PLACE, and do NOT ask the rewriter to replace
+        // the value.
+        //
+        // `gate->result` is a block argument, and THIS FUNCTION deletes it --
+        // every non-entry block's arguments are erased at the end, with the
+        // raw `Block::eraseArguments`. So its lifetime is ours, and the two
+        // things `replaceAllUsesWith` does are both wrong here:
+        //
+        //  - it does not rewrite the IR's uses. Under the reworked conversion
+        //    driver, in rollback mode (the default), it records the
+        //    replacement and leaves the operands alone; only the
+        //    `allowPatternRollback = false` path replaces eagerly, which is
+        //    what the old driver did for everyone and what this code was
+        //    written against. The argument therefore still had every use when
+        //    the erase came, and `eraseArguments` asserts on that.
+        //  - and the record outlives the value. The driver replays it in
+        //    `ReplaceValueRewrite::commit`, calling
+        //    `findOrBuildReplacementValue` on an argument that was destroyed
+        //    in between -- a null type, and a segfault.
+        //
+        // Rerouting through `modifyOpInPlace` tells the driver about the
+        // operand change without registering anything that has to survive the
+        // value. Same shape as `rerouteUsesIf` in
+        // `LowerFuncToHandshake::flattenAndTerminate`, and correct in either
+        // driver mode.
+        for (OpOperand &use :
+             llvm::make_early_inc_range(gate->result.getUses()))
+          rewriter.modifyOpInPlace(use.getOwner(),
+                                   [&]() { use.set(mux.getResult()); });
+      }
 
       gsaList.insert({gate->index, mux});
 
