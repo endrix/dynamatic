@@ -757,6 +757,32 @@ LogicalResult InstanceOp::verifySymbolUses(SymbolTableCollection &symbolTable) {
   return success();
 }
 
+/// The instantiated function, when the symbol resolves.
+static handshake::FuncOp lookupInstantiated(InstanceOp op) {
+  return SymbolTable::lookupNearestSymbolFrom<handshake::FuncOp>(
+      op, op.getModuleAttr());
+}
+
+/// An instance's ports are named after the instantiated function's, which is
+/// what the buffer placement MILP needs to name the channels around it. An
+/// instance whose callee cannot be found or has no port names falls back to
+/// positional names.
+std::string InstanceOp::getOperandName(unsigned idx) {
+  assert(idx < getNumOperands() && "index too high");
+  if (handshake::FuncOp callee = lookupInstantiated(*this))
+    if (ArrayAttr names = callee.getArgNames(); names && idx < names.size())
+      return cast<StringAttr>(names[idx]).str();
+  return "in" + std::to_string(idx);
+}
+
+std::string InstanceOp::getResultName(unsigned idx) {
+  assert(idx < getNumResults() && "index too high");
+  if (handshake::FuncOp callee = lookupInstantiated(*this))
+    if (ArrayAttr names = callee.getResNames(); names && idx < names.size())
+      return cast<StringAttr>(names[idx]).str();
+  return "out" + std::to_string(idx);
+}
+
 FunctionType InstanceOp::getModuleType() {
   return FunctionType::get(getContext(), getOperandTypes(), getResultTypes());
 }

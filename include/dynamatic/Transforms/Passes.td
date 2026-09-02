@@ -268,7 +268,11 @@ def HandshakePlaceBuffers : Pass<"handshake-place-buffers"> {
     "The MILP solver. Choices are: 'gurobi', 'cbc'">,
     Option<"frequencies", "frequencies", "std::string", "",
     "Path to CSV-formatted file containing estimated transition frequencies "
-    "between basic blocks in the kernel.">,
+    "between basic blocks in the kernel. A function carrying a "
+    "'handshake.frequencies' attribute (an array of [srcBB, dstBB, "
+    "numTransitions, isBackedge] quadruplets) uses that instead, which lets "
+    "a module of several functions be placed in one run. Functions with no "
+    "basic-block annotations are skipped with a remark.">,
     Option<"timingModels", "timing-models", "std::string", "",
     "Path to JSON-formatted file containing timing models for dataflow "
     "components.">,

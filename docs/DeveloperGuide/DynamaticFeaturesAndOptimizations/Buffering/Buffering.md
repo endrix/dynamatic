@@ -166,6 +166,31 @@ These channels are skipped during buffer placement.
 
 See [this paper](https://doi.org/10.1145/3174243.3174264) for background.
 
+## Where the Transition Frequencies Come From
+
+The MILP-based placers weigh each CFDFC by how often its basic-block
+transitions execute. That information reaches the pass in one of two ways:
+
+- the `frequencies` option, a CSV file (`srcBlock,dstBlock,numTransitions,is_backedge`)
+  as written by the frequency profiler, which then applies to every function
+  in the module;
+- a `handshake.frequencies` attribute on the function, an array of
+  `[srcBB, dstBB, numTransitions, isBackedge]` quadruplets, which takes
+  precedence over the file. This is the form to use when a module holds
+  several functions with different control-flow graphs, or when the
+  frequencies are estimated by another tool (from loop bounds, say) rather
+  than profiled. `dynamatic::buffer::writeFrequenciesAttr` and
+  `readFrequenciesAttr` in `BufferingSupport.h` produce and consume it.
+
+```mlir
+handshake.func @loop(...) attributes {handshake.frequencies = [[0, 1, 1, 0], [1, 1, 63, 1], [1, 2, 1, 0]], ...}
+```
+
+A function with no basic-block annotations at all (a network of instances,
+for example) has no control-flow graph for the MILP to reason about: the
+pass leaves its buffers as they are and says so in a remark, instead of
+attempting to model it.
+
 ## RTL Generation
 
 The RTL backend selects buffer implementations based on the `BUFFER_TYPE` attribute in each `handshake::BufferOp`. This determines the HDL module to instantiate. The `NUM_SLOTS` attribute is passed as a generic parameter.

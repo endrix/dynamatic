@@ -14,6 +14,7 @@
 #include "dynamatic/Analysis/NameAnalysis.h"
 #include "dynamatic/Dialect/Handshake/HandshakeOps.h"
 #include "dynamatic/Support/Attribute.h"
+#include "dynamatic/Support/CFG.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LogicalResult.h"
@@ -168,4 +169,56 @@ LogicalResult dynamatic::buffer::mapChannelsToProperties(
   }
 
   return success();
+}
+
+//===----------------------------------------------------------------------===//
+// Transition frequencies carried by the IR
+//===----------------------------------------------------------------------===//
+
+bool dynamatic::buffer::hasFrequenciesAttr(handshake::FuncOp funcOp) {
+  return funcOp->hasAttr(FREQUENCIES_ATTR_NAME);
+}
+
+LogicalResult dynamatic::buffer::readFrequenciesAttr(
+    handshake::FuncOp funcOp, SmallVectorImpl<experimental::ArchBB> &archs) {
+  auto malformed = [&]() {
+    return funcOp->emitError()
+           << "'" << FREQUENCIES_ATTR_NAME
+           << "' must be an array of [srcBB, dstBB, numTransitions, "
+              "isBackedge] integer quadruplets";
+  };
+  auto list = funcOp->getAttrOfType<ArrayAttr>(FREQUENCIES_ATTR_NAME);
+  if (!list)
+    return malformed();
+  for (Attribute entry : list) {
+    auto quad = dyn_cast<ArrayAttr>(entry);
+    if (!quad || quad.size() != 4)
+      return malformed();
+    unsigned fields[4];
+    for (auto [i, field] : llvm::enumerate(quad)) {
+      auto integer = dyn_cast<IntegerAttr>(field);
+      if (!integer || integer.getValue().isNegative())
+        return malformed();
+      fields[i] = integer.getValue().getZExtValue();
+    }
+    archs.emplace_back(fields[0], fields[1], fields[2], fields[3] != 0);
+  }
+  return success();
+}
+
+void dynamatic::buffer::writeFrequenciesAttr(
+    handshake::FuncOp funcOp, ArrayRef<experimental::ArchBB> archs) {
+  MLIRContext *ctx = funcOp.getContext();
+  Builder builder(ctx);
+  SmallVector<Attribute> entries;
+  for (const experimental::ArchBB &arch : archs)
+    entries.push_back(builder.getI64ArrayAttr(
+        {arch.srcBB, arch.dstBB, arch.numTrans, arch.isBackEdge ? 1 : 0}));
+  funcOp->setAttr(FREQUENCIES_ATTR_NAME, builder.getArrayAttr(entries));
+}
+
+bool dynamatic::buffer::hasBasicBlocks(handshake::FuncOp funcOp) {
+  return llvm::any_of(funcOp.getOps(), [](Operation &op) {
+    return getLogicBB(&op).has_value();
+  });
 }

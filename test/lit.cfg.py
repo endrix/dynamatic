@@ -1,6 +1,7 @@
 # -*- Python -*-
 
 import os
+import shutil
 
 import lit.formats
 import lit.util
@@ -27,6 +28,7 @@ config.test_exec_root = os.path.join(config.dynamatic_obj_root, "test")
 config.substitutions.append(("%PATH%", config.environment["PATH"]))
 config.substitutions.append(("%shlibext", config.llvm_shlib_ext))
 config.substitutions.append(("%shlibdir", config.dynamatic_shlib_dir))
+config.substitutions.append(("%dynamatic_src_root", config.dynamatic_src_root))
 
 llvm_config.with_system_environment(["HOME", "INCLUDE", "LIB", "TMP", "TEMP"])
 
@@ -34,6 +36,11 @@ llvm_config.use_default_substitutions()
 
 # excludes: A list of directories to exclude from the testsuite.
 config.excludes = ["CMakeLists.txt", "README.md"]
+
+# The cbc-backed MILP placers: the build must have them and the solver must be
+# on PATH, since the pass runs the `cbc` executable.
+if getattr(config, "enable_cbc", False) and shutil.which("cbc"):
+    config.available_features.add("cbc")
 if config.cmake_build_type == "Release":
     print("[WARNING] Skipping `invalid.mlir` in Release mode")
     config.excludes.append("invalid.mlir")

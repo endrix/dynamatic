@@ -45,6 +45,34 @@ struct FuncInfo {
   FuncInfo(handshake::FuncOp funcOp) : funcOp(funcOp) {};
 };
 
+/// Name of the function attribute carrying estimated transition frequencies
+/// between basic blocks: an array of `[srcBB, dstBB, numTransitions,
+/// isBackedge]` integer quadruplets, one per arch, for example
+/// `handshake.frequencies = [[0, 1, 1, 0], [1, 1, 63, 1], [1, 2, 1, 0]]`.
+/// MILP-based buffer placement reads it in preference to the CSV file named
+/// on the command line, so that a module holding several functions with
+/// different control-flow graphs can be placed in one run.
+constexpr llvm::StringLiteral FREQUENCIES_ATTR_NAME("handshake.frequencies");
+
+/// Whether the function carries a frequencies attribute.
+bool hasFrequenciesAttr(handshake::FuncOp funcOp);
+
+/// Reads the function's archs from its frequencies attribute, appending them
+/// to `archs`. Fails with a diagnostic on the function when the attribute is
+/// malformed.
+LogicalResult readFrequenciesAttr(handshake::FuncOp funcOp,
+                                  SmallVectorImpl<experimental::ArchBB> &archs);
+
+/// Writes the archs onto the function as its frequencies attribute, replacing
+/// any previous one.
+void writeFrequenciesAttr(handshake::FuncOp funcOp,
+                          ArrayRef<experimental::ArchBB> archs);
+
+/// Whether any operation in the function is annotated with a basic block.
+/// A function without any has no control-flow graph for the MILP to reason
+/// about.
+bool hasBasicBlocks(handshake::FuncOp funcOp);
+
 /// Acts as a "smart and lazy getter" around a channel's buffering properties.
 /// In situations where one may want to offer easy access to a channel's
 /// buffering properties without fetching the attribute from the IR if not
