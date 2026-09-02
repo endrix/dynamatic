@@ -52,6 +52,33 @@ struct ForceMemoryInterfacePass
     DenseMap<Block *, unsigned> lsqGroups;
     unsigned nextGroupID = 0;
 
+    // A memory nothing STORES to gets a controller even under force-lsq.
+    //
+    // An LSQ exists to order stores against loads, so on a read-only memory it
+    // has nothing to do -- and the backend cannot build one anyway: the
+    // generator sizes its port-index vectors from the store count and asserts
+    // `size > 0`, so a constant lookup table forced through an LSQ fails at
+    // `export-rtl` with a Python AssertionError naming neither the memory nor
+    // the reason.
+    //
+    // Read-only is also the one case where the choice is free: the trap that
+    // makes force-mc wrong -- a store whose data is a load, read back later --
+    // needs a store to happen at all.
+    DenseSet<Value> stored;
+    getOperation()->walk([&](Operation *op) {
+      if (auto store = dyn_cast<memref::StoreOp>(op))
+        stored.insert(store.getMemRef());
+      else if (auto store = dyn_cast<affine::AffineStoreOp>(op))
+        stored.insert(store.getMemRef());
+    });
+    auto readOnly = [&](Operation *op) {
+      if (auto load = dyn_cast<memref::LoadOp>(op))
+        return !stored.contains(load.getMemRef());
+      if (auto load = dyn_cast<affine::AffineLoadOp>(op))
+        return !stored.contains(load.getMemRef());
+      return false;
+    };
+
     // Find all memory operations and adds/modifies the
     // handshake::MemInterfaceAttr on them depending on the pass parameters
     getOperation()->walk([&](Operation *op) {
@@ -60,7 +87,7 @@ struct ForceMemoryInterfacePass
                affine::AffineStoreOp>(op))
         return;
 
-      if (forceMC) {
+      if (forceMC || readOnly(op)) {
         setDialectAttr<handshake::MemInterfaceAttr>(op, ctx);
         return;
       }
