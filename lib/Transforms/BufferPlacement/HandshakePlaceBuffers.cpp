@@ -342,6 +342,15 @@ LogicalResult HandshakePlaceBuffersPass::checkFuncInvariants(FuncInfo &info) {
           /// general so we let this pass without triggering a warning or error
           continue;
         }
+        if (isa<handshake::EndOp>(user)) {
+          // A function output produced inside a loop and handed straight to
+          // the end -- a streamed result, one token per iteration -- rather
+          // than routed to the exit block through branches the way a
+          // returned scalar is. The channel takes part in no cycle (the end
+          // has no outputs) and no CFDFC (the transition is not an arch), so
+          // the MILP only ever sees it as a plain timing path.
+          continue;
+        }
 
         return op.emitError()
                << "Result " << res.getResultNumber() << " defined in block "
