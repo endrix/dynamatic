@@ -63,6 +63,16 @@ static FailureOr<bool> isStoreGIIDOnLoad(handshake::LoadOp loadOp,
   SmallVector<CFGPath> allPaths;
   cfg.getNonCyclicPaths(*loadBB, *storeBB, allPaths);
 
+  // No path from the load's block to the store's block means the CFG offers
+  // no ordering at all between the two, not that every ordering is enforced:
+  // `all_of` over nothing would say the latter. A sequential CFG never gets
+  // here for a dependence the analysis found (the store's block is reachable
+  // from the load's, if only through a back edge, and a block reaches itself
+  // by the trivial path); a CFG whose regions run in parallel does, and the
+  // dependence must then stay active.
+  if (allPaths.empty())
+    return false;
+
   Value loadData = loadOp.getDataResult();
   return llvm::all_of(allPaths, [&](CFGPath &path) {
     return isGIID(loadData, storeOp->getOpOperand(0), path) ||

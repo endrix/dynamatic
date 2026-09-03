@@ -39,3 +39,37 @@ handshake.func @shrsi_giid(%arg0: !handshake.channel<i8>, %arg1: memref<2xi16>, 
   %addressResult_0, %dataResult_1 = store[%1] %5 {handshake.bb = 0 : ui32, handshake.name = "store1"} : <i32>, <i16>, <i32>, <i16>
   end {handshake.bb = 0 : ui32, handshake.name = "end0"} %0#1, %arg3 : <>, <>
 }
+
+// -----
+
+// The load's block cannot reach the store's block: the entry forks its control
+// to both and a join brings them back, the shape a function has once two
+// regions run in parallel. There is no path on which the store could be shown
+// to depend on the load, so the dependence must stay active; an empty path set
+// is not a proof of enforcement.
+// CHECK-LABEL:   handshake.func @war_unreachable(
+handshake.func @war_unreachable(%arg0: memref<8xi32>, %arg1: !handshake.control<>, %arg2: !handshake.control<>, ...) -> (!handshake.control<>, !handshake.control<>) attributes {argNames = ["a", "a_start", "start"], resNames = ["a_end", "end"]} {
+  %0:2 = lsq[%arg0 : memref<8xi32>] (%arg1, %result, %addressResult, %result_0, %addressResult_1, %dataResult_2, %arg2)  {groupSizes = [1 : i32, 1 : i32], handshake.name = "lsq0"} : (!handshake.control<>, !handshake.control<>, !handshake.channel<i32>, !handshake.control<>, !handshake.channel<i32>, !handshake.channel<i32>, !handshake.control<>) -> (!handshake.channel<i32>, !handshake.control<>)
+  %1:2 = fork [2] %arg2 {handshake.bb = 0 : ui32, handshake.name = "fork0"} : <>
+  %2 = constant %arg2 {handshake.bb = 0 : ui32, handshake.name = "constant0", value = 3 : i32} : <>, <i32>
+  %3:2 = fork [2] %2 {handshake.bb = 0 : ui32, handshake.name = "fork1"} : <i32>
+  %4 = br %1#0 {handshake.bb = 0 : ui32, handshake.name = "br0"} : <>
+  %5 = br %1#1 {handshake.bb = 0 : ui32, handshake.name = "br1"} : <>
+  %6 = br %3#0 {handshake.bb = 0 : ui32, handshake.name = "br2"} : <i32>
+  %7 = br %3#1 {handshake.bb = 0 : ui32, handshake.name = "br3"} : <i32>
+  %result, %index = control_merge [%4]  {handshake.bb = 1 : ui32, handshake.name = "control_merge0"} : [<>] to <>, <i1>
+  // CHECK: load
+  // CHECK-SAME: #handshake<deps[{
+  // CHECK-SAME: dstAccess : "store0"
+  // CHECK-SAME: isActive : true
+  // CHECK-SAME: }]
+  %addressResult, %dataResult = load[%6] %0#0 {handshake.bb = 1 : ui32, handshake.deps = #handshake<deps[{dstAccess : "store0", loopDepth : 0, distance : 0, isActive : true}]>, handshake.name = "load0"} : <i32>, <i32>, <i32>, <i32>
+  %8 = br %result {handshake.bb = 1 : ui32, handshake.name = "br4"} : <>
+  %result_0, %index_3 = control_merge [%5]  {handshake.bb = 2 : ui32, handshake.name = "control_merge1"} : [<>] to <>, <i1>
+  %9 = constant %result_0 {handshake.bb = 2 : ui32, handshake.name = "constant1", value = 1 : i32} : <>, <i32>
+  %addressResult_1, %dataResult_2 = store[%7] %9 {handshake.bb = 2 : ui32, handshake.name = "store0"} : <i32>, <i32>, <i32>, <i32>
+  %10 = br %result_0 {handshake.bb = 2 : ui32, handshake.name = "br5"} : <>
+  %11 = join %8, %10 {handshake.bb = 3 : ui32, handshake.name = "join0"} : <>
+  %result_4, %index_5 = control_merge [%11]  {handshake.bb = 3 : ui32, handshake.name = "control_merge2"} : [<>] to <>, <i1>
+  end {handshake.bb = 3 : ui32, handshake.name = "end0"} %0#1, %result_4 : <>, <>
+}
