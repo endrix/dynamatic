@@ -14,36 +14,54 @@ function without the attribute, so every existing flow is untouched.
 ## The analysis
 
 `--cf-detect-parallel-regions` writes the attribute. It runs at the cf
-level, after `mark-memory-interfaces`, where a function is a graph of
-blocks and its top-level loop nests are the natural regions: a nest starts
-when its header is entered and is done when its exiting block leaves. A
-nest is a candidate when one block enters it, one block leaves it, and to
-one place. Consecutive candidates, the second entered from the first's
-exiting block, are grouped while each new one is independent of every nest
-already in the group:
+level, after `mark-memory-interfaces`, where a function's top level is a
+chain: a loop nest, a block or two of straight-line code, another nest,
+and so on. A chain starts at a top-level loop with one entry, one exiting
+block and one exit, and continues at its exit through such loops and
+single-successor blocks until something else ends it, which is the block
+the regions lead to; the block that enters the first loop is where they
+start. A function may hold several chains.
 
-- no value the earlier nest computes reaches the later one, whether
-  through the branch into its header or by direct use from the exiting
-  block (dominance allows it). A constant does not count, nor does a block
-  argument the earlier nest only carries around unchanged, back to a free
-  origin: the lowering re-makes constants and the later pass re-sources
-  such values from the entry;
-- no recorded memory dependence (`handshake.deps`) connects an access of
+The straight-line blocks join the loop after them (they are its preamble:
+the next loop's constants, a lookahead's first reads), so every unit of
+the chain holds a loop. Two units are dependent when:
+
+- a value one computes reaches the other, through the branch into its
+  first block or by direct use (dominance allows it). A constant does not
+  count, nor does a block argument the unit only carries around unchanged,
+  back to a free origin: the lowering re-makes constants and the later
+  pass re-sources such values from the entry. A value handed to a block
+  argument nothing reads carries nothing;
+- a recorded memory dependence (`handshake.deps`) connects an access of
   one to an access of the other;
-- of the memory both touch (function arguments and allocations are
-  distinct memories; anything else is unknown), a memory both only read is
-  free, and a memory one of them writes is free only when every access to
-  it goes to a memory controller, which executes accesses in arrival
-  order. That is the same trust in the dependence analysis that
-  `mark-memory-interfaces` shows when it sends an access to a controller.
-  An LSQ would have to serve both nests, which it cannot;
-- neither nest holds an operation with memory behaviour other than a load
-  or a store of a memref.
+- they touch a common memory (function arguments and allocations are
+  distinct memories; anything else is unknown) that one of them writes,
+  unless every access to it goes to a memory controller, which executes
+  accesses in arrival order. That is the same trust in the dependence
+  analysis that `mark-memory-interfaces` shows when it sends an access to
+  a controller. An LSQ would have to serve both units, which it cannot;
+- an effect one declares on a value that is not a memref (a port, in
+  streamblocks) meets an effect of the other on the same value, and one of
+  them writes. Effects on different values are independent. An operation
+  with an effect on nothing in particular makes its unit opaque, and
+  nothing runs beside it. An allocation counts as nothing.
 
-Each group of two or more nests becomes one entry of the attribute, in the
-block ids the lowering will assign (position in the function), and a
-remark names it. On `mvt_float`'s cf IR the pass finds `[1, 2, 3] [4, 5,
-6] between blocks 0 and 7`, and the lowering forwards the attribute.
+Regions are made within a range of consecutive units: everything before
+the range is done when it starts, so only dependences inside the range
+order anything. Within a range, dependent units merge into one region with
+everything between them, and what is left is a run of regions no two of
+which share a dependence. A unit that depends only on the last region
+joins it. One that depends on an earlier region ends the range: the range
+becomes a group when it holds two regions or more; when it holds one, a
+new range starts right after the last unit the newcomer depends on, so
+that the tail can still pair with it.
+
+Each group becomes one entry of the attribute, in the block ids the
+lowering will assign (position in the function), and a remark names it.
+On `mvt_float`'s cf IR the pass finds `[1, 2, 3] [4, 5, 6] between blocks
+0 and 7`; on streamblocks' two-lane relay, whose action is a pop loop into
+a buffer and a push loop out of it per lane, `[1, 2, 3, 4, 5] [6, 7, 8, 9,
+10, 11] between blocks 0 and 12`, the two lanes.
 
 ## The attribute
 

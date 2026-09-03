@@ -1,5 +1,4 @@
-//===- CfDetectParallelRegions.cpp - Find regions that may run at once -*- C++
-//-*-===//
+//===- CfDetectParallelRegions.cpp - Find regions that may run at once ----===//
 //
 // Dynamatic is under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -9,14 +8,16 @@
 //
 // Implements the --cf-detect-parallel-regions pass.
 //
-// At the cf level a function is a graph of blocks, and its loops are the
-// natural regions: a top-level loop nest starts when its header is entered
-// and is done when its exiting block leaves. Consecutive nests that share no
-// value and no ordered memory access could start together; the sequential
-// lowering nevertheless chains them. This pass finds such runs of nests and
-// records them in the function's `handshake.parallel_regions` attribute, in
-// the block ids the lowering will assign (position in the function), for
-// --handshake-parallelize-regions to act on after the lowering.
+// At the cf level a function's top level is, in the common case, a chain: a
+// loop nest, a block or two of straight-line code, another nest, and so on
+// to the return. Every element of that chain is done before the next one
+// starts, whether or not the next one needs anything from it. This pass
+// walks the chain, records what each element touches, merges the elements
+// that must stay in order into one region, and records the resulting runs of
+// regions -- independent of one another by construction -- in the function's
+// `handshake.parallel_regions` attribute, in the block ids the lowering will
+// assign (position in the function), for --handshake-parallelize-regions to
+// act on after the lowering.
 //
 //===----------------------------------------------------------------------===//
 
@@ -34,7 +35,11 @@
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/Debug.h"
+
+#define DEBUG_TYPE "cf-detect-parallel-regions"
 
 using namespace mlir;
 using namespace dynamatic;
@@ -50,7 +55,7 @@ static constexpr llvm::StringLiteral REGIONS_ATTR("handshake.parallel_regions");
 
 namespace {
 
-/// An access inside a loop: a memref load or store, or any other effect an
+/// An access inside a segment: a memref load or store, or any other effect an
 /// operation declares on a value (a read or write of a port, say), with the
 /// resource it is on. Effects on the default resource are memory.
 struct Access {
@@ -60,21 +65,29 @@ struct Access {
   SideEffects::Resource *resource;
 };
 
-/// A top-level loop that has the shape a region needs: one block enters it,
-/// one block leaves it, to one place.
-struct Candidate {
-  CFGLoop *loop;
-  Block *pred;
-  Block *exiting;
-  Block *exit;
+/// One element of a chain: a loop nest with the shape a region needs (one
+/// block enters it, one block leaves it, to one place), or a straight-line
+/// block between two of them.
+struct Segment {
+  /// The loop, or null for a straight-line block.
+  CFGLoop *loop = nullptr;
+  /// The blocks, in program order.
+  SmallVector<Block *> blocks;
+  /// Where the chain continues after this segment.
+  Block *next = nullptr;
   SmallVector<Access> accesses;
-  /// The effect-free straight-line blocks between the previous loop and this
-  /// one, which its region absorbs.
-  SmallVector<Block *> before;
-  /// True when the loop holds an operation with an effect it does not tie to
-  /// a value (a call, say); nothing runs beside it.
+  /// True when the segment holds an operation with an effect it does not tie
+  /// to a value (a call, say); nothing runs beside it.
   bool opaque = false;
+
+  bool contains(Block *block) const {
+    return llvm::is_contained(blocks, block);
+  }
+  /// The block the segment leaves from.
+  Block *last() const { return loop ? loop->getExitingBlock() : blocks.back(); }
 };
+
+using BlockIndex = llvm::DenseMap<Block *, unsigned>;
 
 struct CfDetectParallelRegionsPass
     : public dynamatic::impl::CfDetectParallelRegionsBase<
@@ -89,20 +102,20 @@ private:
 
 } // namespace
 
-/// Whether the value is a block argument of, or produced inside, the loop.
-static bool definedIn(Value val, CFGLoop *loop) {
+/// Whether the value is a block argument of, or produced inside, the segment.
+static bool definedIn(Value val, const Segment &seg) {
   if (auto arg = dyn_cast<BlockArgument>(val))
-    return loop->contains(arg.getOwner());
-  return loop->contains(val.getDefiningOp()->getBlock());
+    return seg.contains(arg.getOwner());
+  return seg.contains(val.getDefiningOp()->getBlock());
 }
 
-/// Whether a value that leaves `loop` costs the next region nothing: a
+/// Whether a value that leaves `seg` costs the next region nothing: a
 /// constant, which the lowering re-makes wherever it is needed, or a block
-/// argument the loop only carries around unchanged, whose origin is itself
-/// free. Anything computed inside the loop is a live-out.
-static bool isFreeToLeave(Value val, CFGLoop *loop,
+/// argument the segment only carries around unchanged, whose origin is itself
+/// free. Anything computed inside the segment is a live-out.
+static bool isFreeToLeave(Value val, const Segment &seg,
                           SmallPtrSetImpl<Value> &visiting) {
-  if (!definedIn(val, loop))
+  if (!definedIn(val, seg))
     return true;
   if (Operation *def = val.getDefiningOp())
     return isa<arith::ConstantOp>(def);
@@ -124,7 +137,7 @@ static bool isFreeToLeave(Value val, CFGLoop *loop,
         return false;
       if (incoming == val)
         continue;
-      if (!isFreeToLeave(incoming, loop, visiting))
+      if (!isFreeToLeave(incoming, seg, visiting))
         return false;
     }
   }
@@ -133,18 +146,18 @@ static bool isFreeToLeave(Value val, CFGLoop *loop,
 
 /// Whether `later` uses a value `earlier` computes, other than through the
 /// forms isFreeToLeave admits.
-static bool hasLiveOut(const Candidate &earlier, const Candidate &later) {
+static bool hasLiveOut(const Segment &earlier, const Segment &later) {
   SmallPtrSet<Value, 8> visiting;
   auto crosses = [&](Value val) {
-    if (!definedIn(val, earlier.loop))
+    if (!definedIn(val, earlier))
       return false;
     visiting.clear();
-    return !isFreeToLeave(val, earlier.loop, visiting);
+    return !isFreeToLeave(val, earlier, visiting);
   };
-  for (Block *block : later.loop->getBlocks()) {
-    // Values branched into this block from the earlier loop.
+  for (Block *block : later.blocks) {
+    // Values branched into this block from the earlier segment.
     for (Block *pred : block->getPredecessors()) {
-      if (!earlier.loop->contains(pred))
+      if (!earlier.contains(pred))
         continue;
       auto branch = dyn_cast<BranchOpInterface>(pred->getTerminator());
       if (!branch)
@@ -199,13 +212,15 @@ static bool dependsOn(Operation *src, Operation *dst, NameAnalysis &names) {
   });
 }
 
-/// Whether the two loops' memory accesses may interleave. A recorded
-/// dependence orders them. Two memories are free of each other. One memory
-/// both only read is free. One memory one of them writes is free only when
-/// every access to it goes to a memory controller, which executes them in
-/// arrival order -- the same trust in the dependence analysis that sent
-/// them there; an LSQ would have to serve both loops, which it cannot.
-static bool memoryIndependent(const Candidate &a, const Candidate &b,
+/// Whether the two segments' accesses may interleave. A recorded dependence
+/// orders them. Two memories are free of each other. One memory both only
+/// read is free. One memory one of them writes is free only when every
+/// access to it goes to a memory controller, which executes them in arrival
+/// order -- the same trust in the dependence analysis that sent them there;
+/// an LSQ would have to serve both segments, which it cannot. An effect on
+/// another resource is tied to the value it names (a port): two values are
+/// two things, one value is one.
+static bool memoryIndependent(const Segment &a, const Segment &b,
                               NameAnalysis &names) {
   if (a.opaque || b.opaque)
     return false;
@@ -218,8 +233,6 @@ static bool memoryIndependent(const Candidate &a, const Candidate &b,
       if (!x.isStore && !y.isStore)
         continue;
       if (x.resource != SideEffects::DefaultResource::get()) {
-        // An effect on another resource is tied to the value it names (a
-        // port): two values are two things, one value is one.
         if (x.memref != y.memref)
           continue;
         return false;
@@ -236,23 +249,25 @@ static bool memoryIndependent(const Candidate &a, const Candidate &b,
 }
 
 /// Records what an operation touches: memref loads and stores, then every
-/// effect it declares on a value; an effect on nothing in particular makes
-/// the loop opaque.
-static void collectAccesses(Operation &op, Candidate &cand) {
+/// effect it declares on a value. An allocation makes a memory nobody else
+/// has yet and counts as nothing. An effect on nothing in particular makes
+/// the segment opaque.
+static void collectAccesses(Operation &op, Segment &seg) {
   SideEffects::Resource *memory = SideEffects::DefaultResource::get();
   if (auto load = dyn_cast<memref::LoadOp>(op)) {
-    cand.accesses.push_back({&op, load.getMemRef(), false, memory});
+    seg.accesses.push_back({&op, load.getMemRef(), false, memory});
     return;
   }
   if (auto store = dyn_cast<memref::StoreOp>(op)) {
-    cand.accesses.push_back({&op, store.getMemRef(), true, memory});
+    seg.accesses.push_back({&op, store.getMemRef(), true, memory});
     return;
   }
-  if (op.hasTrait<OpTrait::IsTerminator>() || isMemoryEffectFree(&op))
+  if (op.hasTrait<OpTrait::IsTerminator>() || isMemoryEffectFree(&op) ||
+      isa<memref::AllocOp, memref::AllocaOp>(op))
     return;
   auto iface = dyn_cast<MemoryEffectOpInterface>(op);
   if (!iface) {
-    cand.opaque = true;
+    seg.opaque = true;
     return;
   }
   SmallVector<MemoryEffects::EffectInstance> effects;
@@ -260,30 +275,160 @@ static void collectAccesses(Operation &op, Candidate &cand) {
   for (MemoryEffects::EffectInstance &effect : effects) {
     Value value = effect.getValue();
     if (!value) {
-      cand.opaque = true;
+      seg.opaque = true;
       return;
     }
     bool isWrite = isa<MemoryEffects::Write>(effect.getEffect());
-    cand.accesses.push_back({&op, value, isWrite, effect.getResource()});
+    seg.accesses.push_back({&op, value, isWrite, effect.getResource()});
   }
 }
 
-/// Whether a block outside every loop is a straight line with nothing that
-/// touches memory: what scf-to-cf leaves between two loops (the next loop's
-/// constants), which a region may absorb.
-static bool isFreeStraightBlock(Block *block, CFGLoopInfo &loopInfo) {
-  if (loopInfo.getLoopFor(block) || block->getNumSuccessors() != 1)
-    return false;
-  for (Operation &op : *block)
-    if (!op.hasTrait<OpTrait::IsTerminator>() && !isMemoryEffectFree(&op))
-      return false;
-  return true;
-}
+/// Groups one chain. First the straight-line blocks join the loop that
+/// follows them (they are its preamble more often than not: the next loop's
+/// constants, a lookahead's first reads), or the loop before them when they
+/// end the chain, so that every unit holds a loop. Then regions are made
+/// within a RANGE of consecutive units: everything before the range is done
+/// when it starts, so only dependences inside the range order anything.
+/// Within a range, units that must stay in order merge into one region with
+/// everything between them, and what is left is a run of regions no two of
+/// which share a dependence. A unit that depends only on the last region
+/// joins it. One that depends on an earlier region ends the range: the range
+/// so far becomes a group when it holds two regions or more; when it holds
+/// one, a new range starts right after the last unit the newcomer depends
+/// on, so that the tail can still pair with it.
+static void groupChain(func::FuncOp funcOp, BlockIndex &index,
+                       NameAnalysis &names, Block *entry,
+                       SmallVectorImpl<Segment> &segments, Block *successor,
+                       SmallVectorImpl<Attribute> &groups) {
+  SmallVector<Segment> units;
+  SmallVector<Segment> pending;
+  auto absorb = [](Segment &into, Segment &block, bool before) {
+    if (before)
+      into.blocks.insert(into.blocks.begin(), block.blocks.begin(),
+                         block.blocks.end());
+    else
+      into.blocks.append(block.blocks.begin(), block.blocks.end());
+    into.accesses.append(block.accesses.begin(), block.accesses.end());
+    into.opaque |= block.opaque;
+  };
+  for (Segment &seg : segments) {
+    if (!seg.loop) {
+      pending.push_back(std::move(seg));
+      continue;
+    }
+    for (Segment &block : llvm::reverse(pending))
+      absorb(seg, block, /*before=*/true);
+    pending.clear();
+    units.push_back(std::move(seg));
+  }
+  if (units.empty())
+    return;
+  for (Segment &block : pending)
+    absorb(units.back(), block, /*before=*/false);
+  unsigned n = units.size();
+  if (n < 2)
+    return;
 
-static bool independent(const Candidate &earlier, const Candidate &later,
-                        NameAnalysis &names) {
-  return !hasLiveOut(earlier, later) &&
-         memoryIndependent(earlier, later, names);
+  // Dependences, once.
+  SmallVector<SmallVector<bool>> dep(n, SmallVector<bool>(n, false));
+  for (unsigned i = 0; i < n; ++i) {
+    for (unsigned j = i + 1; j < n; ++j) {
+      bool liveOut = hasLiveOut(units[i], units[j]);
+      bool memory = memoryIndependent(units[i], units[j], names);
+      LLVM_DEBUG(llvm::dbgs()
+                 << "units at blocks " << index[units[i].blocks.front()]
+                 << " and " << index[units[j].blocks.front()] << ": "
+                 << (liveOut ? "a live-out" : "no live-out") << ", "
+                 << (memory ? "memory independent" : "memory dependent")
+                 << "\n");
+      dep[i][j] = liveOut || !memory;
+    }
+  }
+
+  // The regions of [from, to]: every dependent pair's span merges. Fills
+  // regionOf and returns how many regions remain.
+  SmallVector<unsigned> regionOf(n);
+  auto computeRegions = [&](unsigned from, unsigned to) {
+    for (unsigned k = from; k <= to; ++k)
+      regionOf[k] = k;
+    for (unsigned i = from; i <= to; ++i)
+      for (unsigned j = i + 1; j <= to; ++j)
+        if (dep[i][j])
+          for (unsigned k = i; k <= j; ++k)
+            regionOf[k] = regionOf[i];
+    unsigned count = 0;
+    for (unsigned k = from; k <= to; ++k)
+      count += (k == from || regionOf[k] != regionOf[k - 1]);
+    return count;
+  };
+
+  OpBuilder builder(funcOp.getContext());
+  auto closeRange = [&](unsigned from, unsigned to) {
+    if (computeRegions(from, to) < 2)
+      return;
+    SmallVector<Attribute> regions;
+    std::string blocksText;
+    for (unsigned i = from; i <= to;) {
+      SmallVector<int64_t> ids;
+      unsigned j = i;
+      while (j <= to && regionOf[j] == regionOf[i]) {
+        for (Block *block : units[j].blocks)
+          ids.push_back(index[block]);
+        ++j;
+      }
+      llvm::sort(ids);
+      regions.push_back(builder.getI64ArrayAttr(ids));
+      blocksText += (blocksText.empty() ? "[" : " [");
+      for (auto [k, id] : llvm::enumerate(ids))
+        blocksText += (k ? ", " : "") + std::to_string(id);
+      blocksText += "]";
+      i = j;
+    }
+    // The block whose control enters the first region: the chain's entry, or
+    // the block the previous unit leaves from. The block the regions lead
+    // to: the next unit's first block, or where the chain ended.
+    Block *entryBlock = from > 0 ? units[from - 1].last() : entry;
+    Block *successorBlock =
+        to + 1 < n ? units[to + 1].blocks.front() : successor;
+    unsigned entryId = index[entryBlock], successorId = index[successorBlock];
+    groups.push_back(builder.getDictionaryAttr(
+        {builder.getNamedAttr("entry", builder.getUI32IntegerAttr(entryId)),
+         builder.getNamedAttr("regions", builder.getArrayAttr(regions)),
+         builder.getNamedAttr("successor",
+                              builder.getUI32IntegerAttr(successorId))}));
+    mlir::emitRemark(funcOp.getLoc())
+        << "parallel regions " << blocksText << " between blocks " << entryId
+        << " and " << successorId;
+  };
+
+  unsigned rangeStart = 0;
+  for (unsigned j = 1; j < n; ++j) {
+    std::optional<unsigned> firstDep, lastDep;
+    for (unsigned i = rangeStart; i < j; ++i) {
+      if (!dep[i][j])
+        continue;
+      if (!firstDep)
+        firstDep = i;
+      lastDep = i;
+    }
+    if (!lastDep)
+      continue;
+    unsigned regions = computeRegions(rangeStart, j - 1);
+    if (regions >= 2) {
+      // The last region's first unit.
+      unsigned lastRegion = j - 1;
+      while (lastRegion > rangeStart &&
+             regionOf[lastRegion - 1] == regionOf[j - 1])
+        --lastRegion;
+      if (*firstDep >= lastRegion)
+        continue;
+      closeRange(rangeStart, j - 1);
+      rangeStart = j;
+    } else if (*lastDep + 1 < j) {
+      rangeStart = *lastDep + 1;
+    }
+  }
+  closeRange(rangeStart, n - 1);
 }
 
 void CfDetectParallelRegionsPass::analyzeFunction(func::FuncOp funcOp) {
@@ -294,95 +439,77 @@ void CfDetectParallelRegionsPass::analyzeFunction(func::FuncOp funcOp) {
     return;
   }
   NameAnalysis &names = getAnalysis<NameAnalysis>();
-  llvm::DenseMap<Block *, unsigned> index;
+  BlockIndex index;
   for (auto [i, block] : llvm::enumerate(funcOp.getBlocks()))
     index[&block] = i;
 
   DominanceInfo domInfo(funcOp);
   CFGLoopInfo loopInfo(domInfo.getDomTree(&funcOp.getBody()));
 
-  // Top-level loops in program order, keeping those a region can be made of.
+  // A chain starts at a top-level loop with one entry, one exiting block and
+  // one exit, and continues at its exit: another such loop, or a block
+  // outside every loop with one successor, is the next segment; anything
+  // else ends the chain, and is the block its regions all lead to. The
+  // block that enters the first loop is where they start. A function may
+  // hold several chains, one after the other.
   SmallVector<CFGLoop *> loops(loopInfo.begin(), loopInfo.end());
   llvm::sort(loops, [&](CFGLoop *a, CFGLoop *b) {
     return index[a->getHeader()] < index[b->getHeader()];
   });
-  SmallVector<Candidate> candidates;
-  for (CFGLoop *loop : loops) {
-    Candidate cand{loop, loop->getLoopPredecessor(), loop->getExitingBlock(),
-                   loop->getExitBlock()};
-    if (!cand.pred || !cand.exiting || !cand.exit)
-      continue;
-    for (Block *block : loop->getBlocks())
-      for (Operation &op : *block)
-        collectAccesses(op, cand);
-    candidates.push_back(std::move(cand));
-  }
-
-  // Walk the candidates in order and grow a group while the next loop follows
-  // the last one directly and is independent of every loop already in it.
+  auto wellFormed = [](CFGLoop *loop) {
+    return loop->getLoopPredecessor() && loop->getExitingBlock() &&
+           loop->getExitBlock();
+  };
+  llvm::SmallPtrSet<Block *, 16> seen;
   SmallVector<Attribute> groups;
-  OpBuilder builder(funcOp.getContext());
-  SmallVector<const Candidate *> current;
-  auto flush = [&]() {
-    if (current.size() >= 2) {
-      SmallVector<Attribute> regions;
-      std::string blocksText;
-      for (const Candidate *cand : current) {
-        SmallVector<int64_t> ids;
-        for (Block *block : cand->before)
-          ids.push_back(index[block]);
-        for (Block *block : cand->loop->getBlocks())
-          ids.push_back(index[block]);
-        llvm::sort(ids);
-        regions.push_back(builder.getI64ArrayAttr(ids));
-        blocksText += (blocksText.empty() ? "[" : " [");
-        for (auto [i, id] : llvm::enumerate(ids))
-          blocksText += (i ? ", " : "") + std::to_string(id);
-        blocksText += "]";
-      }
-      unsigned entry = index[current.front()->pred];
-      unsigned successor = index[current.back()->exit];
-      groups.push_back(builder.getDictionaryAttr(
-          {builder.getNamedAttr("entry", builder.getUI32IntegerAttr(entry)),
-           builder.getNamedAttr("regions", builder.getArrayAttr(regions)),
-           builder.getNamedAttr("successor",
-                                builder.getUI32IntegerAttr(successor))}));
-      mlir::emitRemark(funcOp.getLoc())
-          << "parallel regions " << blocksText << " between blocks " << entry
-          << " and " << successor;
-    }
-    current.clear();
-  };
-  // The next loop follows the last one when the last one's exit block is its
-  // header, or leads to it through free straight-line blocks, which then
-  // belong to the next region.
-  auto follows = [&](const Candidate &last, Candidate &next) {
-    next.before.clear();
-    Block *block = last.exit;
-    while (block != next.loop->getHeader()) {
-      if (!isFreeStraightBlock(block, loopInfo))
-        return false;
-      next.before.push_back(block);
-      block = block->getSuccessor(0);
-    }
-    Block *expectedPred =
-        next.before.empty() ? last.exiting : next.before.back();
-    return next.pred == expectedPred;
-  };
-  for (Candidate &cand : candidates) {
-    if (!current.empty() && follows(*current.back(), cand) &&
-        llvm::all_of(current, [&](const Candidate *prev) {
-          return independent(*prev, cand, names);
-        })) {
-      current.push_back(&cand);
+  for (CFGLoop *first : loops) {
+    if (seen.contains(first->getHeader()) || !wellFormed(first))
       continue;
+    Block *entry = first->getLoopPredecessor();
+    SmallVector<Segment> segments;
+    Block *cur = first->getHeader();
+    while (cur && seen.insert(cur).second) {
+      Segment seg;
+      if (CFGLoop *loop = loopInfo.getLoopFor(cur)) {
+        if (loop->getParentLoop() || loop->getHeader() != cur ||
+            !wellFormed(loop))
+          break;
+        seg.loop = loop;
+        for (Block *block : loop->getBlocks()) {
+          seg.blocks.push_back(block);
+          seen.insert(block);
+        }
+        llvm::sort(seg.blocks,
+                   [&](Block *a, Block *b) { return index[a] < index[b]; });
+        seg.next = loop->getExitBlock();
+      } else {
+        if (cur->getNumSuccessors() != 1)
+          break;
+        seg.blocks.push_back(cur);
+        seg.next = cur->getSuccessor(0);
+      }
+      for (Block *block : seg.blocks)
+        for (Operation &op : *block)
+          collectAccesses(op, seg);
+      LLVM_DEBUG(llvm::dbgs()
+                 << (seg.loop ? "loop" : "block") << " at block "
+                 << index[seg.blocks.front()] << ": " << seg.accesses.size()
+                 << " accesses" << (seg.opaque ? ", opaque" : "") << "\n");
+      cur = seg.next;
+      segments.push_back(std::move(seg));
     }
-    flush();
-    cand.before.clear();
-    current.push_back(&cand);
+    // The chain must end somewhere its regions can all lead to: a block the
+    // walk stopped at, not one it had absorbed.
+    Block *successor = cur;
+    if (!successor || segments.size() < 2 ||
+        llvm::any_of(segments, [&](const Segment &seg) {
+          return seg.contains(successor);
+        }))
+      continue;
+    groupChain(funcOp, index, names, entry, segments, successor, groups);
   }
-  flush();
 
+  OpBuilder builder(funcOp.getContext());
   if (groups.empty())
     funcOp->removeAttr(REGIONS_ATTR);
   else
