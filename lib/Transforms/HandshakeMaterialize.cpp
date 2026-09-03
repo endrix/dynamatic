@@ -113,8 +113,16 @@ static void materializeValue(Value val, OpBuilder &builder) {
   // Insert a fork with as many results as the value has uses
   builder.setInsertionPointAfterValue(val);
   auto forkOp = handshake::ForkOp::create(builder, val.getLoc(), val, numUses);
-  if (Operation *defOp = val.getDefiningOp())
+  if (Operation *defOp = val.getDefiningOp()) {
     inheritBB(defOp, forkOp);
+  } else if (llvm::any_of(*val.getParentBlock(), [](Operation &op) {
+               return getLogicBB(&op).has_value();
+             })) {
+    // A fork of a block argument belongs to the entry block, like the
+    // argument -- in a function that has blocks at all. One without any
+    // (a circuit built by hand or by another front end) stays without.
+    inheritBBFromValue(val, forkOp);
+  }
 
   // Replace original uses of the value with the fork's results
   for (auto [user, forkRes] : llvm::zip_equal(valUsers, forkOp->getResults()))
