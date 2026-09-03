@@ -200,7 +200,7 @@ LogicalResult ExportInfo::concretizeExternalModules() {
       return success();
 
     // First generate dependencies recursively...
-    for (StringRef dep : match->component->getDependencies()) {
+    for (const std::string &dep : match->getDependencies()) {
       RTLDependencyRequest dependencyRequest(dep, request.loc);
       if (failed(concretizeComponent(dependencyRequest, nullptr)))
         return failure();

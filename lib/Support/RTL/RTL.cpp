@@ -91,8 +91,10 @@ std::string dynamatic::replaceRegexes(
 std::string dynamatic::substituteParams(StringRef input,
                                         const ParameterMappings &parameters) {
   std::map<std::string, std::string> replacements;
+  // `$NAME`, or `${NAME}` where what follows the name could be read as part
+  // of it (`${FPU_IMPL}_ip_cores`).
   for (auto &[name, value] : parameters)
-    replacements["\\$" + name.str()] = value;
+    replacements["\\$\\{?" + name.str() + "\\}?"] = value;
   return replaceRegexes(input, replacements);
 }
 
@@ -234,6 +236,13 @@ RTLMatch::RTLMatch(const RTLComponent &component,
       moduleName(substituteParams(component.moduleName, serializedParams)),
       archName(substituteParams(component.archName, serializedParams)),
       serializedParams(serializedParams) {}
+
+std::vector<std::string> RTLMatch::getDependencies() const {
+  std::vector<std::string> deps;
+  for (StringRef dep : component->getDependencies())
+    deps.push_back(substituteParams(dep, serializedParams));
+  return deps;
+}
 
 MapVector<StringRef, StringRef> RTLMatch::getGenericParameterValues() const {
   MapVector<StringRef, StringRef> values;
