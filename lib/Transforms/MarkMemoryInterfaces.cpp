@@ -169,4 +169,11 @@ void MarkMemoryInterfacesPass::markMemoryInterfaces(func::FuncOp funcOp) {
     for (auto &[lsqMemOp, groupID] : regionInterfaces.connectToLSQ)
       setDialectAttr<MemInterfaceAttr>(lsqMemOp, ctx, groupID);
   }
+
+  // Say so on the functions: a controller chosen here is one the dependence
+  // analysis vouched for, which a later pass may take at its word.
+  getOperation()->walk([&](func::FuncOp funcOp) {
+    if (!funcOp.isExternal())
+      funcOp->setAttr(MEM_INTERFACES_FROM_DEPS_ATTR, UnitAttr::get(ctx));
+  });
 }

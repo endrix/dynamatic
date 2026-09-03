@@ -36,10 +36,14 @@ the chain holds a loop. Two units are dependent when:
   one to an access of the other;
 - they touch a common memory (function arguments and allocations are
   distinct memories; anything else is unknown) that one of them writes,
-  unless every access to it goes to a memory controller, which executes
-  accesses in arrival order. That is the same trust in the dependence
-  analysis that `mark-memory-interfaces` shows when it sends an access to
-  a controller. An LSQ would have to serve both units, which it cannot;
+  unless every access to it goes to a memory controller that
+  `mark-memory-interfaces` chose from the recorded dependences (it says so
+  with `handshake.mem_interfaces_from_deps` on the function): such an
+  access is one the dependence analysis found free of every other, and
+  the controller executes accesses in arrival order. A controller that
+  `force-memory-interface` put there says nothing, and the memory keeps
+  the units in order. An LSQ would have to serve both units, which it
+  cannot;
 - an effect one declares on a value that is not a memref (a port, in
   streamblocks) meets an effect of the other on the same value, and one of
   them writes. Effects on different values are independent. An operation
