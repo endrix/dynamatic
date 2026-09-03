@@ -6,13 +6,13 @@ on:
   pull_request:
     paths-ignore:
       - 'docs/**'
-    branches: ["main"]
+    branches: ["streamblocks"]
     types: [opened, synchronize, reopened, ready_for_review]
   
   push:
     paths-ignore:
       - 'docs/**'
-    branches: ["main"]
+    branches: ["streamblocks"]
 
 # Cancel previous CI builds when a new push occurs to the same PR.
 concurrency:
