@@ -1,4 +1,5 @@
-//===- CfDetectParallelRegions.cpp - Find regions that may run at once -*- C++ -*-===//
+//===- CfDetectParallelRegions.cpp - Find regions that may run at once -*- C++
+//-*-===//
 //
 // Dynamatic is under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -142,8 +143,8 @@ static bool hasLiveOut(const Candidate &earlier, const Candidate &later) {
       auto branch = dyn_cast<BranchOpInterface>(pred->getTerminator());
       if (!branch)
         return true;
-      for (unsigned i = 0, e = pred->getTerminator()->getNumSuccessors();
-           i < e; ++i) {
+      for (unsigned i = 0, e = pred->getTerminator()->getNumSuccessors(); i < e;
+           ++i) {
         if (pred->getTerminator()->getSuccessor(i) != block)
           continue;
         for (Value val : branch.getSuccessorOperands(i).getForwardedOperands())
@@ -251,7 +252,8 @@ void CfDetectParallelRegionsPass::analyzeFunction(func::FuncOp funcOp) {
           cand.accesses.push_back({&op, load.getMemRef(), false});
         else if (auto store = dyn_cast<memref::StoreOp>(op))
           cand.accesses.push_back({&op, store.getMemRef(), true});
-        else if (!isMemoryEffectFree(&op) && !op.hasTrait<OpTrait::IsTerminator>())
+        else if (!isMemoryEffectFree(&op) &&
+                 !op.hasTrait<OpTrait::IsTerminator>())
           cand.opaque = true;
       }
     }

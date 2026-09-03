@@ -1,4 +1,5 @@
-//===- HandshakeParallelizeRegions.cpp - Run regions concurrently -*- C++ -*-===//
+//===- HandshakeParallelizeRegions.cpp - Run regions concurrently -*- C++
+//-*-===//
 //
 // Dynamatic is under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -264,8 +265,7 @@ LogicalResult HandshakeParallelizeRegionsPass::parallelize(
                               "'s control reaches region " + Twine(i) +
                               " outside its control merge");
               if (serialCtrl[i])
-                return refuse("region " + Twine(src.region) +
-                              " has two exits");
+                return refuse("region " + Twine(src.region) + " has two exits");
               serialCtrl[i] = val;
               serialMerge[i] = cast<ControlMergeOp>(op);
               serialOperand[i] = opd.getOperandNumber();
@@ -286,8 +286,7 @@ LogicalResult HandshakeParallelizeRegionsPass::parallelize(
             return refuse("the successor block feeds region " + Twine(i) +
                           ", the group sits inside a loop");
           case Place::OUTSIDE:
-            return refuse("a block outside the group feeds region " +
-                          Twine(i));
+            return refuse("a block outside the group feeds region " + Twine(i));
           case Place::NONE:
             break;
           }
@@ -311,8 +310,7 @@ LogicalResult HandshakeParallelizeRegionsPass::parallelize(
           return op->emitError()
                  << "cannot run the regions of '" << REGIONS_ATTR
                  << "' in parallel: a value of region "
-                 << placeOf(bb, places).region
-                 << " is used outside the group";
+                 << placeOf(bb, places).region << " is used outside the group";
       }
     }
   }
@@ -322,9 +320,8 @@ LogicalResult HandshakeParallelizeRegionsPass::parallelize(
                                << " into the first region's control merge";
   for (unsigned i = 1; i < n; ++i) {
     if (!serialCtrl[i])
-      return funcOp->emitError()
-             << "no control edge from region " << i - 1 << " into region "
-             << i << "'s control merge";
+      return funcOp->emitError() << "no control edge from region " << i - 1
+                                 << " into region " << i << "'s control merge";
   }
   if (!succCtrl)
     return funcOp->emitError()
@@ -359,15 +356,16 @@ LogicalResult HandshakeParallelizeRegionsPass::parallelize(
         StringRef dstName = dep.getDstAccess();
         Operation *dstOp = names.getOp(dstName);
         if (!dstOp)
-          return op->emitError() << "memory dependence names an unknown access '"
-                                 << dstName << "'";
+          return op->emitError()
+                 << "memory dependence names an unknown access '" << dstName
+                 << "'";
         std::optional<unsigned> dstRegion = regionOf(dstOp);
         if (dstRegion && *dstRegion != *region)
           return op->emitError()
                  << "cannot run the regions of '" << REGIONS_ATTR
                  << "' in parallel: a memory dependence with '" << dstName
-                 << "' crosses from region " << *region
-                 << " to region " << *dstRegion;
+                 << "' crosses from region " << *region << " to region "
+                 << *dstRegion;
       }
     }
   }
@@ -383,10 +381,9 @@ LogicalResult HandshakeParallelizeRegionsPass::parallelize(
       if (!region)
         continue;
       if (seen && *seen != *region)
-        return lsq->emitError()
-               << "cannot run the regions of '" << REGIONS_ATTR
-               << "' in parallel: this LSQ serves both region " << *seen
-               << " and region " << *region;
+        return lsq->emitError() << "cannot run the regions of '" << REGIONS_ATTR
+                                << "' in parallel: this LSQ serves both region "
+                                << *seen << " and region " << *region;
       seen = region;
     }
   }
@@ -455,8 +452,7 @@ LogicalResult HandshakeParallelizeRegionsPass::parallelize(
       return def->emitError()
              << "cannot run the regions of '" << REGIONS_ATTR
              << "' in parallel: region " << from
-             << " computes this value and region " << from + 1
-             << " uses it";
+             << " computes this value and region " << from + 1 << " uses it";
     }
   };
 
@@ -488,8 +484,8 @@ LogicalResult HandshakeParallelizeRegionsPass::parallelize(
   for (unsigned i = 1; i < n; ++i)
     serialMerge[i]->setOperand(serialOperand[i], entryCtrl);
   builder.setInsertionPoint(succMerge);
-  auto join = JoinOp::create(builder, succMerge.getLoc(), succCtrl.getType(),
-                             exitCtrl);
+  auto join =
+      JoinOp::create(builder, succMerge.getLoc(), succCtrl.getType(), exitCtrl);
   setBB(join, group.successor);
   succMerge->setOperand(succOperand, join.getResult());
 
