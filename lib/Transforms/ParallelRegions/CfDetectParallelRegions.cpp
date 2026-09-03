@@ -220,6 +220,12 @@ static bool independent(const Candidate &earlier, const Candidate &later,
 }
 
 void CfDetectParallelRegionsPass::analyzeFunction(func::FuncOp funcOp) {
+  // A function of one block has no loops, and dominance has nothing to say
+  // about it (and asserts if asked).
+  if (funcOp.getBody().hasOneBlock()) {
+    funcOp->removeAttr(REGIONS_ATTR);
+    return;
+  }
   NameAnalysis &names = getAnalysis<NameAnalysis>();
   llvm::DenseMap<Block *, unsigned> index;
   for (auto [i, block] : llvm::enumerate(funcOp.getBlocks()))

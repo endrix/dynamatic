@@ -187,3 +187,14 @@ func.func @three(%a: memref<8xi32>, %x1: memref<8xi32>, %x2: memref<8xi32>, %x3:
 ^bb4:
   return {handshake.name = "return0"}
 }
+
+// -----
+
+// One block, no loops: nothing to find, and nothing to trip over.
+// CHECK-LABEL:   func.func @one_block(
+// CHECK-NOT:       handshake.parallel_regions
+func.func @one_block(%a: memref<1xi32>) -> i32 {
+  %c0 = arith.constant {handshake.name = "c0"} 0 : index
+  %v = memref.load %a[%c0] {handshake.mem_interface = #handshake.mem_interface<MC>, handshake.name = "load0"} : memref<1xi32>
+  return {handshake.name = "return0"} %v : i32
+}
