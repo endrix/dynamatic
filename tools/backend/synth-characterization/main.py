@@ -72,7 +72,7 @@ def get_dependency_dict(dataflow_units):
     return dependency_dict
 
 
-def run_characterization(json_input, json_output, dynamatic_dir, synth_tool, clock_period):
+def run_characterization(json_input, json_output, dynamatic_dir, synth_tool, clock_period, reference_json):
     """
     Run characterization of dataflow units based on the provided JSON input.
     
@@ -80,7 +80,9 @@ def run_characterization(json_input, json_output, dynamatic_dir, synth_tool, clo
         json_input (str): Path to the input JSON file containing dataflow unit RTL information.
         json_output (str): Path to the output JSON file where characterization results will be saved.
         dynamatic_dir (str): Path to the DYNAMATIC home directory.
-        synth_tool (str): Synthesis tool to use for characterization (e.g., 'vivado').
+        synth_tool (str): Synthesis tool to use for characterization ('vivado' or 'asap7').
+        clock_period (float): Clock period in nanoseconds to synthesize against.
+        reference_json (str): Timing model to take latency tables from, or None.
     """
     # Load the input JSON file
     with open(json_input, 'r') as f:
@@ -144,7 +146,7 @@ def run_characterization(json_input, json_output, dynamatic_dir, synth_tool, clo
         map_unit_to_list_unit_chars[unit_name] = list_unit_chars
     
     # Save the results to the output JSON file
-    extract_rpt_data(map_unit_to_list_unit_chars, json_output)
+    extract_rpt_data(map_unit_to_list_unit_chars, json_output, synth_tool, reference_json)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run characterization of dataflow units")
@@ -170,7 +172,13 @@ if __name__ == "__main__":
         "--synth-tool",
         type=str,
         default="vivado",
-        help="Synthesis tool to use for characterization (default: vivado)",
+        help="Synthesis tool to use for characterization: the command that runs Vivado, or 'asap7' for the yosys + OpenSTA flow on the ASAP7 standard-cell library (default: vivado)",
+    )
+    parser.add_argument(
+        "--reference-json",
+        type=str,
+        default=None,
+        help="Timing model to carry latency tables over from, since this script measures delays only (if unspecified, $DYNAMATIC_DIR/data/components.json)",
     )
     parser.add_argument(
         "--clock-period",
@@ -184,6 +192,9 @@ if __name__ == "__main__":
     dynamatic_dir = args.dynamatic_dir
     synth_tool = args.synth_tool
     clock_period = args.clock_period
+    reference_json = args.reference_json
     if not json_input:
         json_input = f"{dynamatic_dir}/data/rtl-config-vhdl-vivado.json"
-    run_characterization(json_input, json_output, dynamatic_dir, synth_tool, clock_period)
+    if not reference_json:
+        reference_json = f"{dynamatic_dir}/data/components.json"
+    run_characterization(json_input, json_output, dynamatic_dir, synth_tool, clock_period, reference_json)

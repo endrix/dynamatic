@@ -3,6 +3,7 @@ import os
 import re
 from itertools import product
 from utils import parameters_ranges, VhdlInterfaceInfo, UnitCharacterization
+from asap7_backend import is_asap7
 from typing import List, Tuple
 
 def extract_generics_ports(vhdl_code, entity_name):
@@ -154,9 +155,11 @@ def run_unit_characterization(unit_name, list_params, hdl_out_dir, synth_tool, t
     top_entity_name, vhdl_interface_info = extract_generics_ports(vhdl_code, unit_name)
     # Extract the template for the top file
     wrapper_top, top_entity_name = generate_wrapper_top(top_entity_name, vhdl_interface_info, param_names)
-    # Create sdc constraints file
+    # Create sdc constraints file (Vivado reads it; the ASAP7 backend is given
+    # the period directly and writes its own constraints)
     sdc_file = f"{tcl_dir}/period.sdc"
-    write_sdc_constraints(sdc_file, clock_period)  # Set a default period of 4 ns
+    if not is_asap7(synth_tool):
+        write_sdc_constraints(sdc_file, clock_period)
     # Create a top file for each combination of parameters and the corresponding tcl file
     list_tcls = []
     # List to hold objects of UnitCharacterization
@@ -172,7 +175,7 @@ def run_unit_characterization(unit_name, list_params, hdl_out_dir, synth_tool, t
             f.write(wrapper_top_combined)
         unit_char_obj = UnitCharacterization(unit_name, top_entity_name, dict(zip(param_names, combination)), [top_file] + hdl_files, vhdl_interface_info, id)
         # Write the tcl file for synthesis
-        list_tcls.append(unit_char_obj.generate_tcl(tcl_dir, rpt_dir, sdc_file))
+        list_tcls.append(unit_char_obj.generate_tcl(tcl_dir, rpt_dir, sdc_file, synth_tool, clock_period))
         id += 1
         unit_characterization_list.append(unit_char_obj)
 

@@ -97,6 +97,105 @@ The delay information can be computed using a [characterization script](https://
 
 The latest version of these delays has been computed using Vivado 2019.1.
 
+## Characterizing for ASAP7
+
+`data/components.json` is a Kintex-7 model: Vivado numbers, out-of-context
+place and route. `data/components-asap7.json` is the same units measured on the
+ASAP7 standard-cell library, so that the buffer placer can be run against a
+standard-cell target instead of an FPGA. The characterization script takes a
+second backend for it:
+
+```sh
+export PATH="$YOSYS/bin:$GHDL/bin:$OPENSTA/bin:$PATH"
+export GHDL_PREFIX="$GHDL/lib/ghdl"     # the GHDL plugin for yosys needs it
+export ASAP7_DIR=/path/to/asap7         # the five RVT TT liberty files
+
+cd "$DYNAMATIC/tools/backend/synth-characterization"
+python3 main.py --synth-tool asap7 \
+  --dynamatic-dir "$DYNAMATIC" \
+  --json-input "$DYNAMATIC/data/rtl-config-vhdl-vivado.json" \
+  --json-output "$DYNAMATIC/data/components-asap7.json" \
+  --clock-period 1.0
+```
+
+`--synth-tool asap7` swaps the Vivado backend for one that, per unit and per
+bitwidth, maps the generated top with yosys (VHDL read through the GHDL plugin)
+and then asks OpenSTA for the largest combinational delay between each
+(input port, output port) pair the Vivado backend would have asked Vivado
+about. `--clock-period` is what ABC maps toward and what OpenSTA's clock is set
+to; the whole set is a couple of minutes on a multi-core machine.
+
+### What the numbers mean
+
+The mapping recipe lives in `tools/backend/asap7-lib.sh` and is the same one
+`tools/backend/report-timing.sh` uses to time a whole exported design: the five
+ASAP7 RVT typical-corner liberty files, the cells OpenROAD's flow scripts keep
+out of ASAP7 designs, yosys' constrained-liberty ABC script with fan-out
+buffering and gate sizing, a `BUFx2_ASAP7_75t_R` driving every input and a
+3.898 fF load on every output, and reset as a false path. A unit's delay and a
+design's critical path therefore come out of one flow and can be compared.
+
+They are **post-synthesis** numbers. There is no placement, so there are no
+wire delays, and they are optimistic in the same way `report-timing.sh`'s are.
+The corner is typical. The Vivado numbers they sit next to are the opposite
+kind of measurement -- post-route, out of context -- and carry about 1.1 ns of
+routing and boundary delay in every unit, which is why even a 1-bit `andi`
+costs 1.117 ns there and 0.015 ns here. Do not read the ratio as a technology
+speedup.
+
+ASAP7's liberty files declare their time unit as picoseconds, so OpenSTA
+reports picoseconds; the model is in nanoseconds, and the report parser divides
+by 1000.
+
+A pair with no combinational path between its ports -- a pipelined unit's data
+path, where the only route from input to output runs through a register --
+gets `No paths found.` from OpenSTA and is recorded as 0.0, which is what the
+Vivado backend records for the same case. A unit that does not elaborate at all
+leaves no report behind and is left out of the model entirely, rather than
+being recorded as a zero.
+
+### Sanity figures
+
+Measured at `--clock-period 1.0`:
+
+| unit | ASAP7 (ns) | for comparison |
+| --- | --- | --- |
+| `addi`, 32-bit, data | 0.777 | `report-timing.sh` on the same 32-bit adder in a top of its own: 777.1 ps |
+| `addi`, 64-bit, data | 1.488 | |
+| `mux`, valid | 0.157 | a mux in a whole-design ASAP7 report: about 150 ps |
+| `mux`, 32-bit, data | 0.053 | |
+| `cmpi`, 32-bit, data | 0.178 | |
+| `andi`, any bitwidth, data | 0.015 | one two-input gate |
+
+The buffer placer accepts the model: on `fir`, `--handshake-place-buffers`
+with `algorithm=fpga20 solver=cbc` places buffers at a 1.0 ns target period
+against `components-asap7.json` and reports the MILP infeasible at 0.5 ns,
+where against `components.json` it is already infeasible at 1.0 ns and needs
+2.0 ns.
+
+### What the model does not contain
+
+The characterization script skips some units (`utils.py`'s `skipping_units`)
+and the model has no entry for them: `fork`, `lazy_fork`, the buffer types, the
+floating-point units, `store`, `end`, `return`, `divsi`/`divui`, `remsi`. Two
+more units drop out of an ASAP7 run for reasons in the RTL: the dataful
+`control_merge` asserts false in `data/vhdl/handshake/control_merge.vhd`, and
+`sitofp`/`fptosi` elaborate only at a 32-bit data type. Buffer placement warns
+`no timing model for op` for each of them and treats them as zero-delay.
+
+`CV`, `CR` and `VC` are zero throughout: the delay classes are queried under
+the names `condition`/`valid`/`ready` and matched under `control`/`valid`/
+`ready` when the JSON is assembled, so the condition-to-valid and
+condition-to-ready measurements the script takes are discarded. The same is
+true of a Vivado run of this script.
+
+Latency is not measured here. `main.py` copies each unit's latency table from
+`--reference-json` (by default `data/components.json`), since a unit's pipeline
+depth is a property of its RTL and not of what it is mapped onto; units the
+reference does not list get a combinational, zero-latency table. `inport` and
+`outport` are zero, as they are in `components.json`, and the placer does not
+read them.
+
 ## How Timing Information is Used
 
 Timing data is primarily used during **buffer placement**, which inserts buffers in the dataflow circuit. While basic buffer placement (i.e., `on-merges`) ignores timing, the advanced MILP algorithms (fpga20 and flp22) rely heavily on this information to optimize circuit performance and area.

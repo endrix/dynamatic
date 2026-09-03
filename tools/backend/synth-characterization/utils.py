@@ -1,6 +1,7 @@
 import os
 import re
 from typing import List, Tuple, Dict
+from asap7_backend import is_asap7, write_asap7_script
 
 # Constants for the characterization process
 
@@ -281,19 +282,29 @@ class UnitCharacterization:
         self.map_signals_type_to_delay_rpt = {}
         self.tcl_file = None
 
-    def generate_tcl(self, tcl_dir: str, rpt_dir: str, sdc_file: str) -> List[str]:
+    def generate_tcl(self, tcl_dir: str, rpt_dir: str, sdc_file: str,
+                     synth_tool: str, clock_period: float) -> List[str]:
         """
-        Generate a TCL files for synthesis.
-        
+        Generate the synthesis script for one parameter set.
+
+        For Vivado this is a TCL script; for the ASAP7 backend it is a shell
+        script that runs yosys and OpenSTA. Either way the script fills the
+        same per-delay-class report files, so that the JSON assembly is shared.
+
         Args:
-            tcl_dir (str): Directory where TCL files should be stored.
+            tcl_dir (str): Directory where the scripts should be stored.
             rpt_dir (str): Directory where report files should be stored.
-            sdc_file (str): Path to the SDC file for constraints.
+            sdc_file (str): Path to the SDC file for constraints (Vivado only).
+            synth_tool (str): Value of --synth-tool.
+            clock_period (float): Clock period in nanoseconds.
         Returns:
-            str: Path to the generated TCL file.
+            str: Path to the generated script.
         """
-        # Create a TCL file for each delay type
-        tcl_file = f"{tcl_dir}/synth_{self.top_entity_name}_top_{self.unique_id}.tcl"
+        asap7 = is_asap7(synth_tool)
+        # Create a script for each parameter set
+        suffix = "sh" if asap7 else "tcl"
+        tcl_file = (f"{tcl_dir}/synth_{self.top_entity_name}"
+                    f"_top_{self.unique_id}.{suffix}")
         # Create a map to hold input and output ports for each report file
         map_rpt_to_ports = {}
         for delay_type in self.list_delay_types:
@@ -308,8 +319,12 @@ class UnitCharacterization:
                 "input_ports": input_ports,
                 "output_ports": output_ports
             }
-        # Write the TCL file
-        write_tcl(self.top_entity_name, self.hdl_files, tcl_file, sdc_file, map_rpt_to_ports)
+        # Write the script
+        if asap7:
+            write_asap7_script(self.top_entity_name, self.hdl_files, tcl_file,
+                               clock_period, map_rpt_to_ports)
+        else:
+            write_tcl(self.top_entity_name, self.hdl_files, tcl_file, sdc_file, map_rpt_to_ports)
         self.tcl_file = tcl_file
         return tcl_file
     

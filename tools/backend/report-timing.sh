@@ -40,17 +40,10 @@ PERIOD="${3:-1000}"
 LOG_DIR="${4:-$HDL_DIR/timing}"
 mkdir -p "$LOG_DIR"
 
-ASAP7_DIR="${ASAP7_DIR:-}"
-LIBERTIES="${LIBERTIES:-$(ls "${ASAP7_DIR:-/nonexistent}"/asap7sc7p5t_*_RVT_TT_nldm_*.lib 2>/dev/null | tr '\n' ' ')}"
-SEQ_LIBERTY="${SEQ_LIBERTY:-$(ls "${ASAP7_DIR:-/nonexistent}"/asap7sc7p5t_SEQ_RVT_TT_nldm_*.lib 2>/dev/null | head -1)}"
-DONT_USE="${DONT_USE:-*x1p*_ASAP7* *xp*_ASAP7* SDF* ICG*}"
-MAX_FANOUT="${MAX_FANOUT:-12}"
-RESET_PORT="${RESET_PORT:-rst}"
-# What drives the inputs and loads the outputs during mapping: the flow
-# scripts' figures for ASAP7.
-DRIVER_CELL="${DRIVER_CELL:-BUFx2_ASAP7_75t_R}"
-LOAD_FF="${LOAD_FF:-3.898}"
-STA="${STA:-$(command -v sta || true)}"
+# The library, the cells kept out of it, the ABC script, the boundary
+# conditions and the reset port: tools/backend/asap7-lib.sh, shared with the
+# ASAP7 backend of the dataflow-unit characterization.
+source "$(dirname "${BASH_SOURCE[0]}")/asap7-lib.sh"
 
 for tool in yosys; do
   if ! command -v "$tool" >/dev/null 2>&1; then
@@ -66,17 +59,6 @@ if [[ -z "$LIBERTIES" || -z "$SEQ_LIBERTY" || ! -f "$SEQ_LIBERTY" ]]; then
   echo "report-timing: no cell library; set ASAP7_DIR (or LIBERTIES and SEQ_LIBERTY)" >&2
   exit 2
 fi
-LIB_ARGS=""
-for lib in $LIBERTIES; do
-  LIB_ARGS="$LIB_ARGS -liberty $lib"
-done
-for pattern in $DONT_USE; do
-  LIB_ARGS="$LIB_ARGS -dont_use $pattern"
-done
-# Yosys' own constrained liberty script for ABC, with the buffering told
-# to cover primary inputs (register outputs, after dfflibmap) and to stop at
-# MAX_FANOUT loads. Commas stand for spaces in a +script; {D} is the clock.
-ABC_SCRIPT="+strash;&get,-n;&fraig,-x;&put;scorr;dc2;dretime;strash;&get,-n;&dch,-f;&nf,{D};&put;buffer,-p,-N,$MAX_FANOUT;upsize,{D};dnsize,{D};stime,-p"
 
 VERILOG=$(ls "$HDL_DIR"/*.v 2>/dev/null | tr '\n' ' ')
 VHDL=$(ls "$HDL_DIR"/*.vhd 2>/dev/null | tr '\n' ' ')
@@ -105,7 +87,7 @@ fi
 
 MAPPED="$LOG_DIR/$TOP.mapped.v"
 CONSTR="$LOG_DIR/$TOP.abc.constr"
-printf 'set_driving_cell %s\nset_load %s\n' "$DRIVER_CELL" "$LOAD_FF" > "$CONSTR"
+asap7_write_abc_constr "$CONSTR"
 SYNTH_LOG="$LOG_DIR/$TOP.synth.log"
 STA_LOG="$LOG_DIR/$TOP.timing.rpt"
 

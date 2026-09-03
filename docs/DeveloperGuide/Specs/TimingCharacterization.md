@@ -152,6 +152,15 @@ The scripts uses several key functions and data structures to orchestrate charac
 
 ## Using a New Synthesis Tool
 
+There is a second backend already: `--synth-tool asap7` measures the same units
+on the ASAP7 standard-cell library with yosys and OpenSTA, in
+`asap7_backend.py`. See [the ASAP7 section of the timing model
+doc](../CompilerIntrinsics/TimingInformation.md#characterizing-for-asap7) for
+what it does and what its numbers mean.
+
+The rest of this section is about Vivado, which the code still assumes by
+default.
+
 For now the code has some specific information related to Vivado tool. However, adding support for a new backend should not take too long. Here it is a list of places to change to use a different backend:
 - `_synth_worker` -> This function runs the synthesis tool. It assumes the tool can be called as follows: `SYNTHESIS_TOOL -mode batch -source TCL_SCRIPT`. 
 - `write_tcl` -> This function writes the tcl script with tcl commands specific of Vivado. 
