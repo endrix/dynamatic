@@ -315,7 +315,13 @@ void CfDetectParallelRegionsPass::analyzeFunction(func::FuncOp funcOp) {
 }
 
 void CfDetectParallelRegionsPass::runDynamaticPass() {
-  for (func::FuncOp funcOp : getOperation().getOps<func::FuncOp>())
+  // Functions may sit inside another operation (a streamblocks actor holds
+  // its actions' functions), so walk rather than list the module's own.
+  SmallVector<func::FuncOp> funcOps;
+  getOperation().walk([&](func::FuncOp funcOp) {
     if (!funcOp.isExternal())
-      analyzeFunction(funcOp);
+      funcOps.push_back(funcOp);
+  });
+  for (func::FuncOp funcOp : funcOps)
+    analyzeFunction(funcOp);
 }

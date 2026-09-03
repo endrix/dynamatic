@@ -553,7 +553,12 @@ LogicalResult HandshakeParallelizeRegionsPass::parallelize(
 }
 
 void HandshakeParallelizeRegionsPass::runDynamaticPass() {
-  for (handshake::FuncOp funcOp : getOperation().getOps<handshake::FuncOp>()) {
+  // Functions may sit inside another operation (a streamblocks actor holds
+  // its actions' functions), so walk rather than list the module's own.
+  SmallVector<handshake::FuncOp> funcOps;
+  getOperation().walk(
+      [&](handshake::FuncOp funcOp) { funcOps.push_back(funcOp); });
+  for (handshake::FuncOp funcOp : funcOps) {
     SmallVector<RegionGroup> groups;
     if (failed(parseGroups(funcOp, groups)))
       return signalPassFailure();
