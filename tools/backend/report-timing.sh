@@ -111,9 +111,11 @@ STA_LOG="$LOG_DIR/$TOP.timing.rpt"
 
 # Generic synthesis, then the flip-flops from the sequential liberty and the
 # logic from the others. `-noexpr` keeps the netlist a plain instance list for
-# OpenSTA to link. The whole yosys log goes to the file: `stat` at the end is
-# where the cell counts come from.
-if ! "${YOSYS[@]}" -p "$READ; synth -top $TOP -flatten; dfflibmap -liberty $SEQ_LIBERTY; abc $LIB_ARGS -constr $CONSTR -D $PERIOD -script $ABC_SCRIPT; opt_clean; stat; write_verilog -noattr -noexpr $MAPPED" > "$SYNTH_LOG" 2>&1; then
+# OpenSTA to link; `-norename` keeps yosys' own names on the nets and cells
+# it made, which carry the instance path the flattening prefixed them with,
+# so that a path in the report can be placed in the design. The whole yosys
+# log goes to the file: `stat` at the end is where the cell counts come from.
+if ! "${YOSYS[@]}" -p "$READ; synth -top $TOP -flatten; dfflibmap -liberty $SEQ_LIBERTY; abc $LIB_ARGS -constr $CONSTR -D $PERIOD -script $ABC_SCRIPT; opt_clean; stat; write_verilog -noattr -noexpr -norename $MAPPED" > "$SYNTH_LOG" 2>&1; then
   echo "report-timing: yosys failed on $TOP (see $SYNTH_LOG)" >&2
   tail -5 "$SYNTH_LOG" >&2
   exit 1
