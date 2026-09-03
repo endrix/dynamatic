@@ -1527,7 +1527,7 @@ architecture arch of mulf_vitis_hls_wrapper is
     signal a_tvalid  : std_logic;
     signal a_tdata   : std_logic_vector(32 - 1 downto 0);
     signal b_tvalid  : std_logic;
-    signal b_tdata   : std_logic_vector(32 - 1downto 0);
+    signal b_tdata   : std_logic_vector(32 - 1 downto 0);
     signal r_tvalid  : std_logic;
     signal r_tdata   : std_logic_vector(32 - 1 downto 0);
     signal din0_buf1 : std_logic_vector(32 - 1 downto 0);

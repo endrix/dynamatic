@@ -152,6 +152,8 @@ struct IntegrationTest {
   unsigned clockPeriod = 5;
   // Insert an II monitor per loop of the circuit.
   bool instrumentII = false;
+  // Run independent consecutive loop nests concurrently.
+  bool useParallelRegions = false;
 
   // Results
   int simTime;
@@ -160,6 +162,21 @@ struct IntegrationTest {
   /// Path of the simulation log, which also holds the II monitors' reports.
   fs::path simReportPath() const {
     return benchmarkPath / name / ("out_" + testName) / "sim" / "report.txt";
+  }
+
+  /// Runs tools/backend/check-logic-loops.sh on the exported Verilog: 0 when
+  /// the flattened netlist has no combinational loop, 1 when it has one (or
+  /// the check failed), 2 when yosys is not installed and nothing was
+  /// checked. Simulators settle such loops silently, so a design with one
+  /// can pass simulation and still be unsynthesizable.
+  int checkLogicLoops() const {
+    fs::path hdlDir = benchmarkPath / name / ("out_" + testName) / "hdl";
+    fs::path script =
+        fs::path(DYNAMATIC_ROOT) / "tools" / "backend" / "check-logic-loops.sh";
+    std::string cmd = "bash " + script.string() + " " + hdlDir.string() + " " +
+                      name + "_wrapper";
+    int status = system(cmd.c_str());
+    return WIFEXITED(status) ? WEXITSTATUS(status) : 1;
   }
 };
 
@@ -205,6 +222,7 @@ int IntegrationTest::run() {
              << (this->useSpeculation ? " --speculation" : "")
              << (this->useDuplication ? " --enable-duplication" : "")
              << (this->instrumentII ? " --instrument-ii" : "")
+             << (this->useParallelRegions ? " --parallel-regions" : "")
              << " --milp-solver " << this->milpSolver << std::endl;
   // clang-format on
 
@@ -308,6 +326,8 @@ class SpecFixture : public BaseFixture {};
 class DuplicationFixture : public BaseFixture {};
 
 class RigidificationFixture : public BaseFixture {};
+// Kernels whose consecutive loop nests --parallel-regions runs at once.
+class ParallelRegionsFixture : public BaseFixture {};
 class VerifyInvariantsFixture : public BaseFixture {};
 
 TEST_P(BasicFixture, basic) {
@@ -324,6 +344,29 @@ TEST_P(BasicFixture, basic) {
       // clang-format on
   };
   EXPECT_EQ(config.run(), 0);
+  RecordProperty("cycles", std::to_string(config.simTime));
+  logPerformance(config.simTime);
+}
+
+TEST_P(ParallelRegionsFixture, parallel) {
+  IntegrationTest config{
+      // clang-format off
+      .name = GetParam(),
+      .testName = getVerboseOutdirSuffix(),
+      .benchmarkPath = fs::path(DYNAMATIC_ROOT) / "integration-test",
+      .testVerilog = true,
+      .useSharing = false,
+      .milpSolver = "gurobi",
+      .bufferAlgorithm = "fpga20",
+      .useParallelRegions = true,
+      .simTime = -1,
+      // clang-format on
+  };
+  EXPECT_EQ(config.run(), 0);
+  // The join and fork the transformation adds have no timing model, so the
+  // flattened netlist is where a ring would show; 2 means yosys is absent.
+  int loops = config.checkLogicLoops();
+  EXPECT_TRUE(loops == 0 || loops == 2) << "combinational loop in the netlist";
   RecordProperty("cycles", std::to_string(config.simTime));
   logPerformance(config.simTime);
 }
@@ -801,6 +844,20 @@ INSTANTIATE_TEST_SUITE_P(SharingUnitTests, SharingUnitTestFixture,
       [](const auto &info) {
         return "sharing_" + info.param;
       });
+
+// The kernels --cf-detect-parallel-regions accepts among the integration
+// tests (a survey of all of them, 2026-09-03): two nests each, except lu,
+// whose second nest is one block.
+INSTANTIATE_TEST_SUITE_P(ParallelRegionsBenchmarks, ParallelRegionsFixture,
+    testing::Values(
+      "mvt_float",
+      "kernel_3mm",
+      "kernel_3mm_float",
+      "lu"
+      ),
+    [](const auto &info) {
+      return "parallel_" + info.param;
+    });
 
 INSTANTIATE_TEST_SUITE_P(SharingBenchmarks, SharingFixture,
     testing::Values(

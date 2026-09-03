@@ -310,6 +310,7 @@ public:
   static constexpr llvm::StringLiteral CALCULATE_PATH_DELAYS =
       "calculate-path-delays";
   static constexpr llvm::StringLiteral INSTRUMENT_II = "instrument-ii";
+  static constexpr llvm::StringLiteral PARALLEL_REGIONS = "parallel-regions";
 
   Compile(FrontendState &state)
       : Command("compile",
@@ -356,6 +357,11 @@ public:
     addFlag({INSTRUMENT_II,
              "Instrument the generated netlist so that each loop reports "
              "the initiation of each of its iterations during simulation"});
+    addFlag({PARALLEL_REGIONS,
+             "Run independent consecutive loop nests concurrently instead of "
+             "one after the other (see docs/DeveloperGuide/"
+             "DynamaticFeaturesAndOptimizations/ParallelRegions.md). Not "
+             "applied with fast token delivery."});
   }
 
   CommandResult execute(CommandArguments &args) override;
@@ -804,13 +810,16 @@ CommandResult Compile::execute(CommandArguments &args) {
   std::string calculatePathDelays =
       args.flags.contains(CALCULATE_PATH_DELAYS) ? "1" : "0";
   std::string instrumentII = args.flags.contains(INSTRUMENT_II) ? "1" : "0";
+  std::string parallelRegions =
+      args.flags.contains(PARALLEL_REGIONS) ? "1" : "0";
 
-  return execCmd(
-      script, state.dynamaticPath, state.getKernelDir(), state.getOutputDir(),
-      state.getKernelName(), buffers, floatToString(state.targetCP, 3), sharing,
-      state.fpUnitsGenerator, rigidification, kInduction, disableLSQ,
-      fastTokenDelivery, milpSolver, straightToQueue, speculation,
-      enableShortCircuit, enableDuplication, calculatePathDelays, instrumentII);
+  return execCmd(script, state.dynamaticPath, state.getKernelDir(),
+                 state.getOutputDir(), state.getKernelName(), buffers,
+                 floatToString(state.targetCP, 3), sharing,
+                 state.fpUnitsGenerator, rigidification, kInduction, disableLSQ,
+                 fastTokenDelivery, milpSolver, straightToQueue, speculation,
+                 enableShortCircuit, enableDuplication, calculatePathDelays,
+                 instrumentII, parallelRegions);
 }
 
 CommandResult WriteHDL::execute(CommandArguments &args) {

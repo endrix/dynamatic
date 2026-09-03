@@ -26,6 +26,7 @@ ENABLE_SHORT_CIRCUIT=${16}
 ENABLE_DUPLICATION=${17:-0}
 CALCULATE_PATH_DELAYS=${18}
 INSTRUMENT_II=${19}
+PARALLEL_REGIONS=${20:-0}
 
 LLVM=$DYNAMATIC_DIR/llvm-project
 DYNAMATIC_BINS=$DYNAMATIC_DIR/bin
@@ -70,6 +71,28 @@ F_FREQUENCIES="$COMP_DIR/frequencies.csv"
 # ============================================================================ #
 # Helper funtions
 # ============================================================================ #
+
+# Compiles and runs the kernel's main function to collect its inputs, then
+# profiles the cf-level IR with them into $F_FREQUENCIES (the transition
+# frequencies buffer placement uses). Runs once, however often it is called.
+PROFILED_CF=0
+profile_cf() {
+  if [[ $PROFILED_CF -ne 0 ]]; then
+    return
+  fi
+  PROFILED_CF=1
+  "$CLANGXX_BIN" "$SRC_DIR/$KERNEL_NAME.c" -D PRINT_PROFILING_INFO -I \
+    "$DYNAMATIC_DIR/include" -Wno-deprecated -o "$F_PROFILER_BIN"
+  exit_on_fail "Failed to build kernel for profiling" "Built kernel for profiling"
+
+  "$F_PROFILER_BIN" > "$F_PROFILER_INPUTS"
+  exit_on_fail "Failed to kernel for profiling" "Ran kernel for profiling"
+
+  "$DYNAMATIC_PROFILER_BIN" "$F_CF_DYN_TRANSFORMED_MEM_DEP_MARKED" \
+    --top-level-function="$KERNEL_NAME" --input-args-file="$F_PROFILER_INPUTS" \
+    > $F_FREQUENCIES
+  exit_on_fail "Failed to profile cf-level" "Profiled cf-level"
+}
 
 # Exports Handshake-level IR to DOT using Dynamatic, then converts the DOT to
 # a PNG using dot.
@@ -285,6 +308,27 @@ else
     "Marked memory accesses with the corresponding interfaces in cf"
 fi
 
+# Parallel regions: find the independent loop nests at the cf level, and let
+# them run at once once the circuit exists (see docs/DeveloperGuide/
+# DynamaticFeaturesAndOptimizations/ParallelRegions.md). The transformation
+# rewrites the profiled transition frequencies to the new shape, so with a
+# profile-driven buffer placement the profile has to exist before it runs.
+PARALLEL_DETECT_PASS=""
+PARALLEL_PASS=""
+if [[ $PARALLEL_REGIONS -ne 0 ]]; then
+  if [[ $FAST_TOKEN_DELIVERY -ne 0 ]]; then
+    echo_info "Parallel regions are not applied with fast token delivery."
+  else
+    PARALLEL_DETECT_PASS="--cf-detect-parallel-regions"
+    if [[ "$BUFFER_ALGORITHM" == "on-merges" ]]; then
+      PARALLEL_PASS="--handshake-parallelize-regions"
+    else
+      profile_cf
+      PARALLEL_PASS="--handshake-parallelize-regions=frequencies=$F_FREQUENCIES"
+    fi
+  fi
+fi
+
 # cf level -> handshake level
 if [[ $FAST_TOKEN_DELIVERY -ne 0 ]]; then
   echo_info "Running FTD algorithm for handshake conversion"
@@ -294,7 +338,8 @@ if [[ $FAST_TOKEN_DELIVERY -ne 0 ]]; then
     > "$F_HANDSHAKE"
   exit_on_fail "Failed to compile cf to handshake with FTD" "Compiled cf to handshake with FTD"
 else
-  "$DYNAMATIC_OPT_BIN" "$F_CF_DYN_TRANSFORMED_MEM_DEP_MARKED" --lower-cf-to-handshake \
+  "$DYNAMATIC_OPT_BIN" "$F_CF_DYN_TRANSFORMED_MEM_DEP_MARKED" \
+    ${PARALLEL_DETECT_PASS:+"$PARALLEL_DETECT_PASS"} --lower-cf-to-handshake \
     > "$F_HANDSHAKE"
   exit_on_fail "Failed to compile cf to handshake" "Compiled cf to handshake"
 fi
@@ -306,6 +351,7 @@ if [[ $STRAIGHT_TO_QUEUE -ne 0 ]]; then
   # FPT19 should run before straight to the queue, so that no useless components are instantiated.
   "$DYNAMATIC_OPT_BIN" "$F_HANDSHAKE" \
     --handshake-deactivate-mem-dependencies --handshake-replace-memory-interfaces \
+    ${PARALLEL_PASS:+"$PARALLEL_PASS"} \
     --handshake-straight-to-queue \
     --handshake-combine-steering-logic \
     > "$F_HANDSHAKE_SQ"
@@ -327,6 +373,7 @@ else
   # handshake transformations
   "$DYNAMATIC_OPT_BIN" "$F_HANDSHAKE" \
     --handshake-deactivate-mem-dependencies --handshake-replace-memory-interfaces \
+    ${PARALLEL_PASS:+"$PARALLEL_PASS"} \
     --handshake-remove-unused-memrefs \
     --handshake-optimize-bitwidths \
     --handshake-materialize --handshake-infer-basic-blocks \
@@ -366,19 +413,7 @@ if [[ "$BUFFER_ALGORITHM" == "on-merges" ]]; then
     > "$F_HANDSHAKE_BUFFERED"
   exit_on_fail "Failed to place simple buffers" "Placed simple buffers"
 else
-  # Compile kernel's main function to extract profiling information
-  "$CLANGXX_BIN" "$SRC_DIR/$KERNEL_NAME.c" -D PRINT_PROFILING_INFO -I \
-    "$DYNAMATIC_DIR/include" -Wno-deprecated -o "$F_PROFILER_BIN"
-  exit_on_fail "Failed to build kernel for profiling" "Built kernel for profiling"
-
-  "$F_PROFILER_BIN" > "$F_PROFILER_INPUTS"
-  exit_on_fail "Failed to kernel for profiling" "Ran kernel for profiling"
-
-  # cf-level profiler
-  "$DYNAMATIC_PROFILER_BIN" "$F_CF_DYN_TRANSFORMED_MEM_DEP_MARKED" \
-    --top-level-function="$KERNEL_NAME" --input-args-file="$F_PROFILER_INPUTS" \
-    > $F_FREQUENCIES
-  exit_on_fail "Failed to profile cf-level" "Profiled cf-level"
+  profile_cf
 
   echo_info "Set to use \"$MILP_SOLVER\" to solve buffer placement MILP!"
 

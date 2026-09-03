@@ -182,6 +182,63 @@ def HandshakeMaterialize : DynamaticPass<"handshake-materialize"> {
             "If true, replicate all the source->constant per each use.">];
 }
 
+def CfDetectParallelRegions : DynamaticPass<"cf-detect-parallel-regions"> {
+  let summary = "Find runs of loop nests that could run concurrently";
+  let description = [{
+    At the cf level the natural regions of a function are its top-level loop
+    nests. Two consecutive nests are independent when the second uses no
+    value the first computes (a constant, or a value the first merely
+    carries around unchanged, does not count), no recorded memory
+    dependence orders their accesses, they touch no common memory except
+    memory both only read or memory whose every access goes to a memory
+    controller, and neither holds an operation with other memory behaviour.
+    The pass records each maximal run of consecutive independent nests, with
+    the block that enters the first and the block the last leaves to, in the
+    function's `handshake.parallel_regions` attribute using the block ids the
+    lowering will assign (position in the function), and says so in a
+    remark. `--handshake-parallelize-regions` consumes the attribute after
+    `lower-cf-to-handshake`. Run this after `mark-memory-interfaces`, whose
+    interface decisions it reads; the memory rule trusts the dependence
+    analysis exactly as that pass does.
+  }];
+}
+
+def HandshakeParallelizeRegions : DynamaticPass<"handshake-parallelize-regions"> {
+  let summary = "Run independent regions of a function concurrently";
+  let description = [{
+    Dynamatic lowers a sequence of sibling loop nests to a chain: the first
+    nest's exit branch hands the control token to the second nest's entry
+    merge, so the second cannot start before the first has drained, however
+    independent the two are. This pass reads the function's
+    `handshake.parallel_regions` attribute, an array of
+    `{entry, regions, successor}` dictionaries (block ids; `regions` is an
+    array of block-id arrays, in the order the sequential lowering ran them),
+    and for each entry forks the entry block's control into every region at
+    once and joins the regions' exit tokens in the successor block. A value a
+    later region received through an earlier region's exit branch is taken
+    from the entry block instead; a constant the lowering materialized for it
+    inside the earlier region is re-made in the entry block. Memory
+    interfaces, `end` and block ids are untouched.
+
+    The pass refuses a group (with an error) when a memory dependence crosses
+    two of its regions, when two regions share an LSQ, when a region computes
+    a value another region uses, or when a region has more than one exit; it
+    does not check that the regions are independent beyond that, which is the
+    job of the analysis that writes the attribute. The result is not
+    materialized: run `handshake-materialize` afterwards. Run it after
+    `handshake-deactivate-mem-dependencies`, which reasons over the
+    sequential CFG. If the function carries a `handshake.frequencies`
+    attribute, or the `frequencies` option names a profiler CSV, the archs
+    are rewritten to the new shape (the fork and join edges added, the serial
+    edges dropped) and stored in the attribute for buffer placement.
+  }];
+  let options = [
+    Option<"frequencies", "frequencies", "std::string", "",
+    "Path to the profiler's CSV of transition frequencies for the sequential "
+    "CFG; rewritten to the parallel shape and stored on the function as its "
+    "'handshake.frequencies' attribute.">];
+}
+
 def HandshakeOptimizeBitwidths : DynamaticPass< "handshake-optimize-bitwidths", 
                                                 ["mlir::arith::ArithDialect"]> {
   let summary = "Optimize bitwidths of all channels.";
