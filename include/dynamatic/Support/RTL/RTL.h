@@ -311,6 +311,11 @@ public:
   LogicalResult concretize(const RTLRequest &request, StringRef dynamaticPath,
                            StringRef outputDir) const;
 
+  /// Returns the component's dependencies with this match's parameters
+  /// substituted: a dependency may be named by a parameter, the way the
+  /// floating-point units' `${FPU_IMPL}_ip_cores` is.
+  std::vector<std::string> getDependencies() const;
+
 private:
   /// Concrete module name that the RTL component defines, derived from the
   /// module name in the RTL component description with RTL parameter values

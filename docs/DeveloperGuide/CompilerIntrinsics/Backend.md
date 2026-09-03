@@ -105,7 +105,7 @@ An example entry is:
     ],
     "generator": "python $DYNAMATIC/experimental/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t addf -p is_double=$IS_DOUBLE fpu_impl='\"$FPU_IMPL\"' internal_delay='\"$INTERNAL_DELAY\"' latency=$LATENCY extra_signals=$EXTRA_SIGNALS",
     "dependencies": [
-      "flopoco_ip_cores", "vivado_ip_wrappers"
+      "${FPU_IMPL}_ip_cores"
     ]
   },
   { 
@@ -115,7 +115,7 @@ An example entry is:
 ]
 ```
 
-At the moment the dependency management system is relatively barebone; only parameter-less components can appear in dependencies since there is no existing mechanism to transfer the original component's parameters to the component it depends on (therefore, any dependency with at least one parameter will fail to match due to the lack of parameters provided during dependency resolution, see [matching logic](#matching-logic)).
+At the moment the dependency management system is relatively barebone; only parameter-less components can appear in dependencies since there is no existing mechanism to transfer the original component's parameters to the component it depends on (therefore, any dependency with at least one parameter will fail to match due to the lack of parameters provided during dependency resolution, see [matching logic](#matching-logic)). The *name* of a dependency is substituted with the depending component's parameters, though (`$NAME`, or `${NAME}` where a letter or underscore follows), which is how the floating-point units depend on `${FPU_IMPL}_ip_cores`: the FloPoCo cores or the Vivado IP wrappers, whichever they were generated for, and never the other. (The Vivado file references Xilinx's `floating_point` library, which only a Vivado simulation has; shipped beside a FloPoCo design it stops GHDL.)
 
 #### `module-name`
 
