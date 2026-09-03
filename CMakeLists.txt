@@ -74,6 +74,17 @@ option(DYNAMATIC_BUILD_LLVM "Build LLVM as part of the Dynamatic build" OFF)
 # built against an out-of-tree LLVM install that was configured without Polly.
 option(DYNAMATIC_ENABLE_POLLY "Build the Polly-based LLVM IR pass plugins" ON)
 
+# libclang is only needed by --func-set-arg-names, which parses the original C
+# source to recover argument names for the C frontend (compile.sh). It is a
+# shared library in every LLVM build, so a tool that links DynamaticTransforms
+# carries a runtime dependency on libclang.so and cannot be shipped on its own.
+# A consumer that never runs the C frontend can switch it off; the pass then
+# stays registered but fails with a message saying so.
+option(DYNAMATIC_ENABLE_LIBCLANG "Link libclang (needed only by --func-set-arg-names)" ON)
+if (DYNAMATIC_ENABLE_LIBCLANG)
+  add_compile_definitions(DYNAMATIC_ENABLE_LIBCLANG)
+endif()
+
 if (DYNAMATIC_BUILD_LLVM)
   if (DYNAMATIC_ENABLE_POLLY)
     set(LLVM_ENABLE_PROJECTS "mlir;clang;polly" CACHE STRING "" FORCE)

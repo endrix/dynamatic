@@ -28,6 +28,10 @@ List of options:
   --llvm-parallel-link-jobs <num-jobs> : maximum number of simultaneous link jobs when
                                          building llvm (defaults to 2)
   --disable-build-opt | -o             : don't use clang/lld/ccache to speed up builds
+  --linker <linker>                    : linker handed to clang as -fuse-ld (default lld);
+                                         a name, a path (e.g. /usr/bin/ld.lld-20 where
+                                         only a versioned lld is installed), or "system"
+                                         for the toolchain's default linker
   --experimental-enable-xls            : enable experimental xls integration
   --enable-leq-binaries                : download binaries for elastic-miter equivalence
                                          checking
@@ -39,6 +43,9 @@ List of options:
                                          (the directory must contain lib/cmake/llvm,
                                          lib/cmake/mlir and lib/cmake/clang)
   --enable-cbc                         : enable the CBC milp solver
+  --disable-libclang                   : do not link libclang (only --func-set-arg-names
+                                         needs it; tools then have no libclang.so
+                                         runtime dependency)
   --enable-abc                         : enable the ABC logic synthesis tool
   --build-legacy-lsq                   : build the legacy chisel-based lsq
   --check | -c                         : run tests during build
@@ -155,6 +162,7 @@ BUILD_CHIESEL_LSQ=0
 ENABLE_CBC=0
 CMAKE_DYNAMATIC_ENABLE_CBC=""
 CMAKE_DYNAMATIC_ENABLE_ABC=""
+CMAKE_DYNAMATIC_ENABLE_LIBCLANG=""
 CMAKE_DYNAMATIC_ENABLE_POLLY=""
 CMAKE_LLVM_ENABLE_ASSERTIONS=""
 LLVM_DIR="$PWD/build/llvm-project"
@@ -177,6 +185,15 @@ do
       PARSE_ARG=""
     elif [[ $PARSE_ARG == "llvm-parallel-link-jobs" ]]; then
       LLVM_PARALLEL_LINK_JOBS="$arg"
+      PARSE_ARG=""
+    elif [[ $PARSE_ARG == "linker" ]]; then
+      if [[ $arg == "system" ]]; then
+        CMAKE_LLVM_BUILD_OPTIMIZATIONS="${CMAKE_LLVM_BUILD_OPTIMIZATIONS/ -DLLVM_USE_LINKER=lld/}"
+        CMAKE_DYNAMATIC_BUILD_OPTIMIZATIONS="${CMAKE_DYNAMATIC_BUILD_OPTIMIZATIONS/ -DLLVM_USE_LINKER=lld/}"
+      else
+        CMAKE_LLVM_BUILD_OPTIMIZATIONS="${CMAKE_LLVM_BUILD_OPTIMIZATIONS/-DLLVM_USE_LINKER=lld/-DLLVM_USE_LINKER=$arg}"
+        CMAKE_DYNAMATIC_BUILD_OPTIMIZATIONS="${CMAKE_DYNAMATIC_BUILD_OPTIMIZATIONS/-DLLVM_USE_LINKER=lld/-DLLVM_USE_LINKER=$arg}"
+      fi
       PARSE_ARG=""
     elif [[ $PARSE_ARG == "llvm-dir" ]]; then
       EXTERNAL_LLVM=1
@@ -220,6 +237,9 @@ do
           "--llvm-dir")
               PARSE_ARG="llvm-dir"
               ;;
+          "--linker")
+              PARSE_ARG="linker"
+              ;;
           "--export-godot" | "-e")
               PARSE_ARG="godot-path"
               ;;
@@ -236,6 +256,9 @@ do
               ;;
           "--enable-abc")
               CMAKE_DYNAMATIC_ENABLE_ABC="-DDYNAMATIC_ENABLE_ABC=ON"
+              ;;
+          "--disable-libclang")
+              CMAKE_DYNAMATIC_ENABLE_LIBCLANG="-DDYNAMATIC_ENABLE_LIBCLANG=OFF"
               ;;
           "--build-legacy-lsq")
               BUILD_CHIESEL_LSQ=1
@@ -418,6 +441,7 @@ if should_run_cmake ; then
             $CMAKE_DYNAMATIC_ENABLE_XLS \
             $CMAKE_DYNAMATIC_ENABLE_CBC \
             $CMAKE_DYNAMATIC_ENABLE_ABC \
+            $CMAKE_DYNAMATIC_ENABLE_LIBCLANG \
             $CMAKE_LLVM_ENABLE_ASSERTIONS \
             $CMAKE_DYNAMATIC_ENABLE_LEQ_BINARIES
   else
@@ -435,6 +459,7 @@ if should_run_cmake ; then
         $CMAKE_DYNAMATIC_ENABLE_XLS \
         $CMAKE_DYNAMATIC_ENABLE_CBC \
         $CMAKE_DYNAMATIC_ENABLE_ABC \
+        $CMAKE_DYNAMATIC_ENABLE_LIBCLANG \
         $CMAKE_DYNAMATIC_ENABLE_LEQ_BINARIES
   fi
   exit_on_fail "Failed to cmake dynamatic"

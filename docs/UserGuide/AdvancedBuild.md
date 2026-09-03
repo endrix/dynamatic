@@ -165,6 +165,25 @@ sudo apt-get install coinor-cbc
 ./build.sh --enable-cbc
 ```
 
+### Building Without libclang
+
+Only one pass, `--func-set-arg-names`, uses libclang: it parses the original C
+source to recover argument names for the C frontend. libclang is a shared
+library in every LLVM build, so every tool that links Dynamatic's transforms
+otherwise carries a runtime dependency on `libclang.so` and cannot be shipped
+without it. A consumer that never runs the C frontend (for example a project
+that links Dynamatic as a library and lowers its own IR) can leave it out:
+
+```sh
+./build.sh --disable-libclang
+# or, with CMake directly:
+cmake -DDYNAMATIC_ENABLE_LIBCLANG=OFF ...
+```
+
+The pass stays registered, so pipelines still parse, but running it fails with
+a message naming this option. `compile.sh` runs it, so the C frontend needs a
+build with libclang.
+
 ### Enable Legacy Chisel-Based LSQ Generator
 
 Dynamatic previously uses RTL generators written in Chisel (a hardware
