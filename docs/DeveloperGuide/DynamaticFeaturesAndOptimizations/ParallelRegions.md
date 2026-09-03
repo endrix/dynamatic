@@ -11,6 +11,40 @@ multiply-accumulates waiting on another of the same size.
 analysis has declared independent. It is off by default and does nothing to a
 function without the attribute, so every existing flow is untouched.
 
+## The analysis
+
+`--cf-detect-parallel-regions` writes the attribute. It runs at the cf
+level, after `mark-memory-interfaces`, where a function is a graph of
+blocks and its top-level loop nests are the natural regions: a nest starts
+when its header is entered and is done when its exiting block leaves. A
+nest is a candidate when one block enters it, one block leaves it, and to
+one place. Consecutive candidates, the second entered from the first's
+exiting block, are grouped while each new one is independent of every nest
+already in the group:
+
+- no value the earlier nest computes reaches the later one, whether
+  through the branch into its header or by direct use from the exiting
+  block (dominance allows it). A constant does not count, nor does a block
+  argument the earlier nest only carries around unchanged, back to a free
+  origin: the lowering re-makes constants and the later pass re-sources
+  such values from the entry;
+- no recorded memory dependence (`handshake.deps`) connects an access of
+  one to an access of the other;
+- of the memory both touch (function arguments and allocations are
+  distinct memories; anything else is unknown), a memory both only read is
+  free, and a memory one of them writes is free only when every access to
+  it goes to a memory controller, which executes accesses in arrival
+  order. That is the same trust in the dependence analysis that
+  `mark-memory-interfaces` shows when it sends an access to a controller.
+  An LSQ would have to serve both nests, which it cannot;
+- neither nest holds an operation with memory behaviour other than a load
+  or a store of a memref.
+
+Each group of two or more nests becomes one entry of the attribute, in the
+block ids the lowering will assign (position in the function), and a
+remark names it. On `mvt_float`'s cf IR the pass finds `[1, 2, 3] [4, 5,
+6] between blocks 0 and 7`, and the lowering forwards the attribute.
+
 ## The attribute
 
 The pass reads `handshake.parallel_regions` on the function: an array of
@@ -66,10 +100,13 @@ and nothing to enforce.
 
 ## Measured
 
-`mvt_float`, the fixture the pass was built against: 17996 cycles to 9004,
-bit-exact outputs, the second nest's stores starting one cycle after the
-first's, no combinational loop on the flattened netlist. The pass's output
-is the hand-written proof of concept up to names.
+`mvt_float`, the fixture the passes were built against: 17996 cycles to
+9004, bit-exact outputs, the second nest's stores starting one cycle after
+the first's, no combinational loop on the flattened netlist. The
+transformation pass's output on the hand-annotated IR is the hand-written
+proof of concept up to names, and the chain from the C flow's cf IR
+through the analysis, the lowering and the flow's own pass order gives the
+same 9004.
 
 ## Not yet
 
@@ -78,5 +115,6 @@ is the hand-written proof of concept up to names.
   outlining into callees, or an LSQ per region. The pass refuses them.
 - A memory two regions only read is safe but gains nothing until it has two
   read ports.
-- Regions with more than one exit, or a group inside a loop.
-- The analysis that writes the attribute (`--cf-detect-parallel-regions`).
+- Regions with more than one exit, groups inside an enclosing loop, and
+  regions that are not loop nests.
+- The flow: neither pass is in `compile.sh` yet.

@@ -182,6 +182,27 @@ def HandshakeMaterialize : DynamaticPass<"handshake-materialize"> {
             "If true, replicate all the source->constant per each use.">];
 }
 
+def CfDetectParallelRegions : DynamaticPass<"cf-detect-parallel-regions"> {
+  let summary = "Find runs of loop nests that could run concurrently";
+  let description = [{
+    At the cf level the natural regions of a function are its top-level loop
+    nests. Two consecutive nests are independent when the second uses no
+    value the first computes (a constant, or a value the first merely
+    carries around unchanged, does not count), no recorded memory
+    dependence orders their accesses, they touch no common memory except
+    memory both only read or memory whose every access goes to a memory
+    controller, and neither holds an operation with other memory behaviour.
+    The pass records each maximal run of consecutive independent nests, with
+    the block that enters the first and the block the last leaves to, in the
+    function's `handshake.parallel_regions` attribute using the block ids the
+    lowering will assign (position in the function), and says so in a
+    remark. `--handshake-parallelize-regions` consumes the attribute after
+    `lower-cf-to-handshake`. Run this after `mark-memory-interfaces`, whose
+    interface decisions it reads; the memory rule trusts the dependence
+    analysis exactly as that pass does.
+  }];
+}
+
 def HandshakeParallelizeRegions : DynamaticPass<"handshake-parallelize-regions"> {
   let summary = "Run independent regions of a function concurrently";
   let description = [{

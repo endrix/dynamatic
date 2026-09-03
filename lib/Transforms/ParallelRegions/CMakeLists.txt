@@ -1,4 +1,5 @@
 add_dynamatic_library(DynamaticParallelRegions
+  CfDetectParallelRegions.cpp
   HandshakeParallelizeRegions.cpp
 
   DEPENDS
@@ -7,6 +8,13 @@ add_dynamatic_library(DynamaticParallelRegions
   LINK_LIBS PUBLIC
   MLIRIR
   MLIRSupport
+  MLIRAnalysis
+  MLIRArithDialect
+  MLIRControlFlowDialect
+  MLIRControlFlowInterfaces
+  MLIRFuncDialect
+  MLIRMemRefDialect
+  MLIRSideEffectInterfaces
   DynamaticHandshake
   DynamaticSupport
   DynamaticAnalysis
