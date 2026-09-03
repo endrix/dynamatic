@@ -198,3 +198,37 @@ func.func @one_block(%a: memref<1xi32>) -> i32 {
   %v = memref.load %a[%c0] {handshake.mem_interface = #handshake.mem_interface<MC>, handshake.name = "load0"} : memref<1xi32>
   return {handshake.name = "return0"} %v : i32
 }
+
+// -----
+
+// scf-to-cf leaves a block of constants between two loops. It is a straight
+// line with nothing that touches memory, so the second region absorbs it:
+// regions [1] and [2, 3], between blocks 0 and 4. The value the first loop
+// hands to its exit block goes to an argument nothing reads.
+// CHECK-LABEL:   func.func @constants_between(
+// CHECK-SAME:      handshake.parallel_regions = [{entry = 0 : ui32, regions = {{\[}}[1], [2, 3]], successor = 4 : ui32}]
+// expected-remark @below {{parallel regions [1] [2, 3] between blocks 0 and 4}}
+func.func @constants_between(%a: memref<8xi32>, %x1: memref<8xi32>, %x2: memref<8xi32>) {
+  %c0 = arith.constant {handshake.name = "c0"} 0 : index
+  %c1 = arith.constant {handshake.name = "c1"} 1 : index
+  %c8 = arith.constant {handshake.name = "c8"} 8 : index
+  cf.br ^bb1(%c0 : index) {handshake.name = "br0"}
+^bb1(%i: index):
+  %v = memref.load %a[%i] {handshake.mem_interface = #handshake.mem_interface<MC>, handshake.name = "load0"} : memref<8xi32>
+  memref.store %v, %x1[%i] {handshake.mem_interface = #handshake.mem_interface<MC>, handshake.name = "store0"} : memref<8xi32>
+  %i1 = arith.addi %i, %c1 {handshake.name = "inc_i"} : index
+  %cond = arith.cmpi ult, %i1, %c8 {handshake.name = "cmp1"} : index
+  cf.cond_br %cond, ^bb1(%i1 : index), ^bb2(%i1 : index) {handshake.name = "cond_br0"}
+^bb2(%unused: index):
+  %z = arith.constant {handshake.name = "z"} 0 : index
+  %c8_0 = arith.constant {handshake.name = "c8_0"} 8 : index
+  cf.br ^bb3(%z : index) {handshake.name = "br1"}
+^bb3(%j: index):
+  %w = memref.load %a[%j] {handshake.mem_interface = #handshake.mem_interface<MC>, handshake.name = "load1"} : memref<8xi32>
+  memref.store %w, %x2[%j] {handshake.mem_interface = #handshake.mem_interface<MC>, handshake.name = "store1"} : memref<8xi32>
+  %j1 = arith.addi %j, %c1 {handshake.name = "inc_j"} : index
+  %cond_0 = arith.cmpi ult, %j1, %c8_0 {handshake.name = "cmp2"} : index
+  cf.cond_br %cond_0, ^bb3(%j1 : index), ^bb4 {handshake.name = "cond_br1"}
+^bb4:
+  return {handshake.name = "return0"}
+}

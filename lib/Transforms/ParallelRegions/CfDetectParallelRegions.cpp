@@ -50,11 +50,14 @@ static constexpr llvm::StringLiteral REGIONS_ATTR("handshake.parallel_regions");
 
 namespace {
 
-/// A memory access inside a loop.
+/// An access inside a loop: a memref load or store, or any other effect an
+/// operation declares on a value (a read or write of a port, say), with the
+/// resource it is on. Effects on the default resource are memory.
 struct Access {
   Operation *op;
   Value memref;
   bool isStore;
+  SideEffects::Resource *resource;
 };
 
 /// A top-level loop that has the shape a region needs: one block enters it,
@@ -65,8 +68,11 @@ struct Candidate {
   Block *exiting;
   Block *exit;
   SmallVector<Access> accesses;
-  /// True when the loop holds an operation whose memory behaviour is not a
-  /// load or a store of a memref (a call, say); nothing runs beside it.
+  /// The effect-free straight-line blocks between the previous loop and this
+  /// one, which its region absorbs.
+  SmallVector<Block *> before;
+  /// True when the loop holds an operation with an effect it does not tie to
+  /// a value (a call, say); nothing runs beside it.
   bool opaque = false;
 };
 
@@ -147,9 +153,15 @@ static bool hasLiveOut(const Candidate &earlier, const Candidate &later) {
            ++i) {
         if (pred->getTerminator()->getSuccessor(i) != block)
           continue;
-        for (Value val : branch.getSuccessorOperands(i).getForwardedOperands())
-          if (crosses(val))
+        SuccessorOperands operands = branch.getSuccessorOperands(i);
+        for (auto [argIdx, arg] : llvm::enumerate(block->getArguments())) {
+          // A value handed to an argument nothing reads carries nothing.
+          if (arg.use_empty())
+            continue;
+          Value val = operands[argIdx];
+          if (val && crosses(val))
             return true;
+        }
       }
     }
     // Values used directly, which dominance permits from the exiting block.
@@ -199,10 +211,19 @@ static bool memoryIndependent(const Candidate &a, const Candidate &b,
     return false;
   for (const Access &x : a.accesses) {
     for (const Access &y : b.accesses) {
+      if (x.resource != y.resource)
+        continue;
       if (dependsOn(x.op, y.op, names) || dependsOn(y.op, x.op, names))
         return false;
       if (!x.isStore && !y.isStore)
         continue;
+      if (x.resource != SideEffects::DefaultResource::get()) {
+        // An effect on another resource is tied to the value it names (a
+        // port): two values are two things, one value is one.
+        if (x.memref != y.memref)
+          continue;
+        return false;
+      }
       Value rx = rootOf(x.memref), ry = rootOf(y.memref);
       if (rx && ry && rx != ry)
         continue;
@@ -211,6 +232,51 @@ static bool memoryIndependent(const Candidate &a, const Candidate &b,
       return false;
     }
   }
+  return true;
+}
+
+/// Records what an operation touches: memref loads and stores, then every
+/// effect it declares on a value; an effect on nothing in particular makes
+/// the loop opaque.
+static void collectAccesses(Operation &op, Candidate &cand) {
+  SideEffects::Resource *memory = SideEffects::DefaultResource::get();
+  if (auto load = dyn_cast<memref::LoadOp>(op)) {
+    cand.accesses.push_back({&op, load.getMemRef(), false, memory});
+    return;
+  }
+  if (auto store = dyn_cast<memref::StoreOp>(op)) {
+    cand.accesses.push_back({&op, store.getMemRef(), true, memory});
+    return;
+  }
+  if (op.hasTrait<OpTrait::IsTerminator>() || isMemoryEffectFree(&op))
+    return;
+  auto iface = dyn_cast<MemoryEffectOpInterface>(op);
+  if (!iface) {
+    cand.opaque = true;
+    return;
+  }
+  SmallVector<MemoryEffects::EffectInstance> effects;
+  iface.getEffects(effects);
+  for (MemoryEffects::EffectInstance &effect : effects) {
+    Value value = effect.getValue();
+    if (!value) {
+      cand.opaque = true;
+      return;
+    }
+    bool isWrite = isa<MemoryEffects::Write>(effect.getEffect());
+    cand.accesses.push_back({&op, value, isWrite, effect.getResource()});
+  }
+}
+
+/// Whether a block outside every loop is a straight line with nothing that
+/// touches memory: what scf-to-cf leaves between two loops (the next loop's
+/// constants), which a region may absorb.
+static bool isFreeStraightBlock(Block *block, CFGLoopInfo &loopInfo) {
+  if (loopInfo.getLoopFor(block) || block->getNumSuccessors() != 1)
+    return false;
+  for (Operation &op : *block)
+    if (!op.hasTrait<OpTrait::IsTerminator>() && !isMemoryEffectFree(&op))
+      return false;
   return true;
 }
 
@@ -246,17 +312,9 @@ void CfDetectParallelRegionsPass::analyzeFunction(func::FuncOp funcOp) {
                    loop->getExitBlock()};
     if (!cand.pred || !cand.exiting || !cand.exit)
       continue;
-    for (Block *block : loop->getBlocks()) {
-      for (Operation &op : *block) {
-        if (auto load = dyn_cast<memref::LoadOp>(op))
-          cand.accesses.push_back({&op, load.getMemRef(), false});
-        else if (auto store = dyn_cast<memref::StoreOp>(op))
-          cand.accesses.push_back({&op, store.getMemRef(), true});
-        else if (!isMemoryEffectFree(&op) &&
-                 !op.hasTrait<OpTrait::IsTerminator>())
-          cand.opaque = true;
-      }
-    }
+    for (Block *block : loop->getBlocks())
+      for (Operation &op : *block)
+        collectAccesses(op, cand);
     candidates.push_back(std::move(cand));
   }
 
@@ -271,6 +329,8 @@ void CfDetectParallelRegionsPass::analyzeFunction(func::FuncOp funcOp) {
       std::string blocksText;
       for (const Candidate *cand : current) {
         SmallVector<int64_t> ids;
+        for (Block *block : cand->before)
+          ids.push_back(index[block]);
         for (Block *block : cand->loop->getBlocks())
           ids.push_back(index[block]);
         llvm::sort(ids);
@@ -293,17 +353,32 @@ void CfDetectParallelRegionsPass::analyzeFunction(func::FuncOp funcOp) {
     }
     current.clear();
   };
-  for (const Candidate &cand : candidates) {
-    bool follows = !current.empty() &&
-                   current.back()->exit == cand.loop->getHeader() &&
-                   cand.pred == current.back()->exiting;
-    if (follows && llvm::all_of(current, [&](const Candidate *prev) {
+  // The next loop follows the last one when the last one's exit block is its
+  // header, or leads to it through free straight-line blocks, which then
+  // belong to the next region.
+  auto follows = [&](const Candidate &last, Candidate &next) {
+    next.before.clear();
+    Block *block = last.exit;
+    while (block != next.loop->getHeader()) {
+      if (!isFreeStraightBlock(block, loopInfo))
+        return false;
+      next.before.push_back(block);
+      block = block->getSuccessor(0);
+    }
+    Block *expectedPred =
+        next.before.empty() ? last.exiting : next.before.back();
+    return next.pred == expectedPred;
+  };
+  for (Candidate &cand : candidates) {
+    if (!current.empty() && follows(*current.back(), cand) &&
+        llvm::all_of(current, [&](const Candidate *prev) {
           return independent(*prev, cand, names);
         })) {
       current.push_back(&cand);
       continue;
     }
     flush();
+    cand.before.clear();
     current.push_back(&cand);
   }
   flush();
