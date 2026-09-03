@@ -646,28 +646,22 @@ ModuleDiscriminator::ModuleDiscriminator(Operation *op) {
         // Bitwidth and binary-encoded constant value
         ChannelType cstType = cstOp.getResult().getType();
         unsigned bitwidth = cstType.getDataBitWidth();
-        if (bitwidth > 64) {
-          cstOp.emitError() << "Constant value has bitwidth " << bitwidth
-                            << ", but we only support up to 64.";
-          unsupported = true;
-          return;
-        }
 
         // Determine the constant value based on the constant's return type
         // and convert it to a binary string value
         TypedAttr valueAttr = cstOp.getValueAttr();
         std::string bitValue;
         if (auto intType = dyn_cast<IntegerType>(cstType.getDataType())) {
+          // The VHDL literal this becomes is a bit string of the channel's
+          // width, whatever that width is; there is no 64-bit anything on
+          // its way there. A 65-bit constant is what the frontend's i64 * i64
+          // -> i65 arithmetic produces once canonicalization folds the
+          // extension of a constant into the constant itself.
           APInt value = cast<mlir::IntegerAttr>(valueAttr).getValue();
-
-          // Bitset requires a compile-time constant, just use 64 and
-          // manually truncate the value after so that it is the exact
-          // bitwidth we need
-          if (intType.isUnsignedInteger())
-            bitValue = std::bitset<64>(value.getZExtValue()).to_string();
-          else
-            bitValue = std::bitset<64>(value.getSExtValue()).to_string();
-          bitValue = bitValue.substr(64 - bitwidth);
+          value = intType.isUnsignedInteger() ? value.zextOrTrunc(bitwidth)
+                                              : value.sextOrTrunc(bitwidth);
+          bitValue = llvm::toString(value, /*Radix=*/2, /*Signed=*/false);
+          bitValue.insert(0, bitwidth - bitValue.size(), '0');
         } else if (isa<FloatType>(cstType.getDataType())) {
           mlir::FloatAttr attr = cast<mlir::FloatAttr>(valueAttr);
           APInt floatInt = attr.getValue().bitcastToAPInt();
