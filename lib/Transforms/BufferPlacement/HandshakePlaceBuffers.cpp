@@ -811,12 +811,19 @@ LogicalResult HandshakePlaceBuffersPass::placeWithoutUsingMILP() {
 
     // Place the minimal number of buffers (as specified by the buffering
     // constraints on each channel) for each channel, deducting internal unit
-    // buffers at the same time
+    // buffers at the same time. A minimum on the total number of slots that
+    // the opaque and transparent minimums do not already meet is made up with
+    // transparent slots: that is the slot set-buffering-properties asks for
+    // in front of every LSQ access, which the MILP placers honour and this
+    // one used to drop, leaving the allocation-to-access lag on the loop.
     BufferPlacement placement;
     for (auto &[channel, props] : channelProps) {
       PlacementResult result;
       result.numOneSlotDV = props.minOpaque;
       result.numOneSlotR = props.minTrans;
+      unsigned minimum = props.minOpaque + props.minTrans;
+      if (props.minSlots > minimum)
+        result.numOneSlotR += props.minSlots - minimum;
       placement[channel] = result;
     }
 
