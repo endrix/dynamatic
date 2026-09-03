@@ -15,7 +15,9 @@
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
+#ifdef DYNAMATIC_ENABLE_LIBCLANG
 #include "clang-c/Index.h"
+#endif // DYNAMATIC_ENABLE_LIBCLANG
 
 // [START Boilerplate code for the MLIR pass]
 #include "dynamatic/Transforms/Passes.h" // IWYU pragma: keep
@@ -27,6 +29,8 @@ namespace dynamatic {
 
 using namespace mlir;
 using namespace dynamatic;
+
+#ifdef DYNAMATIC_ENABLE_LIBCLANG
 
 using FuncArgs = SmallVector<std::string>;
 using FuncData = llvm::StringMap<FuncArgs>;
@@ -120,3 +124,26 @@ struct FuncSetArgNamesPass
 };
 
 } // namespace
+
+#else // DYNAMATIC_ENABLE_LIBCLANG
+
+namespace {
+
+/// Stand-in for a build configured with DYNAMATIC_ENABLE_LIBCLANG=OFF: the
+/// pass is still registered (so pipelines parse) but cannot run.
+struct FuncSetArgNamesPass
+    : public dynamatic::impl::FuncSetArgNamesBase<FuncSetArgNamesPass> {
+
+  using FuncSetArgNamesBase::FuncSetArgNamesBase;
+
+  void runDynamaticPass() override {
+    mlir::emitError(getOperation().getLoc())
+        << "--func-set-arg-names needs libclang to parse " << source
+        << ", and this Dynamatic was built with DYNAMATIC_ENABLE_LIBCLANG=OFF";
+    signalPassFailure();
+  }
+};
+
+} // namespace
+
+#endif // DYNAMATIC_ENABLE_LIBCLANG
