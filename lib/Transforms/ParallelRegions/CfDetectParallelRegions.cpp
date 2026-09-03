@@ -215,13 +215,16 @@ static bool dependsOn(Operation *src, Operation *dst, NameAnalysis &names) {
 /// Whether the two segments' accesses may interleave. A recorded dependence
 /// orders them. Two memories are free of each other. One memory both only
 /// read is free. One memory one of them writes is free only when every
-/// access to it goes to a memory controller, which executes them in arrival
-/// order -- the same trust in the dependence analysis that sent them there;
-/// an LSQ would have to serve both segments, which it cannot. An effect on
-/// another resource is tied to the value it names (a port): two values are
-/// two things, one value is one.
+/// access to it goes to a memory controller AND the controllers were chosen
+/// from the recorded dependences (`trustMC`): then an access on one is an
+/// access the dependence analysis found free of every other, and the
+/// controller executes them in arrival order. A forced controller says
+/// nothing, and the memory keeps the segments in order. An LSQ would have to
+/// serve both segments, which it cannot. An effect on another resource is
+/// tied to the value it names (a port): two values are two things, one value
+/// is one.
 static bool memoryIndependent(const Segment &a, const Segment &b,
-                              NameAnalysis &names) {
+                              NameAnalysis &names, bool trustMC) {
   if (a.opaque || b.opaque)
     return false;
   for (const Access &x : a.accesses) {
@@ -240,7 +243,7 @@ static bool memoryIndependent(const Segment &a, const Segment &b,
       Value rx = rootOf(x.memref), ry = rootOf(y.memref);
       if (rx && ry && rx != ry)
         continue;
-      if (rx && rx == ry && connectsToMC(x.op) && connectsToMC(y.op))
+      if (trustMC && rx && rx == ry && connectsToMC(x.op) && connectsToMC(y.op))
         continue;
       return false;
     }
@@ -297,7 +300,7 @@ static void collectAccesses(Operation &op, Segment &seg) {
 /// one, a new range starts right after the last unit the newcomer depends
 /// on, so that the tail can still pair with it.
 static void groupChain(func::FuncOp funcOp, BlockIndex &index,
-                       NameAnalysis &names, Block *entry,
+                       NameAnalysis &names, bool trustMC, Block *entry,
                        SmallVectorImpl<Segment> &segments, Block *successor,
                        SmallVectorImpl<Attribute> &groups) {
   SmallVector<Segment> units;
@@ -334,7 +337,7 @@ static void groupChain(func::FuncOp funcOp, BlockIndex &index,
   for (unsigned i = 0; i < n; ++i) {
     for (unsigned j = i + 1; j < n; ++j) {
       bool liveOut = hasLiveOut(units[i], units[j]);
-      bool memory = memoryIndependent(units[i], units[j], names);
+      bool memory = memoryIndependent(units[i], units[j], names, trustMC);
       LLVM_DEBUG(llvm::dbgs()
                  << "units at blocks " << index[units[i].blocks.front()]
                  << " and " << index[units[j].blocks.front()] << ": "
@@ -439,6 +442,10 @@ void CfDetectParallelRegionsPass::analyzeFunction(func::FuncOp funcOp) {
     return;
   }
   NameAnalysis &names = getAnalysis<NameAnalysis>();
+  // A controller is evidence of independence only when
+  // `mark-memory-interfaces` chose it from the recorded dependences; one that
+  // `force-memory-interface` put there is not.
+  bool trustMC = funcOp->hasAttr(MEM_INTERFACES_FROM_DEPS_ATTR);
   BlockIndex index;
   for (auto [i, block] : llvm::enumerate(funcOp.getBlocks()))
     index[&block] = i;
@@ -506,7 +513,8 @@ void CfDetectParallelRegionsPass::analyzeFunction(func::FuncOp funcOp) {
           return seg.contains(successor);
         }))
       continue;
-    groupChain(funcOp, index, names, entry, segments, successor, groups);
+    groupChain(funcOp, index, names, trustMC, entry, segments, successor,
+               groups);
   }
 
   OpBuilder builder(funcOp.getContext());

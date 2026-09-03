@@ -89,6 +89,14 @@ Os &operator<<(Os &os, ChannelBufProps &props) {
   return os;
 }
 
+/// Set on a function by `mark-memory-interfaces`: the interfaces of its
+/// accesses were chosen from the recorded dependences (`handshake.deps`), so
+/// an access on a memory controller is one the dependence analysis found free
+/// of every other. `force-memory-interface` removes it: a forced controller
+/// says nothing about dependences.
+constexpr llvm::StringLiteral
+    MEM_INTERFACES_FROM_DEPS_ATTR("handshake.mem_interfaces_from_deps");
+
 } // namespace handshake
 } // namespace dynamatic
 

@@ -91,12 +91,43 @@ func.func @dependence(%a: memref<8xi32>, %x1: memref<8xi32>, %x2: memref<8xi32>)
 // -----
 
 // Both loops write x1 with no dependence recorded between them (disjoint
-// halves), every access on a memory controller: they may interleave, the way
-// the controller already lets them.
+// halves), every access on a memory controller that `mark-memory-interfaces`
+// chose from the recorded dependences: they may interleave, the way the
+// controller already lets them.
 // CHECK-LABEL:   func.func @shared_memory_on_mc(
+// CHECK-SAME:      handshake.mem_interfaces_from_deps
 // CHECK-SAME:      handshake.parallel_regions = [{entry = 0 : ui32, regions = {{\[}}[1], [2]], successor = 3 : ui32}]
 // expected-remark @below {{parallel regions [1] [2] between blocks 0 and 3}}
-func.func @shared_memory_on_mc(%a: memref<8xi32>, %x1: memref<8xi32>) {
+func.func @shared_memory_on_mc(%a: memref<8xi32>, %x1: memref<8xi32>) attributes {handshake.mem_interfaces_from_deps} {
+  %c0 = arith.constant {handshake.name = "c0"} 0 : index
+  cf.br ^bb1(%c0 : index) {handshake.name = "br0"}
+^bb1(%i: index):
+  %c1 = arith.constant {handshake.name = "c1"} 1 : index
+  %c4 = arith.constant {handshake.name = "c4"} 4 : index
+  %v = memref.load %a[%i] {handshake.mem_interface = #handshake.mem_interface<MC>, handshake.name = "load0"} : memref<8xi32>
+  memref.store %v, %x1[%i] {handshake.mem_interface = #handshake.mem_interface<MC>, handshake.name = "store0"} : memref<8xi32>
+  %i1 = arith.addi %i, %c1 {handshake.name = "inc_i"} : index
+  %cond = arith.cmpi ult, %i1, %c4 {handshake.name = "cmp1"} : index
+  cf.cond_br %cond, ^bb1(%i1 : index), ^bb2(%c4 : index) {handshake.name = "cond_br0"}
+^bb2(%j: index):
+  %c1_0 = arith.constant {handshake.name = "c1_0"} 1 : index
+  %c8_0 = arith.constant {handshake.name = "c8_0"} 8 : index
+  %w = memref.load %a[%j] {handshake.mem_interface = #handshake.mem_interface<MC>, handshake.name = "load1"} : memref<8xi32>
+  memref.store %w, %x1[%j] {handshake.mem_interface = #handshake.mem_interface<MC>, handshake.name = "store1"} : memref<8xi32>
+  %j1 = arith.addi %j, %c1_0 {handshake.name = "inc_j"} : index
+  %cond_0 = arith.cmpi ult, %j1, %c8_0 {handshake.name = "cmp2"} : index
+  cf.cond_br %cond_0, ^bb2(%j1 : index), ^bb3 {handshake.name = "cond_br1"}
+^bb3:
+  return {handshake.name = "return0"}
+}
+
+// -----
+
+// The same interfaces, forced rather than chosen from dependences (nothing
+// says the halves are disjoint): the memory keeps the loops in order.
+// CHECK-LABEL:   func.func @shared_memory_forced_on_mc(
+// CHECK-NOT:       handshake.parallel_regions
+func.func @shared_memory_forced_on_mc(%a: memref<8xi32>, %x1: memref<8xi32>) {
   %c0 = arith.constant {handshake.name = "c0"} 0 : index
   cf.br ^bb1(%c0 : index) {handshake.name = "br0"}
 ^bb1(%i: index):

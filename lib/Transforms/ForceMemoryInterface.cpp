@@ -15,6 +15,7 @@
 #include "dynamatic/Dialect/Handshake/HandshakeAttributes.h"
 #include "dynamatic/Support/Attribute.h"
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 
 // [START Boilerplate code for the MLIR pass]
@@ -88,6 +89,12 @@ struct ForceMemoryInterfacePass
         return !written.contains(load.getMemRef());
       return false;
     };
+
+    // A forced interface says nothing about dependences: whatever
+    // `mark-memory-interfaces` vouched for no longer holds.
+    getOperation()->walk([&](func::FuncOp funcOp) {
+      funcOp->removeAttr(handshake::MEM_INTERFACES_FROM_DEPS_ATTR);
+    });
 
     // Find all memory operations and adds/modifies the
     // handshake::MemInterfaceAttr on them depending on the pass parameters
