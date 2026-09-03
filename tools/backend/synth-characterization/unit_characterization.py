@@ -55,10 +55,39 @@ def extract_generics_ports(vhdl_code, entity_name):
         lines = re.split(r';\s*\n', raw)
         return [line.strip() for line in lines if line.strip()]
 
-    generics = split_definitions(generics_raw)
-    ports    = split_definitions(ports_raw)
+    generics = split_identifier_lists(split_definitions(generics_raw))
+    ports    = split_identifier_lists(split_definitions(ports_raw))
 
     return entity_name, VhdlInterfaceInfo(generics, ports)
+
+
+def split_identifier_lists(definitions: List[str]) -> List[str]:
+    """
+    Expand a VHDL declaration that names several objects into one each.
+
+    `clk, rst : in std_logic` is one declaration of two ports. Everything
+    downstream works a name at a time: the port classification splits on the
+    colon and would classify a port called `clk, rst`, and the wrapper's port
+    map would write `clk, rst => clk, rst`, which does not compile. Splitting
+    here makes the rest of the interface handling see two ordinary ports.
+
+    Args:
+        definitions (List[str]): declarations as split on the semicolons.
+
+    Returns:
+        List[str]: the same declarations, one object name each.
+    """
+    expanded = []
+    for definition in definitions:
+        names, colon, rest = definition.partition(":")
+        if not colon or "," not in names:
+            expanded.append(definition)
+            continue
+        for name in names.split(","):
+            name = name.strip()
+            if name:
+                expanded.append(f"{name} :{rest}")
+    return expanded
 
 
 def generate_wrapper_top(entity_name, vhdl_interface_info, param_names):
@@ -118,7 +147,7 @@ generic map (
 
     return wrapper_top, entity_name
 
-def run_unit_characterization(unit_name, list_params, hdl_out_dir, synth_tool, top_def_file, tcl_dir, rpt_dir, log_dir, clock_period):
+def run_unit_characterization(unit_name, list_params, hdl_out_dir, synth_tool, top_def_file, tcl_dir, rpt_dir, log_dir, clock_period, module_name=None):
     """
     Run characterization for a single unit using the specified synthesis tool.
     
@@ -132,6 +161,11 @@ def run_unit_characterization(unit_name, list_params, hdl_out_dir, synth_tool, t
         rpt_dir (str): Directory where reports will be stored.
         log_dir (str): Directory where logs will be stored.
         clock_period (float): Clock period in nanoseconds for the synthesis tool.
+        module_name (str): Name of the unit's VHDL entity, when the RTL entry
+            gives one. A unit name is not always its entity's name --
+            `handshake.fork` is the entity `handshake_fork`, and all six
+            buffer implementations are `handshake.buffer` -- and the entity to
+            read the interface off cannot be found by the unit name alone.
     
     Returns:
         List[UnitCharacterization]: List of UnitCharacterization objects for the unit.
@@ -141,6 +175,13 @@ def run_unit_characterization(unit_name, list_params, hdl_out_dir, synth_tool, t
     # Generate top files for all the combination of parameters
     params_charact = {}
     for param in list_params:
+        # Only the parameters the RTL entry calls generics are generics of the
+        # VHDL entity; the rest name the implementation rather than configure
+        # it (a buffer's BUFFER_TYPE picks which of the six entities is built,
+        # and its TIMING states what that entity registers). Sweeping them
+        # would ask the wrapper for a generic the entity does not have.
+        if param.get("generic", True) is False:
+            continue
         param_name = param["name"]
         assert param_name in parameters_ranges, f"Parameter {param_name} not found in parameters_ranges."
         param_values = parameters_ranges[param_name]
@@ -152,7 +193,8 @@ def run_unit_characterization(unit_name, list_params, hdl_out_dir, synth_tool, t
     print(f"Extracting generics and ports from {top_def_file}")
     with open(top_def_file, 'r') as f:
         vhdl_code = f.read()
-    top_entity_name, vhdl_interface_info = extract_generics_ports(vhdl_code, unit_name)
+    top_entity_name, vhdl_interface_info = extract_generics_ports(
+        vhdl_code, module_name if module_name else unit_name)
     # Extract the template for the top file
     wrapper_top, top_entity_name = generate_wrapper_top(top_entity_name, vhdl_interface_info, param_names)
     # Create sdc constraints file (Vivado reads it; the ASAP7 backend is given
