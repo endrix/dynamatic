@@ -166,6 +166,34 @@ Measured at `--clock-period 1.0`:
 | `mux`, 32-bit, data | 0.053 | |
 | `cmpi`, 32-bit, data | 0.178 | |
 | `andi`, any bitwidth, data | 0.015 | one two-input gate |
+| `fork`, ready | 0.042 | `outs_ready[1]` to `ins_ready`, the eager fork's AND tree |
+| `fork`, data | 0.000 | `outs(i) <= ins` is a wire, and OpenSTA reports the path at 0.000 |
+| `buffer`, ready | 0.084 | the largest of the six implementations |
+
+### The three units a name covers several of
+
+`fork`, `lazy_fork` and `buffer` were added to the model in the same change
+that made `CV`/`CR` real. `handshake.buffer` is six VHDL entities -- `oehb`,
+`tehb`, `tfifo`, `elastic_fifo_inner`, `one_slot_break_dvr`,
+`shift_reg_break_dv` -- and the model has one entry per operation name, so the
+script characterizes all six and reduces each delay class with the maximum.
+The per-implementation numbers at 64 bits, which are what the buffer types
+mean, read straight off the reports:
+
+| implementation | `BUFFER_TYPE` | data | valid | ready |
+| --- | --- | --- | --- | --- |
+| `oehb` | `ONE_SLOT_BREAK_DV` | registered | registered | 39.0 ps |
+| `tehb` | `ONE_SLOT_BREAK_R` | 15.2 ps | 51.5 ps | registered |
+| `tfifo` | `FIFO_BREAK_NONE` | 19.1 ps | 17.9 ps | 17.9 ps |
+| `elastic_fifo_inner` | `FIFO_BREAK_DV` | registered | registered | 17.9 ps |
+| `one_slot_break_dvr` | `ONE_SLOT_BREAK_DVR` | registered | registered | registered |
+| `shift_reg_break_dv` | `SHIFT_REG_BREAK_DV` | registered | registered | 69.5 ps |
+
+"registered" is `No paths found.`, read back as 0.0. The maximum is the
+conservative reduction: the model then never says a path is shorter than some
+implementation makes it. It is also the only reduction available, since the
+placer looks a unit up by its operation name and `handshake.buffer` is the
+name of all six.
 
 The buffer placer accepts the model: on `fir`, `--handshake-place-buffers`
 with `algorithm=fpga20 solver=cbc` places buffers at a 1.0 ns target period
@@ -176,18 +204,35 @@ where against `components.json` it is already infeasible at 1.0 ns and needs
 ### What the model does not contain
 
 The characterization script skips some units (`utils.py`'s `skipping_units`)
-and the model has no entry for them: `fork`, `lazy_fork`, the buffer types, the
-floating-point units, `store`, `end`, `return`, `divsi`/`divui`, `remsi`. Two
-more units drop out of an ASAP7 run for reasons in the RTL: the dataful
-`control_merge` asserts false in `data/vhdl/handshake/control_merge.vhd`, and
-`sitofp`/`fptosi` elaborate only at a 32-bit data type. Buffer placement warns
-`no timing model for op` for each of them and treats them as zero-delay.
+and the model has no entry for them: the floating-point units, `store`, `end`,
+`return`, `divsi`/`divui`, `remsi`, `join`, `blocker`, `mem_controller` and the
+LSQ. Two more units drop out of an ASAP7 run for reasons in the RTL: the
+dataful `control_merge` asserts false in
+`data/vhdl/handshake/control_merge.vhd` ("implementation with data signal has
+a bug"), so it cannot be elaborated at all; and `sitofp`/`fptosi` elaborate
+only at a 32-bit data type, which is the format their RTL is written for.
+Buffer placement warns `no timing model for op` for each missing unit and
+treats it as zero-delay.
 
-`CV`, `CR` and `VC` are zero throughout: the delay classes are queried under
-the names `condition`/`valid`/`ready` and matched under `control`/`valid`/
-`ready` when the JSON is assembled, so the condition-to-valid and
-condition-to-ready measurements the script takes are discarded. The same is
-true of a Vivado run of this script.
+`mem_controller` now resolves its dependency (`mem_controller.vhd` names
+`mem_controller_loadless`, which the dependency dictionary keyed under the unit
+name rather than the file's), but it is still on the skip list: its ports are
+the BRAM interface (`loadEn`, `loadAddr`, `storeData`) and the per-access
+channels (`ldAddr`, `ldData`), which `VhdlInterfaceInfo.categorize_ports` has
+no rule for and asserts on, and its `NUM_LOADS`/`NUM_CONTROLS`/`NUM_STORES`
+have no entry in `parameters_ranges`. The BRAM side is not a handshake channel
+and has no place in the model's delay classes at all.
+
+`VC` is zero throughout, and for a reason that is not a bug: it is the delay
+from a `valid` input to a `condition` output, and the only unit in the RTL
+config with a `condition`-class *output* is `control_merge`'s `index` -- the
+one unit whose dataful VHDL refuses to elaborate. Nothing else can produce a
+number for it. `CV` and `CR` are measured (`select`, `mux` and `cond_br` have
+them); until this change they were thrown away, because the delay classes are
+queried under the names `condition`/`valid`/`ready` and were matched under
+`control`/`valid`/`ready` when the JSON was assembled. That was true of a
+Vivado run of this script too, so `components.json`'s `CV`, `CR` and `VC` are
+worth re-measuring.
 
 Latency is not measured here. `main.py` copies each unit's latency table from
 `--reference-json` (by default `data/components.json`), since a unit's pipeline

@@ -74,6 +74,29 @@ The scripts uses several key functions and data structures to orchestrate charac
 
     A dictionary mapping parameter names to lists of values to sweep. Enables exhaustive exploration of the design space. 
 
+    Only the parameters an RTL entry calls generics are swept. A parameter
+    marked `"generic": false` names the implementation rather than configures
+    it -- a buffer's `BUFFER_TYPE` picks which of six VHDL entities is built,
+    and its `TIMING` states what that entity registers -- and asking the
+    wrapper for a generic the entity does not have is an error.
+
+### The name of a unit and the name of its entity
+
+Three things in the RTL config make the two differ, and the script has to
+follow all three:
+
+- An entry can carry a `module-name`, and then that, not the unit name, is the
+  VHDL entity to read the interface off: `handshake.fork` is the entity
+  `handshake_fork`. `extract_rtl_info` returns it and it is passed down to
+  `extract_generics_ports`.
+- Several entries can share a unit name. Six of them are `handshake.buffer`,
+  and three are `handshake.mem_controller`. The timing model has one entry per
+  unit name, so their characterizations accumulate under that name and the
+  JSON assembly reduces each delay class over them with the maximum.
+- A unit's dependencies are its own entry's list, passed to `get_hdl_files`.
+  Looking them up by unit name finds the wrong entry when a name covers several
+  implementations, and no entry at all when the one it wants was registered
+  under its `module-name`.
 
 ### Entity Extraction
 
@@ -82,6 +105,11 @@ The scripts uses several key functions and data structures to orchestrate charac
     Parses VHDL code to extract the list of generics (parameters) and ports for the specified entity.
     - Removes comments for robust parsing.
     - Handles multiple entity definitions in a single file.
+    - Expands a declaration that names several objects (`clk, rst : in
+      std_logic`) into one declaration each, through `split_identifier_lists`.
+      Everything downstream works a name at a time: the port classification
+      splits on the colon, and a port map would otherwise read
+      `clk, rst => clk, rst`.
     - Returns: `(entity_name, VhdlInterfaceInfo)`.
 
 - **VhdlInterfaceInfo**: (File `utils.py`)
