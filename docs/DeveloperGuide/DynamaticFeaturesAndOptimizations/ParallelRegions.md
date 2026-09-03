@@ -98,6 +98,31 @@ it. Run it after `handshake-deactivate-mem-dependencies`, which reasons
 over the sequential CFG and would otherwise see no path between the regions
 and nothing to enforce.
 
+## In the flow
+
+`compile --parallel-regions` in the frontend (`PARALLEL_REGIONS`, the 20th
+argument of `compile.sh`) runs the analysis before `lower-cf-to-handshake`
+and the transformation right after `handshake-replace-memory-interfaces`,
+before `handshake-materialize`. With a profile-driven buffer placement the
+transformation is handed the profiler's CSV and stores the rewritten archs
+on the function, which the placer reads before the CSV; the profile is
+therefore taken before the handshake transformations instead of at
+placement time, which changes nothing else. Fast token delivery does not
+get the passes (it builds its own control network); the flag then says so
+and does nothing.
+
+The integration suite's `ParallelRegionsFixture` compiles the kernels the
+analysis accepts (`mvt_float`, `kernel_3mm`, `kernel_3mm_float`, `lu`, from
+a survey of all of them) with the flag, simulates them, records their
+cycles for the performance report, and runs
+`tools/backend/check-logic-loops.sh` on the export: yosys flattens the
+design and asserts there is no combinational loop, which a simulator
+would settle silently and buffer placement cannot see, having no timing
+model for `join`. The script reads a Verilog export as is (a VHDL module
+inside it, the LSQ, stays a black box) and a VHDL export through the GHDL
+plugin; without yosys it reports that nothing was checked and the test
+does not fail on it.
+
 ## Measured
 
 `mvt_float`, the fixture the passes were built against: 17996 cycles to
@@ -107,6 +132,24 @@ transformation pass's output on the hand-annotated IR is the hand-written
 proof of concept up to names, and the chain from the C flow's cf IR
 through the analysis, the lowering and the flow's own pass order gives the
 same 9004.
+
+Through the frontend (`compile --parallel-regions`, VHDL, GHDL, outputs
+checked against the C run, the export free of combinational loops), the
+four kernels the analysis accepts, latency in cycles:
+
+| kernel | placement | without | with |
+|---|---|---|---|
+| mvt_float | on-merges | 17997 | 9005 |
+| mvt_float | fpga20 (cbc) | 17997 | 5291 |
+| kernel_3mm | on-merges | 20006 | 14005 |
+| kernel_3mm_float | on-merges | 31998 | 22001 |
+| lu | on-merges | 619 | 613 |
+
+With the fpga20 placement the MILP sees both nests' cycles through the
+rewritten archs and pipelines them, which the serial design never let it
+do: the on-merges and fpga20 latencies of the serial `mvt_float` are the
+same 17997. `lu`'s second region is a single small block, so it gains
+what that block costs.
 
 ## Not yet
 
