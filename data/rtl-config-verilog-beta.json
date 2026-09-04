@@ -31,6 +31,14 @@
     "hdl": "verilog"
   },
   {
+    "name": "handshake.remui",
+    "parameters": [
+      {"name": "LATENCY","type": "unsigned"}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/verilog/verilog-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.v -t remui -p bitwidth=$BITWIDTH  latency=$LATENCY extra_signals=$EXTRA_SIGNALS",
+    "hdl": "verilog"
+  },
+  {
     "name": "handshake.divsi",
     "parameters": [
       {"name": "LATENCY","type": "unsigned"}
