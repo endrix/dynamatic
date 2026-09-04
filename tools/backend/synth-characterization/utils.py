@@ -34,12 +34,9 @@ skipping_units = [
     "handshake.mem_controller",
     "mem_to_bram",
     # units characterized by other scripts
-    "handshake.fork",
-    "handshake.lazy_fork",
     "handshake.lsq",
     "handshake.mulf",
     "handshake.negf",
-    "handshake.buffer",
     "handshake.addf",
     "handshake.cmpf",
     "handshake.divf",
@@ -51,6 +48,9 @@ skipping_units = [
 parameters_ranges = { 
     "DATA_TYPE": [1, 2, 4, 8, 16, 32, 64],
     "SIZE": [2],
+    # A buffer's depth. The delays this script measures are the buffer's
+    # combinational paths, which do not depend on how many slots it holds.
+    "NUM_SLOTS": [2],
     "SELECT_TYPE": [2],
     "INDEX_TYPE": [2],
     "ADDR_TYPE": [64],
@@ -234,7 +234,10 @@ def add_2d_ports(ports, direction):
     result = []
     for port in ports:
         if direction in port and "data_array" in port:
-            match = re.search(r'data_array\((\w+)\s*-\s*1\s*downto\s*0\)', port)
+            # `data_array (SIZE - 1 downto 0)(DATA_TYPE - 1 downto 0)`:
+            # the VHDL writes the space, so the regex has to allow it.
+            match = re.search(
+                r'data_array\s*\((\w+)\s*-\s*1\s*downto\s*0\)', port)
             assert match, f"Could not find data_array port {port}."
             size_name = match.group(1)
             # Get corresponding size # Assuming only one value in parameters allowed

@@ -15,15 +15,19 @@ def extract_rtl_info(unit_info):
         unit_info (dict): Dictionary containing unit information.
         
     Returns:
-        tuple: A tuple containing the unit name, list of parameters, generic, generator, and dependencies.
+        tuple: A tuple containing the unit name, list of parameters, generic,
+            generator, dependencies, and the name of the VHDL entity when the
+            entry gives one (a unit name is not always its entity's name:
+            `handshake.fork` is the entity `handshake_fork`).
     """
     unit_name = unit_info.get("name")
     list_params = unit_info.get("parameters", [])
     generic = unit_info.get("generic", None)
     generator = unit_info.get("generator", None)
     dependencies = unit_info.get("dependencies", [])
+    module_name = unit_info.get("module-name", None)
 
-    return unit_name, list_params, generic, generator, dependencies
+    return unit_name, list_params, generic, generator, dependencies, module_name
 
 # Extract dependencies from the dataflow units
 # This function is essential to move the right RTL files
@@ -69,6 +73,14 @@ def get_dependency_dict(dataflow_units):
             dependencies = unit_info.get("dependencies", [])
             unit_name = unit_info["name"]
             dependency_dict[unit_name] = {"RTL": rtl_file, "dependencies": dependencies}
+            # Several entries can share a `name` and no `module-name`; a
+            # dependency on one of them is written with the RTL file's stem
+            # (`mem_controller` depends on `mem_controller_loadless`), so
+            # register that name too.
+            if rtl_file:
+                stem = rtl_file.split("/")[-1].split(".")[0]
+                dependency_dict.setdefault(
+                    stem, {"RTL": rtl_file, "dependencies": dependencies})
     return dependency_dict
 
 
@@ -115,7 +127,7 @@ def run_characterization(json_input, json_output, dynamatic_dir, synth_tool, clo
 
     for unit_info in dataflow_units:
         # Extract the unit name and its RTL information
-        unit_name, list_params, generic, generator, dependencies = extract_rtl_info(unit_info)
+        unit_name, list_params, generic, generator, dependencies, module_name = extract_rtl_info(unit_info)
         if unit_name == None:
             print("Skipping unit with no name.")
             continue
@@ -139,11 +151,14 @@ def run_characterization(json_input, json_output, dynamatic_dir, synth_tool, clo
         os.system(f"rm -rf {tcl_dir}/*")
         # Copy the RTL files or generate them if necessary
         print(f"Processing unit: {unit_name}")
-        top_def_file = get_hdl_files(unit_name, generic, generator, hdl_dir, dynamatic_dir, all_dependencies_dict)
+        top_def_file = get_hdl_files(unit_name, generic, generator, dependencies, hdl_dir, dynamatic_dir, all_dependencies_dict)
         # After generating the HDL files, we can proceed with characterization
-        list_unit_chars = run_unit_characterization(unit_name, list_params, hdl_dir, synth_tool, top_def_file, tcl_dir, rpt_dir, log_dir, clock_period)
-        # Store the results in the map_unit_to_list_unit_chars dictionary
-        map_unit_to_list_unit_chars[unit_name] = list_unit_chars
+        list_unit_chars = run_unit_characterization(unit_name, list_params, hdl_dir, synth_tool, top_def_file, tcl_dir, rpt_dir, log_dir, clock_period, module_name)
+        # Store the results in the map_unit_to_list_unit_chars dictionary.
+        # A unit name can name several implementations -- six of them are
+        # `handshake.buffer`, and the model has one entry per name -- so the
+        # characterizations accumulate and the assembly reduces over them.
+        map_unit_to_list_unit_chars.setdefault(unit_name, []).extend(list_unit_chars)
     
     # Save the results to the output JSON file
     extract_rpt_data(map_unit_to_list_unit_chars, json_output, synth_tool, reference_json)

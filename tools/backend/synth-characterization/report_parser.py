@@ -156,18 +156,28 @@ def extract_rpt_data(map_unit_to_list_unit_chars, json_output,
                 # Extract delay from the report file
                 delay = extract_single_rpt(rpt_filename, synth_tool)
                 if delay_type == ("data", "data"):
-                    dataDict[str(unit_char.get_parameter_value("DATA_TYPE"))] = delay
+                    # A unit name can cover several implementations that reach
+                    # this bitwidth (six of them are `handshake.buffer`), and
+                    # the model has one entry per name. Reduce with the max, as
+                    # the other delay classes below do: the model then never
+                    # says a path is shorter than some implementation makes it.
+                    bitwidth = str(unit_char.get_parameter_value("DATA_TYPE"))
+                    dataDict[bitwidth] = max(dataDict.get(bitwidth, 0.0), delay)
                 elif delay_type == ("valid", "valid"):
                     validDict["1"] = max(validDict["1"], delay)
                 elif delay_type == ("ready", "ready"):
                     readyDict["1"] = max(readyDict["1"], delay)
                 elif delay_type == ("valid", "ready"):
                     VRDelayFinal = max(VRDelayFinal, delay)
-                elif delay_type == ("control", "valid"):
+                # The delay classes are named after the port class the
+                # interface parser assigns, which is "condition" (see
+                # VhdlInterfaceInfo.categorize_ports); the model's keys for
+                # them are CV, CR and VC.
+                elif delay_type == ("condition", "valid"):
                     CVDelayFinal = max(CVDelayFinal, delay)
-                elif delay_type == ("control", "ready"):
+                elif delay_type == ("condition", "ready"):
                     CRDelayFinal = max(CRDelayFinal, delay)
-                elif delay_type == ("valid", "control"):
+                elif delay_type == ("valid", "condition"):
                     VCDelayFinal = max(VCDelayFinal, delay)
                 elif delay_type == ("valid", "data"):
                     VDDelayFinal = max(VDDelayFinal, delay)
