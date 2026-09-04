@@ -707,6 +707,7 @@ static GIIDStatus isGIIDRec(
                 handshake::OrIOp, handshake::ShLIOp, handshake::ShRUIOp,
                 handshake::ShRSIOp, handshake::SubIOp, handshake::TruncIOp,
                 handshake::XOrIOp, handshake::NotIOp, handshake::RemSIOp,
+                handshake::RemUIOp,
                 handshake::MaxSIOp, handshake::MaxUIOp, handshake::MinSIOp,
                 handshake::MinUIOp, handshake::MaximumFOp,
                 handshake::MinimumFOp, handshake::AddFOp, handshake::CmpFOp,

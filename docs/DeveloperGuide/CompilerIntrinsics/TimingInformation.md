@@ -205,7 +205,7 @@ where against `components.json` it is already infeasible at 1.0 ns and needs
 
 The characterization script skips some units (`utils.py`'s `skipping_units`)
 and the model has no entry for them: the floating-point units, `store`, `end`,
-`return`, `divsi`/`divui`, `remsi`, `join`, `blocker`, `mem_controller` and the
+`return`, `divsi`/`divui`, `remsi`/`remui`, `join`, `blocker`, `mem_controller` and the
 LSQ. Two more units drop out of an ASAP7 run for reasons in the RTL: the
 dataful `control_merge` asserts false in
 `data/vhdl/handshake/control_merge.vhd` ("implementation with data signal has

@@ -2222,6 +2222,9 @@ void HandshakeOptimizeBitwidthsPass::addForwardPatterns(
   fwPatterns.add<ArithSingleType<handshake::DivSIOp>>(
       bitwidthReduced, true, divWidth</*zeroExtend=*/true>, ctx,
       getAnalysis<NameAnalysis>());
+  fwPatterns.add<ArithSingleType<handshake::RemUIOp>>(
+      bitwidthReduced, true, divWidth</*zeroExtend=*/true>, ctx,
+      getAnalysis<NameAnalysis>());
 
   fwPatterns.add<ArithCmpFW, ArithBoundOpt>(bitwidthReduced, ctx,
                                             getAnalysis<NameAnalysis>());

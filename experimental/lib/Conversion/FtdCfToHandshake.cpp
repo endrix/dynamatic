@@ -336,6 +336,7 @@ struct FtdCfToHandshakePass
                  OneToOneConversion<arith::DivSIOp, handshake::DivSIOp>,
                  OneToOneConversion<arith::DivUIOp, handshake::DivUIOp>,
                  OneToOneConversion<arith::RemSIOp, handshake::RemSIOp>,
+                 OneToOneConversion<arith::RemUIOp, handshake::RemUIOp>,
                  OneToOneConversion<arith::ExtSIOp, handshake::ExtSIOp>,
                  OneToOneConversion<arith::ExtUIOp, handshake::ExtUIOp>,
                  OneToOneConversion<arith::MaximumFOp, handshake::MaximumFOp>,

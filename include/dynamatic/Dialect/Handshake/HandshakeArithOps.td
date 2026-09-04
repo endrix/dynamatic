@@ -483,6 +483,16 @@ def Handshake_DivUIOp : Handshake_Arith_IntBinaryOp<"divui", [
   let summary = "Unsigned integer division.";
 }
 
+def Handshake_RemUIOp : Handshake_Arith_IntBinaryOp<"remui", [
+  BinaryArithNamedIO,
+  IsIntChannel<"lhs">,
+  IsIntChannel<"rhs">,
+  IsIntChannel<"result">,
+  LatencyInterface
+]> {
+  let summary = "Unsigned integer remainder.";
+}
+
 def Handshake_MaxSIOp : Handshake_Arith_IntBinaryOp<"maxsi", [
   BinaryArithNamedIO
 ]> {
