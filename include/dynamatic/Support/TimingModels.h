@@ -89,6 +89,20 @@ public:
   FailureOr<std::reference_wrapper<const M>> select(Operation *op) const {
     return select(getOpDatawidth(op));
   }
+
+  /// The widest characterised bitwidth; fails only when there is no data
+  /// point at all. For a metric that does not grow with the bitwidth (a
+  /// unit's latency is its stage count, a generator parameter) the entry at
+  /// this bitwidth is the value for any wider operation too.
+  FailureOr<unsigned> widestBitwidth() const {
+    std::optional<unsigned> widest;
+    for (const auto &[width, m] : data)
+      if (!widest.has_value() || width > *widest)
+        widest = width;
+    if (!widest.has_value())
+      return failure();
+    return *widest;
+  }
 };
 
 /// Represents a delay-dependent latency: maps any number of internal

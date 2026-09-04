@@ -146,10 +146,24 @@ FailureOr<double> TimingDatabase::getLatency(Operation *op,
   }
   auto latAndMaxFreqByClockPeriod = latAndMaxFreqByBitwidth->get().select(op);
   if (failed(latAndMaxFreqByClockPeriod)) {
-    op->emitWarning()
-        << "TimingDatabase::getLatency: bitwidth not characterised in the "
-           "timing model";
-    return failure();
+    // The operation is wider than the widest characterised bitwidth. Its
+    // latency is still known: a unit's latency is its stage count, a
+    // generator parameter that does not change with the width (the same
+    // number is handed to the generator as LATENCY), so the widest entry
+    // holds for any wider operation. Only the delay is unknown, and the
+    // delay lookups keep failing for such a width.
+    auto widest = latAndMaxFreqByBitwidth->get().widestBitwidth();
+    if (failed(widest)) {
+      op->emitWarning()
+          << "TimingDatabase::getLatency: bitwidth not characterised in the "
+             "timing model";
+      return failure();
+    }
+    op->emitRemark() << "TimingDatabase::getLatency: bitwidth "
+                     << getOpDatawidth(op)
+                     << " is above the widest characterised (" << *widest
+                     << "); the latency is the widest entry's";
+    latAndMaxFreqByClockPeriod = latAndMaxFreqByBitwidth->get().select(*widest);
   }
   auto latencyOrFail =
       latAndMaxFreqByClockPeriod->get().selectLatency(targetPeriod);
