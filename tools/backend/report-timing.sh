@@ -21,8 +21,9 @@
 # (the files, space-separated) and SEQ_LIBERTY (the one with the flip-flops).
 #
 # A Verilog export (*.v) is read as is; a VHDL export (*.vhd) through the GHDL
-# plugin for yosys, the way the VHDL flow's designs are simulated. Memories
-# become flip-flops, which is what a 64-entry block buffer is anyway.
+# plugin for yosys, the way the VHDL flow's designs are simulated (the reading
+# is tools/backend/hdl-read.sh, shared with report-lut6.sh). Memories become
+# flip-flops, which is what a 64-entry block buffer is anyway.
 #
 # Exit status: 0 with a report; 1 when a tool failed; 2 when a tool or the
 # library is not installed, nothing was timed.
@@ -44,6 +45,9 @@ mkdir -p "$LOG_DIR"
 # conditions and the reset port: tools/backend/asap7-lib.sh, shared with the
 # ASAP7 backend of the dataflow-unit characterization.
 source "$(dirname "${BASH_SOURCE[0]}")/asap7-lib.sh"
+# How the export is read into yosys: tools/backend/hdl-read.sh, shared with
+# report-lut6.sh, so that the timing and the LUT count are of one design.
+source "$(dirname "${BASH_SOURCE[0]}")/hdl-read.sh"
 
 for tool in yosys; do
   if ! command -v "$tool" >/dev/null 2>&1; then
@@ -60,30 +64,7 @@ if [[ -z "$LIBERTIES" || -z "$SEQ_LIBERTY" || ! -f "$SEQ_LIBERTY" ]]; then
   exit 2
 fi
 
-VERILOG=$(ls "$HDL_DIR"/*.v 2>/dev/null | tr '\n' ' ')
-VHDL=$(ls "$HDL_DIR"/*.vhd 2>/dev/null | tr '\n' ' ')
-if [[ -n "$VERILOG" ]]; then
-  READ="read_verilog -sv -noassert $VERILOG; hierarchy -top $TOP"
-  YOSYS=(yosys)
-elif [[ -n "$VHDL" ]]; then
-  if ! yosys -q -m ghdl -p "" >/dev/null 2>&1; then
-    echo "report-timing: the GHDL plugin for yosys is not installed; VHDL not timed" >&2
-    exit 2
-  fi
-  FILES="$(ls "$HDL_DIR"/types.vhd 2>/dev/null || true)"
-  for f in $VHDL; do
-    case "$(basename "$f")" in
-      types.vhd|"$TOP.vhd") continue ;;
-    esac
-    FILES="$FILES $f"
-  done
-  FILES="$FILES $HDL_DIR/$TOP.vhd"
-  READ="ghdl --std=08 -fsynopsys $FILES -e $TOP; hierarchy -top $TOP"
-  YOSYS=(yosys -m ghdl)
-else
-  echo "report-timing: no Verilog or VHDL file in $HDL_DIR" >&2
-  exit 1
-fi
+hdl_read_design report-timing "$HDL_DIR" "$TOP" || exit $?
 
 MAPPED="$LOG_DIR/$TOP.mapped.v"
 CONSTR="$LOG_DIR/$TOP.abc.constr"
