@@ -251,9 +251,13 @@ static MinimalValue backtrackToMinimalValue(ChannelVal val) {
 }
 
 /// Returns the maximum number of bits that are used by any of the value's
-/// users. If the value has no users, returns 0. During the backward pass, the
-/// returned value gives an indication of how many high-significant bits can be
-/// safely truncated away from the value during optimization.
+/// users, and one when nothing uses them: a value whose only users are sinks
+/// (or that has none) still travels on a channel, and a channel has to be at
+/// least one bit wide -- `ChannelType` refuses `i0`, and a state variable a
+/// firing sets to a constant nobody reads was narrowing to exactly that.
+/// During the backward pass, the returned value gives an indication of how
+/// many high-significant bits can be safely truncated away from the value
+/// during optimization.
 static unsigned getUsefulResultWidth(ChannelVal val) {
   std::optional<unsigned> maxWidth;
   for (Operation *user : val.getUsers()) {
@@ -265,7 +269,7 @@ static unsigned getUsefulResultWidth(ChannelVal val) {
     unsigned truncWidth = truncOp.getOut().getType().getDataBitWidth();
     maxWidth = std::max(maxWidth.value_or(0), truncWidth);
   }
-  return maxWidth.value_or(0);
+  return std::max(maxWidth.value_or(0), 1u);
 }
 
 /// Produces a value that matches the content of the passed value but whose
