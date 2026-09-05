@@ -255,9 +255,15 @@ bool ASTStatistic::fromJSON(const llvm::json::Value &value,
                             llvm::json::Path path) {
   std::map<std::string, double> averages;
   llvm::json::ObjectMapper mapper(value, path);
-  if (!mapper || !mapper.map("numSamples", numSamples) ||
+  // uint64_t rather than the member's std::size_t: llvm::json has overloads
+  // for `unsigned` and `uint64_t` and none for size_t as such. They are the
+  // same type on LP64 Linux and different on 64-bit macOS, where uint64_t is
+  // `unsigned long long`.
+  uint64_t numSamplesJSON = 0;
+  if (!mapper || !mapper.map("numSamples", numSamplesJSON) ||
       !mapper.map("averages", averages))
     return false;
+  numSamples = static_cast<std::size_t>(numSamplesJSON);
 
   counts.clear();
   for (const auto &[name, average] : averages) {

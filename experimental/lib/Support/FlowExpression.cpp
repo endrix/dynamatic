@@ -15,7 +15,10 @@ IndexTokenTracker::IndexTokenTracker(size_t numValues) {
 IndexTokenTracker IndexTokenTracker::fromJSON(const llvm::json::Value &value,
                                               llvm::json::Path path) {
   llvm::json::ObjectMapper mapper(value, path);
-  unsigned long x;
+  // uint64_t, not `unsigned long`: llvm::json has an overload for uint64_t and
+  // none for `unsigned long` as such. The two are the same type on LP64 Linux
+  // and different on 64-bit macOS, where uint64_t is `unsigned long long`.
+  uint64_t x;
   if (!mapper || !mapper.map(TRACKED_VALUES_LIT, x)) {
     llvm::report_fatal_error("json parsing of Token Tracker failed");
   }
