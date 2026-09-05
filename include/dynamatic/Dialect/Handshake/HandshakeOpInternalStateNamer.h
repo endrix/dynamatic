@@ -154,7 +154,14 @@ struct EagerForkSentNamer : InternalStateNamer {
 
   std::string opName;
   std::string channelName;
-  size_t channelSize;
+  // uint64_t rather than size_t, and deliberately: these members are read
+  // straight out of JSON by llvm::json::ObjectMapper, which has overloads for
+  // `unsigned` and for `uint64_t` but none for size_t as such. On LP64 Linux
+  // uint64_t IS `unsigned long`, so a size_t member binds to that overload and
+  // compiles; on 64-bit macOS uint64_t is `unsigned long long` and a size_t
+  // member matches neither, so the mapper fails to instantiate. Same width on
+  // both, so nothing else changes.
+  uint64_t channelSize;
 
   ConstrainedEagerForkSentNamer constrain(int32_t value) const;
 
@@ -233,7 +240,14 @@ struct BufferSlotFullNamer : InternalStateNamer {
   std::string opName;
   std::string slotName;
   std::string dataName;
-  size_t slotSize;
+  // uint64_t rather than size_t, and deliberately: these members are read
+  // straight out of JSON by llvm::json::ObjectMapper, which has overloads for
+  // `unsigned` and for `uint64_t` but none for size_t as such. On LP64 Linux
+  // uint64_t IS `unsigned long`, so a size_t member binds to that overload and
+  // compiles; on 64-bit macOS uint64_t is `unsigned long long` and a size_t
+  // member matches neither, so the mapper fails to instantiate. Same width on
+  // both, so nothing else changes.
+  uint64_t slotSize;
   static constexpr llvm::StringLiteral OPERATION_LIT = "operation";
   static constexpr llvm::StringLiteral SLOT_NAME_LIT = "slot_name";
   static constexpr llvm::StringLiteral DATA_NAME_LIT = "data_name";
@@ -366,7 +380,14 @@ struct MemoryControllerSlotNamer : InternalStateNamer {
                        MemoryControllerSlotNamer &namer, llvm::json::Path path);
 
   std::string opName;
-  size_t slotIndex;
+  // uint64_t rather than size_t, and deliberately: these members are read
+  // straight out of JSON by llvm::json::ObjectMapper, which has overloads for
+  // `unsigned` and for `uint64_t` but none for size_t as such. On LP64 Linux
+  // uint64_t IS `unsigned long`, so a size_t member binds to that overload and
+  // compiles; on 64-bit macOS uint64_t is `unsigned long long` and a size_t
+  // member matches neither, so the mapper fails to instantiate. Same width on
+  // both, so nothing else changes.
+  uint64_t slotIndex;
   PortType portType;
   bool loadless;
   static constexpr llvm::StringLiteral OPERATION_LIT = "operation";

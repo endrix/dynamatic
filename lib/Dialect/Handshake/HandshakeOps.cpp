@@ -221,6 +221,8 @@ void handshake::HandshakeDialect::getCanonicalizationPatterns(
 // MergeOp
 //===----------------------------------------------------------------------===//
 
+OpResult FirstOp::getDataResult() { return cast<OpResult>(getResult()); }
+
 OpResult MergeOp::getDataResult() { return cast<OpResult>(getResult()); }
 
 //===----------------------------------------------------------------------===//

@@ -59,16 +59,22 @@ struct IndexTracker {
 
   inline IndexTracker static fromJSON(const llvm::json::Value &value,
                                       llvm::json::Path path) {
-    size_t numValues;
-    std::optional<size_t> singleValue;
+    // uint64_t, not size_t: llvm::json::ObjectMapper has overloads for
+    // `unsigned` and `uint64_t` but none for size_t as such. On LP64 Linux
+    // uint64_t IS `unsigned long` so size_t binds to it; on 64-bit macOS
+    // uint64_t is `unsigned long long` and size_t matches neither. Same width
+    // either way, so this only fixes which overload is found.
+    uint64_t numValuesJSON;
+    std::optional<uint64_t> singleValueJSON;
     llvm::json::ObjectMapper mapper(value, path);
-    if (!mapper || !mapper.map(NUM_VALUES_LIT, numValues) ||
-        !mapper.map(SINGLE_VALUE_LIT, singleValue)) {
+    if (!mapper || !mapper.map(NUM_VALUES_LIT, numValuesJSON) ||
+        !mapper.map(SINGLE_VALUE_LIT, singleValueJSON)) {
       llvm::report_fatal_error("json parsing of failed");
     }
 
-    IndexTracker ret(numValues);
-    ret.trackedValue = singleValue;
+    IndexTracker ret(static_cast<size_t>(numValuesJSON));
+    if (singleValueJSON)
+      ret.trackedValue = static_cast<size_t>(*singleValueJSON);
     return ret;
   }
 
