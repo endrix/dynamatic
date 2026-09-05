@@ -9,6 +9,7 @@ import generators.handshake.cond_br as cond_br
 import generators.handshake.constant as constant
 import generators.handshake.control_merge as control_merge
 import generators.handshake.join as join
+import generators.handshake.first as first
 import generators.handshake.fork as fork
 import generators.handshake.lazy_fork as lazy_fork
 import generators.handshake.load as load
@@ -69,6 +70,8 @@ def generate_code(name, mod_type, parameters):
             return control_merge.generate_control_merge(name, parameters)
         case "join":
             return join.generate_join(name, parameters)
+        case "first":
+            return first.generate_first(name, parameters)
         case "fork":
             return fork.generate_fork(name, parameters)
         case "lazy_fork":

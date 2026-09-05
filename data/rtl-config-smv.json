@@ -71,6 +71,14 @@
     "hdl": "smv"
   },
   {
+    "name": "handshake.first",
+   "parameters": [
+      {"name": "SIZE", "type": "unsigned"}
+   ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t first -p size=$SIZE bitwidth=$BITWIDTH",
+    "hdl": "smv"
+  },
+  {
     "name": "handshake.merge",
    "parameters": [
       {"name": "SIZE", "type": "unsigned"}

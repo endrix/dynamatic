@@ -660,6 +660,17 @@
     "module-name": "merge_dataless"
   },
   {
+    "name": "handshake.first",
+    "parameters": [
+      { "name": "SIZE", "type": "unsigned", "lb": 1 },
+      { "name": "DATA_TYPE", "type": "dataflow", "data-lb": 1, "extra-eq": 0 }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/first.vhd",
+    "dependencies": [
+      "types"
+    ]
+  },
+  {
     "name": "handshake.merge",
     "parameters": [
       { "name": "SIZE", "type": "unsigned", "lb": 1 },
