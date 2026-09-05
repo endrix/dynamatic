@@ -1518,6 +1518,24 @@
     "hdl": "verilog"
   },
   {
+    "name": "handshake.first",
+    "parameters": [
+      {
+        "name": "SIZE",
+        "type": "unsigned",
+        "lb": 1
+      },
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      }
+    ],
+    "generic": "$DYNAMATIC/data/verilog/handshake/first.v",
+    "hdl": "verilog"
+  },
+  {
     "name": "handshake.br",
     "parameters": [
       {
