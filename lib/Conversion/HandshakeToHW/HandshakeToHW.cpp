@@ -575,8 +575,10 @@ ModuleDiscriminator::ModuleDiscriminator(Operation *op) {
         addType("DATA_TYPE", cmergeOp.getResult());
         addType("INDEX_TYPE", cmergeOp.getIndex());
       })
-      .Case<handshake::MergeOp>([&](auto) {
-        // Number of input data channels and data bitwidth
+      .Case<handshake::MergeOp, handshake::FirstOp>([&](auto) {
+        // Number of input data channels and data bitwidth. `first` is the
+        // first-wins merge with full consumption: the same generics as
+        // `merge`, the same generator inputs (rtl-config: size, bitwidth).
         addUnsigned("SIZE", op->getNumOperands());
         addType("DATA_TYPE", op->getResult(0));
       })
@@ -2526,6 +2528,7 @@ public:
         ConvertToHWInstance<handshake::ConditionalBranchOp>,
         ConvertToHWInstance<handshake::BranchOp>,
         ConvertToHWInstance<handshake::MergeOp>,
+        ConvertToHWInstance<handshake::FirstOp>,
         ConvertToHWInstance<handshake::ControlMergeOp>,
         ConvertToHWInstance<handshake::MuxOp>,
         ConvertToHWInstance<handshake::JoinOp>,
