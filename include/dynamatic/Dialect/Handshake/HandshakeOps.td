@@ -567,6 +567,62 @@ def LazyForkOp : Handshake_ForkOp<"lazy_fork"> {
   }];
 }
 
+def FirstOp : Handshake_Op<"first", [
+  Pure,
+  SameOperandsAndResultType,
+  VariadicHasElement<"dataOperands">,
+  DeclareOpInterfaceMethods<MergeLikeOpInterface, ["getDataResult"]>,
+  SimpleNamedIO
+]> {
+  let summary = "first-wins merge with full consumption";
+  let description = [{
+    A merge that arbitrates by ARRIVAL and consumes every input.
+
+    `merge` propagates one input and consumes ONE token per firing. `first`
+    consumes exactly one token on EVERY input per round and emits one. The two
+    are not interchangeable: lowering an N-input round through `merge` strands
+    N-1 tokens, which reappear in the next round and shift every later decision
+    by one.
+
+    The emitted payload is the first non-zero one to ARRIVE. A payload of `0` is
+    reserved for "nothing selected", so a winner is distinguishable from a
+    loser, and if every input carries zero the output is zero. Inputs arriving
+    in the same cycle are resolved by operand order, which is free to choose
+    because operands of a `first` are incomparable by construction.
+
+    This is what distinguishes it from a chain of `select`: the chain resolves
+    in OPERAND order, so a slow input early in that order stalls the whole unit
+    even when it carries nothing. `first` waits only for a winner.
+
+    Example:
+
+    ```mlir
+    %0 = first %a, %b, %c : !handshake.channel<i2>
+    ```
+  }];
+
+  let arguments = (ins Variadic<HandshakeType>:$dataOperands);
+  let results = (outs HandshakeType:$result);
+
+  let assemblyFormat = [{
+    $dataOperands attr-dict `:` custom<HandshakeType>(type($result))
+  }];
+
+  let extraClassDefinition = [{
+    ::mlir::FailureOr<::llvm::SmallVector<::mlir::NamedAttribute>>
+    FirstOp::getRTLParameters() {
+      ::mlir::MLIRContext *ctx = (*this)->getContext();
+      ::mlir::Type ui32 = ::mlir::IntegerType::get(ctx, 32, ::mlir::IntegerType::Unsigned);
+      return ::llvm::SmallVector<::mlir::NamedAttribute>{
+        {::mlir::StringAttr::get(ctx, "SIZE"),
+         ::mlir::IntegerAttr::get(ui32, (unsigned)(*this)->getNumOperands())},
+        {::mlir::StringAttr::get(ctx, "BITWIDTH"),
+         ::mlir::TypeAttr::get(getResult().getType())}
+      };
+    }
+  }];
+}
+
 def MergeOp : Handshake_Op<"merge", [
   Pure,
   // SameOperandsAndResultsType is a built-in variant of AllTypesMatch with useful
