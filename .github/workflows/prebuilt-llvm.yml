@@ -1,0 +1,104 @@
+# Builds the LLVM this fork targets (the `llvm-project` submodule, llvmorg-22.1.7)
+# on the runner image the other workflows use, installs it, and publishes the
+# install tree as a release asset. `build.sh --use-prebuilt-llvm` downloads
+# that asset, so the build and test workflows never build LLVM themselves.
+#
+# Run it by hand (workflow_dispatch) whenever the submodule moves to another
+# LLVM, then update the version in build.sh. A push to the `ci/prebuilt-llvm`
+# branch also runs it, which is how the first archive was made before this
+# file was on the default branch. The archive is a Release build with
+# assertions; one archive serves both build types of Dynamatic.
+name: prebuilt-llvm
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["ci/prebuilt-llvm"]
+
+permissions:
+  contents: write
+
+env:
+  LLVM_VERSION: 22.1.7
+
+jobs:
+  build-llvm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      DEBIAN_FRONTEND: noninteractive
+
+    steps:
+      # The runner has about 20 GB free; an LLVM build with clang, MLIR and
+      # Polly needs more. Drop the toolchains this job never uses.
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo docker image prune --all --force > /dev/null
+          df -h /
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get -y update
+          sudo apt-get install -y clang lld cmake ninja-build python3 git
+
+      - name: Check the submodule is the version this workflow publishes
+        run: |
+          test "$(git -C llvm-project rev-parse HEAD)" = \
+               "$(git ls-remote --tags https://github.com/llvm/llvm-project.git "llvmorg-$LLVM_VERSION^{}" | cut -f1)"
+
+      # The same projects and targets as the in-tree build (CMakeLists.txt,
+      # DYNAMATIC_BUILD_LLVM): mlir, clang and polly for the host. Optional
+      # libraries are off so that a consumer needs nothing but the archive.
+      - name: Configure LLVM
+        run: |
+          cmake -G Ninja -S llvm-project/llvm -B build-llvm \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_ENABLE_ASSERTIONS=ON \
+            -DLLVM_ENABLE_PROJECTS="mlir;clang;polly" \
+            -DLLVM_TARGETS_TO_BUILD=host \
+            -DLLVM_ENABLE_RTTI=ON \
+            -DLLVM_INSTALL_UTILS=ON \
+            -DLLVM_INCLUDE_TESTS=OFF \
+            -DLLVM_INCLUDE_EXAMPLES=OFF \
+            -DLLVM_INCLUDE_BENCHMARKS=OFF \
+            -DLLVM_INCLUDE_DOCS=OFF \
+            -DLLVM_ENABLE_BINDINGS=OFF \
+            -DLLVM_ENABLE_ZLIB=OFF \
+            -DLLVM_ENABLE_ZSTD=OFF \
+            -DLLVM_ENABLE_LIBXML2=OFF \
+            -DLLVM_ENABLE_LIBEDIT=OFF \
+            -DLLVM_PARALLEL_LINK_JOBS=2 \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DLLVM_USE_LINKER=lld \
+            -DCMAKE_INSTALL_PREFIX="$PWD/install-llvm"
+
+      - name: Build and install
+        run: ninja -C build-llvm install/strip
+
+      - name: Package
+        run: |
+          tar -C install-llvm -czf "llvm-$LLVM_VERSION-x86_64-linux-Release.tar.gz" .
+          ls -la "llvm-$LLVM_VERSION-x86_64-linux-Release.tar.gz"
+          du -sh install-llvm
+
+      - name: Publish as a release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="prebuilt-llvm-$LLVM_VERSION"
+          if ! gh release view "$TAG" > /dev/null 2>&1; then
+            gh release create "$TAG" \
+              --title "Prebuilt LLVM $LLVM_VERSION (x86_64 Linux, Release with assertions)" \
+              --notes "The llvm-project install tree that build.sh --use-prebuilt-llvm downloads: llvmorg-$LLVM_VERSION with mlir, clang and polly for the host, Release with assertions, built on ubuntu-latest by .github/workflows/prebuilt-llvm.yml." \
+              --target "${{ github.sha }}"
+          fi
+          gh release upload "$TAG" "llvm-$LLVM_VERSION-x86_64-linux-Release.tar.gz" --clobber
