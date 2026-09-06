@@ -35,9 +35,9 @@ List of options:
   --experimental-enable-xls            : enable experimental xls integration
   --enable-leq-binaries                : download binaries for elastic-miter equivalence
                                          checking
-  --use-prebuilt-llvm                  : download and use the prebuilt LLVM (currently
-                                         unavailable: the published archives predate the
-                                         move to LLVM 22)
+  --use-prebuilt-llvm                  : download and use the prebuilt LLVM 22.1.7 this
+                                         fork publishes (release asset prebuilt-llvm-22.1.7,
+                                         built by .github/workflows/prebuilt-llvm.yml)
   --llvm-dir <path>                    : build against an existing LLVM/MLIR build or
                                          install directory instead of building LLVM
                                          (the directory must contain lib/cmake/llvm,
@@ -228,11 +228,7 @@ do
               PARSE_ARG="llvm-parallel-link-jobs"
               ;;
           "--use-prebuilt-llvm")
-              echo "The published prebuilt LLVM archives are still LLVM 18 based and no"
-              echo "longer match the LLVM version Dynamatic targets (22.1.7). Either let"
-              echo "this script build the llvm-project submodule, or point it at an"
-              echo "existing LLVM 22 build with --llvm-dir <path>."
-              exit 1
+              PREBUILT_LLVM=1
               ;;
           "--llvm-dir")
               PARSE_ARG="llvm-dir"
@@ -306,37 +302,21 @@ elif [[ $PREBUILT_LLVM -eq 1 ]]; then
   fi
 
 
-  if [[ $BUILD_TYPE == "Release" ]]; then
-    URL="https://github.com/ETHZ-DYNAMO/llvm-project/releases/download/llvm-b06546b/llvm-b06546b-x86_64-linux.tar.gz"
-    PREBUILT_LLVM_TARBALL=$(realpath "./llvm-project-x86_64.tar.gz")
-    # Download only if the file doesn't exist
-    if [ ! -f "$PREBUILT_LLVM_TARBALL" ]; then
-        echo "Downloading $PREBUILT_LLVM_TARBALL..."
-        wget --no-verbose --show-progress -O "$PREBUILT_LLVM_TARBALL" "$URL"
-        exit_on_fail "Failed to download the prebuilt llvm-project (release)!"
-    fi
-  else
-    PREBUILT_LLVM_TARBALL=$(realpath "./llvm-b06546b-x86_64-linux-Debug.tar.gz")
-    if [ ! -f "$PREBUILT_LLVM_TARBALL" ]; then
-      wget --no-verbose --show-progress -O "llvm-b06546b-x86_64-linux-Debug.part-aa" \
-        "https://github.com/ETHZ-DYNAMO/llvm-project/releases/download/llvm-b06546b/llvm-b06546b-x86_64-linux-Debug.part-aa"
-      wget --no-verbose --show-progress -O "llvm-b06546b-x86_64-linux-Debug.part-ab" \
-        "https://github.com/ETHZ-DYNAMO/llvm-project/releases/download/llvm-b06546b/llvm-b06546b-x86_64-linux-Debug.part-ab"
-      wget --no-verbose --show-progress -O "llvm-b06546b-x86_64-linux-Debug.part-ac" \
-        "https://github.com/ETHZ-DYNAMO/llvm-project/releases/download/llvm-b06546b/llvm-b06546b-x86_64-linux-Debug.part-ac"
-      wget --no-verbose --show-progress -O "llvm-b06546b-x86_64-linux-Debug.part-ad" \
-        "https://github.com/ETHZ-DYNAMO/llvm-project/releases/download/llvm-b06546b/llvm-b06546b-x86_64-linux-Debug.part-ad"
-      wget --no-verbose --show-progress -O "llvm-b06546b-x86_64-linux-Debug.part-ae" \
-        "https://github.com/ETHZ-DYNAMO/llvm-project/releases/download/llvm-b06546b/llvm-b06546b-x86_64-linux-Debug.part-ae"
-      cat \
-        "llvm-b06546b-x86_64-linux-Debug.part-aa" \
-        "llvm-b06546b-x86_64-linux-Debug.part-ab" \
-        "llvm-b06546b-x86_64-linux-Debug.part-ac" \
-        "llvm-b06546b-x86_64-linux-Debug.part-ad" \
-        "llvm-b06546b-x86_64-linux-Debug.part-ae" \
-        > $PREBUILT_LLVM_TARBALL
-      exit_on_fail "Failed to download the prebuilt llvm-project (debug)!"
-    fi
+  # The archive is the install tree of the submodule's LLVM (llvmorg-22.1.7:
+  # mlir, clang and polly for the host, Release with assertions), built on
+  # ubuntu-latest by .github/workflows/prebuilt-llvm.yml and published as a
+  # release asset of this fork. One archive serves both build types of
+  # Dynamatic. The version here must follow the submodule; the workflow
+  # checks the two agree before it publishes.
+  PREBUILT_LLVM_VERSION="22.1.7"
+  PREBUILT_LLVM_NAME="llvm-$PREBUILT_LLVM_VERSION-x86_64-linux-Release.tar.gz"
+  URL="https://github.com/endrix/dynamatic/releases/download/prebuilt-llvm-$PREBUILT_LLVM_VERSION/$PREBUILT_LLVM_NAME"
+  PREBUILT_LLVM_TARBALL=$(realpath "./$PREBUILT_LLVM_NAME")
+  # Download only if the file doesn't exist
+  if [ ! -f "$PREBUILT_LLVM_TARBALL" ]; then
+    echo "Downloading $PREBUILT_LLVM_TARBALL..."
+    wget --no-verbose --show-progress -O "$PREBUILT_LLVM_TARBALL" "$URL"
+    exit_on_fail "Failed to download the prebuilt llvm-project!"
   fi
 
   # untar the file 

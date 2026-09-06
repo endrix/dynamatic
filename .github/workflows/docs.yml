@@ -64,7 +64,10 @@ jobs:
         with:
           path: ${{github.workspace}}/build/mdbook/html/
 
-  # Deploy to github pages (push only)
+  # Deploy to github pages (push only). Deploying needs GitHub Pages enabled
+  # for the repository, which the upstream repository has and a fork does
+  # not (the deployment fails with 404 there), so it runs upstream only; the
+  # docs job above still builds the book on every push and pull request.
   docs-deploy:
     environment:
       name: github-pages
@@ -74,7 +77,7 @@ jobs:
       contents: read
       pages: write
       id-token: write
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && github.repository == 'EPFL-LAP/dynamatic'
     needs: ["docs"]
     steps:
       - name: Deploy to GitHub Pages

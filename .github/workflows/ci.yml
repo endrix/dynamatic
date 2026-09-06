@@ -66,8 +66,11 @@ jobs:
           deactivate
           exit $STATUS
 
+  # The integration tests build LLVM and run on a self-hosted runner that
+  # only the upstream repository has; on a fork the job would queue for ever
+  # and hold the workflow open, so it runs upstream only.
   integration:
-    if: github.event.pull_request.draft == false
+    if: github.repository == 'EPFL-LAP/dynamatic' && github.event.pull_request.draft == false
     runs-on: self-hosted
 
     steps:
