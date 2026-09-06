@@ -246,6 +246,27 @@ struct InternalMemLoweringState {
         ports(getMemoryPorts(memInterface)) {};
 };
 
+/// A memory that an instance in the module serves through the module's own
+/// IO: the memref operand of a `handshake.instance` whose callee holds the
+/// memory interface. The callee's memory ports are brought up one level, so
+/// that a module which only hands a memory down still exposes it.
+struct InstanceMemState {
+  /// The instance operand that is the memref.
+  unsigned operandIdx = 0;
+  /// Index of the module input port that carries the memory's load data.
+  size_t inputIdx = 0;
+  /// Index of the first module output port that belongs to this memory, and
+  /// how many there are: loadEn, loadAddr, storeEn, storeAddr and storeData,
+  /// in that order.
+  size_t outputIdx = 0;
+  size_t numOutputs = 0;
+  /// For each of those, the index of the callee's output it is driven by.
+  SmallVector<unsigned> calleeOutputs;
+  /// Backedges to the containing module's `hw::OutputOp`, resolved when the
+  /// instance is converted.
+  SmallVector<Backedge> backedges;
+};
+
 /// Summarizes information to convert a Handshake function into a
 /// `hw::HWModuleOp`.
 struct ModuleLoweringState {
@@ -254,6 +275,10 @@ struct ModuleLoweringState {
   llvm::MapVector<handshake::MemoryOpInterface, MemLoweringState> memInterfaces;
   /// Number of distinct memories in the function's arguments.
   unsigned numMemories = 0;
+
+  /// Memories served by instances, keyed by the `handshake.instance` that
+  /// serves them, in the order their ports were added to the module.
+  llvm::MapVector<Operation *, SmallVector<InstanceMemState>> instanceMemories;
 
   /// Memory interfaces connected to the internal BRAMs (represented using an
   /// ramOp).
@@ -1250,13 +1275,73 @@ hw::ModulePortInfo ModuleBuilder::getPortInfo() {
   return hw::ModulePortInfo(inputPorts, outputPorts);
 }
 
+static FailureOr<hw::ModulePortInfo> getFuncPortInfo(handshake::FuncOp funcOp,
+                                                     ModuleLoweringState &state);
+
+namespace {
+/// The ports of the module a `handshake.instance` references, by name and
+/// type, inputs and outputs apart.
+struct CalleePorts {
+  SmallVector<std::pair<StringAttr, Type>> inputs, outputs;
+};
+} // namespace
+
+/// Reads the ports of the module an instance references: off the module when
+/// it exists (an external module, or a generated one that has already been
+/// converted), off the Handshake function otherwise. Patterns run in no
+/// particular order, so an instance is as likely to be reached before its
+/// callee as after, and waiting is not an option a pattern has. The two agree
+/// by construction: getFuncPortInfo builds the module's ports from the same
+/// names and the same lowerType, in the same order, and appends clk and rst
+/// last.
+static FailureOr<CalleePorts> getCalleePorts(handshake::InstanceOp instOp) {
+  auto topLevelModOp = instOp->getParentOfType<mlir::ModuleOp>();
+  CalleePorts ports;
+  hw::HWModuleLike modOp = findExternMod(topLevelModOp, instOp.getModule());
+  if (!modOp)
+    modOp = topLevelModOp.lookupSymbol<hw::HWModuleOp>(instOp.getModule());
+  if (modOp) {
+    for (const hw::ModulePort &port : modOp.getHWModuleType().getPorts()) {
+      auto &side =
+          port.dir == hw::ModulePort::Output ? ports.outputs : ports.inputs;
+      side.push_back({port.name, port.type});
+    }
+    return ports;
+  }
+  auto calleeOp =
+      topLevelModOp.lookupSymbol<handshake::FuncOp>(instOp.getModule());
+  if (!calleeOp)
+    return instOp.emitOpError()
+           << "references '" << instOp.getModule()
+           << "', which is neither an external module nor a Handshake "
+              "function in this module";
+  ModuleLoweringState scratch(calleeOp);
+  FailureOr<hw::ModulePortInfo> info = getFuncPortInfo(calleeOp, scratch);
+  if (failed(info))
+    return failure();
+  for (const hw::PortInfo &port : info->getInputs())
+    ports.inputs.push_back({port.name, port.type});
+  for (const hw::PortInfo &port : info->getOutputs())
+    ports.outputs.push_back({port.name, port.type});
+  return ports;
+}
+
 /// Adds IO to the module builder for the provided memref, using the provided
 /// name to unique IO port names. All Handshake memory interfaces referencing
 /// the memref inside the function are added to the module lowering state
-/// memory interface map, along with helper lowering state.
-static void addMemIO(ModuleBuilder &modBuilder, handshake::FuncOp funcOp,
-                     TypedValue<MemRefType> memref, StringRef memName,
-                     ModuleLoweringState &state) {
+/// memory interface map, along with helper lowering state. A memref that no
+/// interface in the function touches may still reach one through a
+/// `handshake.instance`: the callee holds the interface, and the module's IO
+/// for the memory is the callee's, brought up one level; the instance is
+/// recorded in the lowering state so that its conversion can drive that IO.
+/// Fails, with the error emitted, on an instance whose callee's ports cannot
+/// be read or do not describe a memory at that operand, and on a memory with
+/// more than one user, since a memory has one master.
+static LogicalResult addMemIO(ModuleBuilder &modBuilder,
+                              handshake::FuncOp funcOp,
+                              TypedValue<MemRefType> memref, StringRef memName,
+                              ModuleLoweringState &state) {
+  bool served = false;
   for (auto memOp : funcOp.getOps<handshake::MemoryOpInterface>()) {
     // The interface must reference this memory region
     if (memOp.getMemRef() != memref)
@@ -1266,15 +1351,66 @@ static void addMemIO(ModuleBuilder &modBuilder, handshake::FuncOp funcOp,
     if (memOp.isMasterInterface())
       info.connectWithCircuit(modBuilder);
     state.memInterfaces.insert({memOp, info});
+    served = true;
   }
+
+  for (OpOperand &use : memref.getUses()) {
+    auto instOp = dyn_cast<handshake::InstanceOp>(use.getOwner());
+    if (!instOp)
+      continue;
+    if (served)
+      return instOp.emitOpError()
+             << "shares memory '" << memName
+             << "' with another user of it; a memory has one master";
+    FailureOr<CalleePorts> ports = getCalleePorts(instOp);
+    if (failed(ports))
+      return failure();
+    unsigned operandIdx = use.getOperandNumber();
+    if (operandIdx >= ports->inputs.size())
+      return instOp.emitOpError()
+             << "has more operands than '" << instOp.getModule()
+             << "' has inputs";
+    // A memref expands into exactly one input, the load data, at the memref's
+    // own position; the callee's other ports for the memory are outputs
+    // named after the same argument.
+    StringRef calleeName = ports->inputs[operandIdx].first.getValue();
+    if (!calleeName.consume_back("_loadData"))
+      return instOp.emitOpError()
+             << "passes memory '" << memName << "' to input '"
+             << ports->inputs[operandIdx].first.getValue() << "' of '"
+             << instOp.getModule() << "', which is not a memory";
+    InstanceMemState info;
+    info.operandIdx = operandIdx;
+    info.inputIdx = modBuilder.getNumInputs();
+    modBuilder.addInput(memName + "_loadData", ports->inputs[operandIdx].second);
+    info.outputIdx = modBuilder.getNumOutputs();
+    for (StringRef suffix :
+         {"_loadEn", "_loadAddr", "_storeEn", "_storeAddr", "_storeData"}) {
+      std::string portName = (calleeName + suffix).str();
+      auto *it = llvm::find_if(ports->outputs, [&](auto &port) {
+        return port.first.getValue() == portName;
+      });
+      if (it == ports->outputs.end())
+        return instOp.emitOpError()
+               << "'" << instOp.getModule() << "' has no output '" << portName
+               << "' for memory '" << memName << "'";
+      info.calleeOutputs.push_back(std::distance(ports->outputs.begin(), it));
+      modBuilder.addOutput(memName + suffix, it->second);
+    }
+    info.numOutputs = modBuilder.getNumOutputs() - info.outputIdx;
+    state.instanceMemories[instOp.getOperation()].push_back(std::move(info));
+    served = true;
+  }
+  return success();
 }
 
 /// Produces the port information for the HW module that will replace the
 /// Handshake function. Fills in the lowering state object with information
 /// that will allow the conversion pass to connect memory interface to their
-/// top-level IO later on.
-static hw::ModulePortInfo getFuncPortInfo(handshake::FuncOp funcOp,
-                                          ModuleLoweringState &state) {
+/// top-level IO later on. Fails, with the error emitted, when a memory
+/// argument's IO cannot be derived (see addMemIO).
+static FailureOr<hw::ModulePortInfo> getFuncPortInfo(handshake::FuncOp funcOp,
+                                                     ModuleLoweringState &state) {
   ModuleBuilder modBuilder(funcOp.getContext());
 
   // Add all function outputs to the module
@@ -1286,10 +1422,12 @@ static hw::ModulePortInfo getFuncPortInfo(handshake::FuncOp funcOp,
   for (auto [idx, arg] : llvm::enumerate(funcOp.getArguments())) {
     StringAttr argName = funcOp.getArgName(idx);
     Type type = arg.getType();
-    if (TypedValue<MemRefType> memref = dyn_cast<TypedValue<MemRefType>>(arg))
-      addMemIO(modBuilder, funcOp, memref, argName, state);
-    else
+    if (TypedValue<MemRefType> memref = dyn_cast<TypedValue<MemRefType>>(arg)) {
+      if (failed(addMemIO(modBuilder, funcOp, memref, argName, state)))
+        return failure();
+    } else {
       modBuilder.addInput(argName.getValue(), lowerType(type));
+    }
   }
 
   modBuilder.addClkAndRst();
@@ -1371,7 +1509,9 @@ ConvertFunc::matchAndRewrite(handshake::FuncOp funcOp, OpAdaptor adaptor,
 
   StringAttr name = rewriter.getStringAttr(funcOp.getName());
   ModuleLoweringState state(funcOp);
-  hw::ModulePortInfo modInfo = getFuncPortInfo(funcOp, state);
+  FailureOr<hw::ModulePortInfo> modInfo = getFuncPortInfo(funcOp, state);
+  if (failed(modInfo))
+    return failure();
 
   // Register all the memory interfaces that are connect to an ramOp
   for (auto ramOp : funcOp.getOps<handshake::RAMOp>()) {
@@ -1394,7 +1534,8 @@ ConvertFunc::matchAndRewrite(handshake::FuncOp funcOp, OpAdaptor adaptor,
 
   // Create non-external HW module to replace the function with
   rewriter.setInsertionPoint(funcOp);
-  auto modOp = hw::HWModuleOp::create(rewriter, funcOp.getLoc(), name, modInfo);
+  auto modOp =
+      hw::HWModuleOp::create(rewriter, funcOp.getLoc(), name, *modInfo);
 
   // Move the block from the Handshake function to the new HW module, after
   // which the Handshake function becomes empty and can be deleted
@@ -1416,19 +1557,35 @@ ConvertFunc::matchAndRewrite(handshake::FuncOp funcOp, OpAdaptor adaptor,
   }
 
   // Remaining output operands will eventually come from master memory
-  // interfaces' outputs; create backedges and resolve them during memory
-  // lowering
-  auto moduleOutputs = modInfo.getOutputs().begin();
-  for (size_t i = 0, e = endOp->getNumOperands(); i < e; ++i, ++moduleOutputs)
-    ;
-  for (auto &[_, memState] : state.memInterfaces) {
-    for (size_t i = 0; i < memState.numOutputs; ++i) {
-      const hw::PortInfo &port = *(moduleOutputs++);
-      Backedge backedge = lowerState.edgeBuilder.get(port.type);
-      outOperands.push_back(backedge);
-      memState.backedges.push_back(backedge);
+  // interfaces' outputs, and from the instances that serve a memory through
+  // this module's IO; create backedges and resolve them during memory or
+  // instance lowering. Each memory knows where its ports are, so the operands
+  // are placed by index rather than in sequence: an instance's memory may sit
+  // between two interfaces' in the argument order.
+  SmallVector<hw::PortInfo> outputPorts(modInfo->getOutputs().begin(),
+                                        modInfo->getOutputs().end());
+  assert(outOperands.size() <= outputPorts.size() &&
+         "more end operands than module outputs");
+  outOperands.resize(outputPorts.size());
+  auto placeBackedges = [&](size_t outputIdx, size_t numOutputs,
+                            SmallVector<Backedge> &backedges) {
+    for (size_t i = 0; i < numOutputs; ++i) {
+      assert(outputIdx + i < outOperands.size() && !outOperands[outputIdx + i] &&
+             "memory output placed twice");
+      Backedge backedge =
+          lowerState.edgeBuilder.get(outputPorts[outputIdx + i].type);
+      outOperands[outputIdx + i] = backedge;
+      backedges.push_back(backedge);
     }
-  }
+  };
+  for (auto &[_, memState] : state.memInterfaces)
+    placeBackedges(memState.outputIdx, memState.numOutputs,
+                   memState.backedges);
+  for (auto &[_, mems] : state.instanceMemories)
+    for (InstanceMemState &mem : mems)
+      placeBackedges(mem.outputIdx, mem.numOutputs, mem.backedges);
+  assert(llvm::all_of(outOperands, [](Value val) { return val; }) &&
+         "a module output nothing drives");
 
   // Replace the default terminator with one with our operands, and delete the
   // Handshake function's terminator
@@ -1743,11 +1900,19 @@ LogicalResult ConvertToHWInstance<T>::matchAndRewrite(
 namespace {
 
 /// Converts a Handshake-level instance operation to an equivalent HW-level one.
-/// The pattern assumes that the module the Handshake instance references has
-/// already been converted to a `hw::HWExternModuleOp`.
+/// The module the instance references may already exist (an external module,
+/// or a generated one converted before this instance was reached) or still be
+/// a Handshake function; either way its ports are read off it. A memref
+/// operand is the module's own memory IO handed down: the instance receives
+/// the load data at the memref's position and its memory outputs drive the
+/// module's, through the backedges the function's conversion left for them.
 class ConvertInstance : public OpConversionPattern<handshake::InstanceOp> {
 public:
-  using OpConversionPattern<handshake::InstanceOp>::OpConversionPattern;
+  ConvertInstance(ChannelTypeConverter &typeConverter, MLIRContext *ctx,
+                  LoweringState &lowerState)
+      : OpConversionPattern<handshake::InstanceOp>(typeConverter, ctx),
+        lowerState(lowerState) {}
+
   using OpAdaptor = typename handshake::InstanceOp::Adaptor;
 
   /// Always succeeds in replacing the matched operation with an equivalent
@@ -1755,6 +1920,10 @@ public:
   LogicalResult
   matchAndRewrite(handshake::InstanceOp instOp, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
+
+private:
+  /// Shared lowering state.
+  LoweringState &lowerState;
 };
 } // namespace
 
@@ -1762,68 +1931,66 @@ LogicalResult
 ConvertInstance::matchAndRewrite(handshake::InstanceOp instOp,
                                  OpAdaptor adaptor,
                                  ConversionPatternRewriter &rewriter) const {
+  // A memref expands into one input, the load data, at the memref's own
+  // position, so the operands line up with the callee's inputs as they are:
+  // clk and rst last, the way getFuncPortInfo appends them. The value at a
+  // memref's position is the module's load data input itself, taken from the
+  // module's block: the memref argument was replaced by that input when the
+  // function's block was moved in, and what the adaptor offers there is a
+  // cast back to the memref type that nothing could resolve.
   SmallVector<Value> instOperands(adaptor.getOperands());
-  auto [clk, rst] = getClkAndRst(instOp->getParentOfType<hw::HWModuleOp>());
+  hw::HWModuleOp parentModOp = instOp->getParentOfType<hw::HWModuleOp>();
+  ModuleLoweringState &modState = lowerState.modState[parentModOp];
+  auto memories = modState.instanceMemories.find(instOp.getOperation());
+  if (memories != modState.instanceMemories.end())
+    for (InstanceMemState &mem : memories->second)
+      instOperands[mem.operandIdx] =
+          parentModOp.getBodyBlock()->getArgument(mem.inputIdx);
+  auto [clk, rst] = getClkAndRst(parentModOp);
   instOperands.push_back(clk);
   instOperands.push_back(rst);
 
-  auto topLevelModOp = instOp->getParentOfType<mlir::ModuleOp>();
   StringAttr instNameAttr = rewriter.getStringAttr(getUniqueName(instOp));
-
-  // An external module, or a generated one that has already been converted:
-  // either way the module exists, so its ports can be read off it.
-  hw::HWModuleLike modOp = findExternMod(topLevelModOp, instOp.getModule());
-  if (!modOp)
-    modOp = topLevelModOp.lookupSymbol<hw::HWModuleOp>(instOp.getModule());
-  if (modOp) {
-    rewriter.replaceOpWithNewOp<hw::InstanceOp>(instOp, modOp, instNameAttr,
-                                                instOperands);
-    return success();
-  }
-
-  // A generated module that has NOT been converted yet. Patterns run in no
-  // particular order, so an instance is as likely to be reached before its
-  // callee as after, and waiting is not an option a pattern has. The ports are
-  // therefore computed from the Handshake function instead of read off a
-  // module that is not there yet. The two agree by construction:
-  // getFuncPortInfo builds the module's ports from the same names and the same
-  // lowerType, in the same order, and appends clk and rst last exactly as the
-  // operands were appended above.
-  auto calleeOp =
-      topLevelModOp.lookupSymbol<handshake::FuncOp>(instOp.getModule());
-  if (!calleeOp)
+  FailureOr<CalleePorts> ports = getCalleePorts(instOp);
+  if (failed(ports))
+    return failure();
+  if (instOperands.size() != ports->inputs.size())
     return instOp.emitOpError()
-           << "references '" << instOp.getModule()
-           << "', which is neither an external module nor a Handshake "
-              "function in this module";
-
-  // A memref argument expands into a set of load and store ports whose shape
-  // depends on the memory interfaces inside the callee, which is per-module
-  // state this pattern does not have. Refused rather than guessed at.
-  if (llvm::any_of(calleeOp.getArgumentTypes(),
-                   [](Type type) { return isa<MemRefType>(type); }))
-    return instOp.emitOpError()
-           << "instantiating a function with a memref argument is not "
-              "supported; its ports depend on the memory interfaces inside it";
+           << "has " << instOperands.size() - 2 << " operands but '"
+           << instOp.getModule() << "' takes " << ports->inputs.size() - 2
+           << " inputs";
 
   SmallVector<Type> resultTypes;
-  SmallVector<Attribute> resultNames;
-  for (auto [idx, res] : llvm::enumerate(calleeOp.getResultTypes())) {
-    resultTypes.push_back(lowerType(res));
-    resultNames.push_back(calleeOp.getResName(idx));
+  SmallVector<Attribute> resultNames, argNames;
+  for (auto &[name, type] : ports->outputs) {
+    resultTypes.push_back(type);
+    resultNames.push_back(name);
   }
-  SmallVector<Attribute> argNames;
-  for (unsigned idx = 0, e = calleeOp.getNumArguments(); idx < e; ++idx)
-    argNames.push_back(calleeOp.getArgName(idx));
-  argNames.push_back(rewriter.getStringAttr(CLK_PORT));
-  argNames.push_back(rewriter.getStringAttr(RST_PORT));
+  for (auto &[name, type] : ports->inputs)
+    argNames.push_back(name);
 
-  rewriter.replaceOpWithNewOp<hw::InstanceOp>(
-      instOp, resultTypes, instNameAttr,
+  auto hwInstOp = hw::InstanceOp::create(
+      rewriter, instOp.getLoc(), resultTypes, instNameAttr,
       FlatSymbolRefAttr::get(rewriter.getContext(), instOp.getModule()),
       instOperands, rewriter.getArrayAttr(argNames),
       rewriter.getArrayAttr(resultNames), rewriter.getArrayAttr({}),
       hw::InnerSymAttr{});
+
+  // The callee's outputs past the function's own are its memory ports; the
+  // ones for a memory this module hands down drive the module's outputs for
+  // it.
+  if (memories != modState.instanceMemories.end())
+    for (InstanceMemState &mem : memories->second)
+      for (auto [backedge, outIdx] :
+           llvm::zip_equal(mem.backedges, mem.calleeOutputs))
+        backedge.setValue(hwInstOp.getResult(outIdx));
+
+  unsigned numResults = instOp.getNumResults();
+  if (numResults > hwInstOp.getNumResults())
+    return instOp.emitOpError()
+           << "has " << numResults << " results but '" << instOp.getModule()
+           << "' has " << hwInstOp.getNumResults() << " outputs";
+  rewriter.replaceOp(instOp, hwInstOp.getResults().take_front(numResults));
   return success();
 }
 
@@ -2518,11 +2685,10 @@ public:
     // Create pattern set
     RewritePatternSet patterns(ctx);
     patterns.insert<ConvertFunc, ConvertMemInterface,
-                    ConvertMemInterfaceForInternalArray>(typeConverter, ctx,
-                                                         lowerState);
+                    ConvertMemInterfaceForInternalArray, ConvertInstance>(
+        typeConverter, ctx, lowerState);
     patterns.insert<
         // clang-format off
-        ConvertInstance,
         ConvertToHWInstance<handshake::BufferOp>,
         ConvertToHWInstance<handshake::NDWireOp>,
         ConvertToHWInstance<handshake::ConditionalBranchOp>,
