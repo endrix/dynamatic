@@ -846,16 +846,21 @@ ModuleDiscriminator::ModuleDiscriminator(Operation *op) {
         }
       })
       .Case<handshake::InitOp>([&](handshake::InitOp initOp) {
+        // The token the unit holds at reset: `INIT_VALUE`, an integer, when
+        // the op says one (an actor's state variable starting at 4); else
+        // the boolean `INIT_TOKEN`, 0 or 1, as before.
         auto paramsAttr =
             initOp->getAttrOfType<mlir::DictionaryAttr>("hw.parameters");
+        unsigned initialValue = 0;
         if (paramsAttr) {
-          auto initTokenAttr =
-              dyn_cast_or_null<mlir::BoolAttr>(paramsAttr.get("INIT_TOKEN"));
-          int initialValue =
-              (initTokenAttr && initTokenAttr.getValue()) ? 1 : 0;
-          addUnsigned("INITIAL_VALUE", initialValue);
-        } else
-          addUnsigned("INITIAL_VALUE", 0);
+          if (auto valueAttr = dyn_cast_or_null<mlir::IntegerAttr>(
+                  paramsAttr.get("INIT_VALUE")))
+            initialValue = valueAttr.getValue().getZExtValue();
+          else if (auto initTokenAttr = dyn_cast_or_null<mlir::BoolAttr>(
+                       paramsAttr.get("INIT_TOKEN")))
+            initialValue = initTokenAttr.getValue() ? 1 : 0;
+        }
+        addUnsigned("INITIAL_VALUE", initialValue);
       })
       .Default([&](auto) {
         op->emitError() << "This operation cannot be lowered to RTL "

@@ -69,7 +69,18 @@ def _generate_init(name, bitwidth, initial_value):
   dependencies = _generate_init_dataless(
       init_dataless_name)
 
-  dataReg_init = f"'{initial_value}'"
+  # The register's reset value. 0 and 1 replicate the bit over the width as
+  # they always did (a `'1'` token on a one-bit channel); any other value is
+  # the integer itself, written out as a bit string of the channel's width
+  # (an actor's state variable that starts at 4).
+  initial_value = int(initial_value)
+  if initial_value in (0, 1):
+    dataReg_reset = f"(others => '{initial_value}')"
+  else:
+    if initial_value < 0 or initial_value >= (1 << bitwidth):
+      raise ValueError(
+          f"init {name}: initial value {initial_value} does not fit {bitwidth} bits")
+    dataReg_reset = f'"{initial_value:0{bitwidth}b}"'
 
   entity = f"""
 library ieee;
@@ -114,7 +125,7 @@ begin
   begin
     if (rising_edge(clk)) then
       if (rst = '1') then
-        dataReg <= (others => {dataReg_init});
+        dataReg <= {dataReg_reset};
       elsif (regEnable) then
         dataReg <= ins;
       end if;
