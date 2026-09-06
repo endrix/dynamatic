@@ -508,11 +508,16 @@ void WriteModData::writeSignalDeclarations(
           // - getRawType specifies std_logic instead of std_logic_vector when
           // the bitwidth is 1 (in VHDL).
           // - However, address signals should still be declared as
-          // std_logic_vector, even when their bitwidth is 1.
+          // std_logic_vector, even when their bitwidth is 1, and so should
+          // a memory's data signals: a RAM of one-bit words (an actor's
+          // array of booleans) has std_logic_vector(0 downto 0) ports on
+          // the generated RAM and controller alike.
           bool forceArrayType =
               valueAndName.second.find("_address") != std::string::npos ||
               valueAndName.second.find("_loadAddr") != std::string::npos ||
-              valueAndName.second.find("_storeAddr") != std::string::npos;
+              valueAndName.second.find("_storeAddr") != std::string::npos ||
+              valueAndName.second.find("_loadData") != std::string::npos ||
+              valueAndName.second.find("_storeData") != std::string::npos;
 
           writeDeclaration(valueAndName.second,
                            !forceArrayType
@@ -656,11 +661,14 @@ RTLWriter::EntityIO::EntityIO(hw::HWModuleOp modOp) {
           // - getRawType specifies std_logic instead of std_logic_vector when
           // the bitwidth is 1 (in VHDL).
           // - However, address signals should still be declared as
-          // std_logic_vector, even when their bitwidth is 1.
+          // std_logic_vector, even when their bitwidth is 1, and so should
+          // a memory's data signals (a RAM of one-bit words).
           bool forceArrayType =
               portName.find("_address") != std::string::npos ||
               portName.find("_loadAddr") != std::string::npos ||
-              portName.find("_storeAddr") != std::string::npos;
+              portName.find("_storeAddr") != std::string::npos ||
+              portName.find("_loadData") != std::string::npos ||
+              portName.find("_storeData") != std::string::npos;
           down.emplace_back(portName,
                             !forceArrayType
                                 ? getRawType(intType)
