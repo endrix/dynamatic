@@ -144,3 +144,46 @@ handshake.func @shared_lsq(%arg0: memref<8xi32>, %arg1: !handshake.control<>, %a
   %result_12, %index_13 = control_merge [%falseResult_11]  {handshake.bb = 3 : ui32, handshake.name = "merge3"} : [<>] to <>, <i1>
   end {handshake.bb = 3 : ui32, handshake.name = "end0"} %0#1, %result_12 : <>, <>
 }
+
+// -----
+
+// A value from a block BEFORE the group: block 0 computes it and branches
+// into the entry, block 1; region 3 reads it. It is a value of the firing
+// like one from the entry -- computed once, forked to whichever regions read
+// it (the parser copies a block into two arrays in one loop, then pushes
+// each in its own) -- and the group lowers.
+// CHECK-LABEL:   handshake.func @before_the_group(
+// CHECK:           %[[K:.*]] = constant %arg0 {handshake.bb = 0 : ui32, handshake.name = "k", value = 7 : i32}
+// CHECK:           %[[BK:.*]] = br %[[K]] {handshake.bb = 0 : ui32, handshake.name = "br_k"}
+// CHECK:           control_merge [%{{.*}}, %{{.*}}] {handshake.bb = 2 : ui32, handshake.name = "merge2"}
+// CHECK:           control_merge [%{{.*}}, %{{.*}}] {handshake.bb = 3 : ui32, handshake.name = "merge3"}
+// CHECK:           addi %{{.*}}, %[[BK]] {handshake.bb = 3 : ui32, handshake.name = "use_k"}
+// CHECK:           join %{{.*}}, %{{.*}} {handshake.bb = 4 : ui32
+handshake.func @before_the_group(%arg0: !handshake.control<>, ...) -> !handshake.control<> attributes {argNames = ["start"], resNames = ["end"], handshake.parallel_regions = [{entry = 1 : ui32, regions = [[2], [3]], successor = 4 : ui32}]} {
+  %k = constant %arg0 {handshake.bb = 0 : ui32, handshake.name = "k", value = 7 : i32} : <>, <i32>
+  %bk = br %k {handshake.bb = 0 : ui32, handshake.name = "br_k"} : <i32>
+  %c0 = br %arg0 {handshake.bb = 0 : ui32, handshake.name = "br_ctrl0"} : <>
+  %e, %ei = control_merge [%c0]  {handshake.bb = 1 : ui32, handshake.name = "merge1"} : [<>] to <>, <i1>
+  %zero = constant %e {handshake.bb = 1 : ui32, handshake.name = "zero", value = 0 : i32} : <>, <i32>
+  %bz = br %zero {handshake.bb = 1 : ui32, handshake.name = "br_zero"} : <i32>
+  %c1 = br %e {handshake.bb = 1 : ui32, handshake.name = "br_ctrl1"} : <>
+  %result, %index = control_merge [%c1, %trueResult_2]  {handshake.bb = 2 : ui32, handshake.name = "merge2"} : [<>, <>] to <>, <i1>
+  %4 = mux %index [%bz, %trueResult] {handshake.bb = 2 : ui32, handshake.name = "mux_i"} : <i1>, [<i32>, <i32>] to <i32>
+  %6 = constant %result {handshake.bb = 2 : ui32, handshake.name = "one", value = 1 : i32} : <>, <i32>
+  %7 = addi %4, %6 {handshake.bb = 2 : ui32, handshake.name = "inc_i"} : <i32>
+  %8 = constant %result {handshake.bb = 2 : ui32, handshake.name = "ten1", value = 10 : i32} : <>, <i32>
+  %9 = cmpi ult, %7, %8 {handshake.bb = 2 : ui32, handshake.name = "cmp1"} : <i32>
+  %trueResult, %falseResult = cond_br %9, %7 {handshake.bb = 2 : ui32, handshake.name = "loop_i"} : <i1>, <i32>
+  %trueResult_2, %falseResult_3 = cond_br %9, %result {handshake.bb = 2 : ui32, handshake.name = "exit1"} : <i1>, <>
+  %10 = constant %result {handshake.bb = 2 : ui32, handshake.name = "zero_for_j", value = 0 : i32} : <>, <i32>
+  %trueResult_4, %falseResult_5 = cond_br %9, %10 {handshake.bb = 2 : ui32, handshake.name = "loop_zero"} : <i1>, <i32>
+  %result_6, %index_7 = control_merge [%falseResult_3, %trueResult_10]  {handshake.bb = 3 : ui32, handshake.name = "merge3"} : [<>, <>] to <>, <i1>
+  %11 = mux %index_7 [%falseResult_5, %trueResult_8] {handshake.bb = 3 : ui32, handshake.name = "mux_j"} : <i1>, [<i32>, <i32>] to <i32>
+  %13 = addi %11, %bk {handshake.bb = 3 : ui32, handshake.name = "use_k"} : <i32>
+  %14 = constant %result_6 {handshake.bb = 3 : ui32, handshake.name = "ten2", value = 10 : i32} : <>, <i32>
+  %15 = cmpi ult, %13, %14 {handshake.bb = 3 : ui32, handshake.name = "cmp2"} : <i32>
+  %trueResult_8, %falseResult_9 = cond_br %15, %13 {handshake.bb = 3 : ui32, handshake.name = "loop_j"} : <i1>, <i32>
+  %trueResult_10, %falseResult_12 = cond_br %15, %result_6 {handshake.bb = 3 : ui32, handshake.name = "exit2"} : <i1>, <>
+  %result_13, %index_14 = control_merge [%falseResult_12]  {handshake.bb = 4 : ui32, handshake.name = "merge4"} : [<>] to <>, <i1>
+  end {handshake.bb = 4 : ui32, handshake.name = "end0"} %result_13 : <>
+}

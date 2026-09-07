@@ -286,6 +286,14 @@ LogicalResult HandshakeParallelizeRegionsPass::parallelize(
             return refuse("the successor block feeds region " + Twine(i) +
                           ", the group sits inside a loop");
           case Place::OUTSIDE:
+            // A value from a block BEFORE the group is a value of the firing,
+            // like one from the entry: computed once, forked to whichever
+            // regions read it (the parser's actions copy a block into two
+            // arrays in one loop, then push each array in its own). Control
+            // from outside, and anything from a block after the group, is a
+            // shape this pass does not know.
+            if (!isCtrl && blockOf(val) && *blockOf(val) < group.entry)
+              break;
             return refuse("a block outside the group feeds region " + Twine(i));
           case Place::NONE:
             break;
