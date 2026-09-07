@@ -3,22 +3,22 @@ from generators.support.signal_manager.utils.concat import get_concat_extra_sign
 
 
 def generate_init(name, params):
-  bitwidth = params["bitwidth"]
-  extra_signals = params.get("extra_signals", None)
-  # The initial value to use for the buffer
-  initial_value = params.get("initial_value", 0)
+    bitwidth = params["bitwidth"]
+    extra_signals = params.get("extra_signals", None)
+    # The initial value to use for the buffer
+    initial_value = params.get("initial_value", 0)
 
-  if extra_signals:
-    return _generate_init_signal_manager(name, bitwidth, extra_signals, initial_value)
-  elif bitwidth == 0:
-    return _generate_init_dataless(name)
-  else:
-    return _generate_init(name, bitwidth, initial_value)
+    if extra_signals:
+        return _generate_init_signal_manager(name, bitwidth, extra_signals, initial_value)
+    elif bitwidth == 0:
+        return _generate_init_dataless(name)
+    else:
+        return _generate_init(name, bitwidth, initial_value)
 
 
 def _generate_init_dataless(name):
 
-  entity = f"""
+    entity = f"""
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -37,7 +37,7 @@ entity {name} is
 end entity;
 """
 
-  architecture = f"""
+    architecture = f"""
 -- Architecture of init_dataless
 architecture arch of {name} is
   signal fullReg, outputValid : std_logic;
@@ -60,18 +60,29 @@ begin
 end architecture;
 """
 
-  return entity + architecture
+    return entity + architecture
 
 
 def _generate_init(name, bitwidth, initial_value):
-  init_dataless_name = f"{name}_dataless"
+    init_dataless_name = f"{name}_dataless"
 
-  dependencies = _generate_init_dataless(
-      init_dataless_name)
+    dependencies = _generate_init_dataless(
+        init_dataless_name)
 
-  dataReg_init = f"'{initial_value}'"
+    # The register's reset value. 0 and 1 replicate the bit over the width as
+    # they always did (a `'1'` token on a one-bit channel); any other value is
+    # the integer itself, written out as a bit string of the channel's width
+    # (an actor's state variable that starts at 4).
+    initial_value = int(initial_value)
+    if initial_value in (0, 1):
+        dataReg_reset = f"(others => '{initial_value}')"
+    else:
+        if initial_value < 0 or initial_value >= (1 << bitwidth):
+            raise ValueError(
+                f"init {name}: initial value {initial_value} does not fit {bitwidth} bits")
+        dataReg_reset = f'"{initial_value:0{bitwidth}b}"'
 
-  entity = f"""
+    entity = f"""
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -92,7 +103,7 @@ entity {name} is
 end entity;
 """
 
-  architecture = f"""
+    architecture = f"""
 -- Architecture of init
 architecture arch of {name} is
   signal regEnable, regNotFull : std_logic;
@@ -114,7 +125,7 @@ begin
   begin
     if (rising_edge(clk)) then
       if (rst = '1') then
-        dataReg <= (others => {dataReg_init});
+        dataReg <= {dataReg_reset};
       elsif (regEnable) then
         dataReg <= ins;
       end if;
@@ -135,23 +146,22 @@ begin
 end architecture;
 """
 
-  return dependencies + entity + architecture
+    return dependencies + entity + architecture
 
 
 def _generate_init_signal_manager(name, bitwidth, extra_signals, initial_value):
-  extra_signals_bitwidth = get_concat_extra_signals_bitwidth(extra_signals)
-  return generate_concat_signal_manager(
-    name, 
-    [{
-        "name": "ins",
-        "bitwidth": bitwidth,
-        "extra_signals": extra_signals
-    }],
-    [{
-        "name": "outs",
-        "bitwidth": bitwidth,
-        "extra_signals": extra_signals
-    }],
-    extra_signals,
-    lambda name: _generate_init(name, bitwidth + extra_signals_bitwidth, initial_value))
-  
+    extra_signals_bitwidth = get_concat_extra_signals_bitwidth(extra_signals)
+    return generate_concat_signal_manager(
+        name,
+        [{
+            "name": "ins",
+            "bitwidth": bitwidth,
+            "extra_signals": extra_signals
+        }],
+        [{
+            "name": "outs",
+            "bitwidth": bitwidth,
+            "extra_signals": extra_signals
+        }],
+        extra_signals,
+        lambda name: _generate_init(name, bitwidth + extra_signals_bitwidth, initial_value))
