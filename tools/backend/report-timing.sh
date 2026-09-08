@@ -78,7 +78,20 @@ STA_LOG="$LOG_DIR/$TOP.timing.rpt"
 # it made, which carry the instance path the flattening prefixed them with,
 # so that a path in the report can be placed in the design. The whole yosys
 # log goes to the file: `stat` at the end is where the cell counts come from.
-if ! "${YOSYS[@]}" -p "$READ; synth -top $TOP -flatten; dfflibmap -liberty $SEQ_LIBERTY; abc $LIB_ARGS -constr $CONSTR -D $PERIOD -script $ABC_SCRIPT; opt_clean; stat; write_verilog -noattr -noexpr -norename $MAPPED" > "$SYNTH_LOG" 2>&1; then
+# The commands go through a script file, not `-p`: the read command names
+# every file of the design, and a network of a few hundred units (the
+# decoder's parser, 1,390 files) is longer than one argument may be.
+YS_SCRIPT="$LOG_DIR/$TOP.synth.ys"
+{
+  printf '%s\n' "$READ" | sed 's/; */\n/g'
+  echo "synth -top $TOP -flatten"
+  echo "dfflibmap -liberty $SEQ_LIBERTY"
+  echo "abc $LIB_ARGS -constr $CONSTR -D $PERIOD -script $ABC_SCRIPT"
+  echo "opt_clean"
+  echo "stat"
+  echo "write_verilog -noattr -noexpr -norename $MAPPED"
+} > "$YS_SCRIPT"
+if ! "${YOSYS[@]}" -s "$YS_SCRIPT" > "$SYNTH_LOG" 2>&1; then
   echo "report-timing: yosys failed on $TOP (see $SYNTH_LOG)" >&2
   tail -5 "$SYNTH_LOG" >&2
   exit 1
