@@ -874,11 +874,11 @@ ModuleDiscriminator::ModuleDiscriminator(Operation *op) {
       // takes: a comparison its predicate, a constant its value.
       .Case<arith::AndIOp, arith::OrIOp, arith::XOrIOp, arith::AddIOp,
             arith::SubIOp, arith::MulIOp, arith::ShLIOp, arith::ShRUIOp,
-            arith::ShRSIOp, arith::SelectOp>([&](auto) {
-        addUnsigned("DATA_WIDTH", rawWidth(op->getResult(0)));
-      })
+            arith::ShRSIOp, arith::SelectOp>(
+          [&](auto) { addUnsigned("DATA_WIDTH", rawWidth(op->getResult(0))); })
       .Case<arith::CmpIOp>([&](arith::CmpIOp cmpOp) {
-        addString("PREDICATE", arith::stringifyCmpIPredicate(cmpOp.getPredicate()));
+        addString("PREDICATE",
+                  arith::stringifyCmpIPredicate(cmpOp.getPredicate()));
         addUnsigned("DATA_WIDTH", rawWidth(cmpOp.getLhs()));
       })
       .Case<arith::TruncIOp, arith::ExtUIOp, arith::ExtSIOp>([&](auto) {
@@ -1989,7 +1989,8 @@ public:
 
     for (auto [name, oprd] : llvm::zip(inputs, adaptor.getOperands()))
       converter.addInput(name, oprd);
-    converter.addClkAndRst(((Operation *)op)->getParentOfType<hw::HWModuleOp>());
+    converter.addClkAndRst(
+        ((Operation *)op)->getParentOfType<hw::HWModuleOp>());
     for (auto [name, type] : llvm::zip(outputs, op->getResultTypes()))
       converter.addOutput(name, lowerType(type));
     hw::InstanceOp instOp = converter.convertToInstance(op, rewriter);
@@ -2883,8 +2884,8 @@ public:
                       hw::OutputOp>();
     // arith is illegal too: an operation on raw wires either has a unit or
     // stops the lowering here, by name, rather than reaching the exporter.
-    target.addIllegalDialect<handshake::HandshakeDialect,
-                             memref::MemRefDialect, arith::ArithDialect>();
+    target.addIllegalDialect<handshake::HandshakeDialect, memref::MemRefDialect,
+                             arith::ArithDialect>();
 
     if (failed(applyPartialConversion(modOp, target, std::move(patterns))))
       return signalPassFailure();
