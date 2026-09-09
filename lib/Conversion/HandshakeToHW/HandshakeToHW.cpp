@@ -27,6 +27,7 @@
 #include "dynamatic/Support/RTL/RTL.h"
 #include "dynamatic/Support/Utils/Utils.h"
 #include "dynamatic/Transforms/HandshakeMaterialize.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/Builders.h"
@@ -552,6 +553,11 @@ private:
   /// Adds the value's type as a dataflow-type parameter.
   void addType(const Twine &name, Value val) { addType(name, val.getType()); };
 
+  /// The width of a raw wire -- a plain integer, not a channel.
+  static unsigned rawWidth(Value val) {
+    return cast<IntegerType>(val.getType()).getWidth();
+  }
+
   /// Adds a string parameter.
   void addString(const Twine &name, const Twine &txt) {
     addParam(name, StringAttr::get(ctx, txt));
@@ -861,6 +867,40 @@ ModuleDiscriminator::ModuleDiscriminator(Operation *op) {
             initialValue = initTokenAttr.getValue() ? 1 : 0;
         }
         addUnsigned("INITIAL_VALUE", initialValue);
+      })
+      // arith on raw wires -- the logic a function holds between an unbundle
+      // and a bundle. The unit carries the wires and nothing else, so its
+      // parameters are widths, plus what the handshake unit of the same name
+      // takes: a comparison its predicate, a constant its value.
+      .Case<arith::AndIOp, arith::OrIOp, arith::XOrIOp, arith::AddIOp,
+            arith::SubIOp, arith::MulIOp, arith::ShLIOp, arith::ShRUIOp,
+            arith::ShRSIOp, arith::SelectOp>([&](auto) {
+        addUnsigned("DATA_WIDTH", rawWidth(op->getResult(0)));
+      })
+      .Case<arith::CmpIOp>([&](arith::CmpIOp cmpOp) {
+        addString("PREDICATE", arith::stringifyCmpIPredicate(cmpOp.getPredicate()));
+        addUnsigned("DATA_WIDTH", rawWidth(cmpOp.getLhs()));
+      })
+      .Case<arith::TruncIOp, arith::ExtUIOp, arith::ExtSIOp>([&](auto) {
+        addUnsigned("INPUT_WIDTH", rawWidth(op->getOperand(0)));
+        addUnsigned("OUTPUT_WIDTH", rawWidth(op->getResult(0)));
+      })
+      .Case<arith::ConstantOp>([&](arith::ConstantOp cstOp) {
+        // The bit string of the wire's width, as the handshake constant's.
+        auto intAttr = dyn_cast<mlir::IntegerAttr>(cstOp.getValue());
+        if (!intAttr) {
+          cstOp.emitError() << "only an integer constant lowers to a unit "
+                               "on raw wires";
+          unsupported = true;
+          return;
+        }
+        unsigned bitwidth = rawWidth(cstOp.getResult());
+        APInt value = intAttr.getValue().sextOrTrunc(bitwidth);
+        std::string bitValue =
+            llvm::toString(value, /*Radix=*/2, /*Signed=*/false);
+        bitValue.insert(0, bitwidth - bitValue.size(), '0');
+        addUnsigned("DATA_WIDTH", bitwidth);
+        addString("VALUE", bitValue);
       })
       .Default([&](auto) {
         op->emitError() << "This operation cannot be lowered to RTL "
@@ -1902,7 +1942,60 @@ LogicalResult ConvertToHWInstance<T>::matchAndRewrite(
   return instOp ? success() : failure();
 }
 
+/// The port names of an arith operation on raw wires, which has no
+/// `NamedIOInterface` to ask. They are the handshake units' names for the same
+/// operands -- `lhs`/`rhs`/`result`, `ins`/`outs` -- and a select names its
+/// arms. Named individually, never `ins_0`/`ins_1`: the netlist printer reads
+/// that suffix as vector packing.
+static void rawPortNames(Operation *op, SmallVectorImpl<std::string> &inputs,
+                         SmallVectorImpl<std::string> &outputs) {
+  llvm::TypeSwitch<Operation *, void>(op)
+      .Case<arith::SelectOp>([&](auto) {
+        inputs.assign({"condition", "true_value", "false_value"});
+        outputs.assign({"result"});
+      })
+      .Case<arith::CmpIOp, arith::AndIOp, arith::OrIOp, arith::XOrIOp,
+            arith::AddIOp, arith::SubIOp, arith::MulIOp, arith::ShLIOp,
+            arith::ShRUIOp, arith::ShRSIOp>([&](auto) {
+        inputs.assign({"lhs", "rhs"});
+        outputs.assign({"result"});
+      })
+      .Case<arith::TruncIOp, arith::ExtUIOp, arith::ExtSIOp>([&](auto) {
+        inputs.assign({"ins"});
+        outputs.assign({"outs"});
+      })
+      .Case<arith::ConstantOp>([&](auto) { outputs.assign({"outs"}); });
+}
+
 namespace {
+
+/// An arith operation on raw wires becomes an instance the way a handshake
+/// operation does; only the port names come from elsewhere.
+template <typename T>
+class ConvertRawToHWInstance : public OpConversionPattern<T> {
+public:
+  using OpConversionPattern<T>::OpConversionPattern;
+  using OpAdaptor = typename T::Adaptor;
+
+  LogicalResult
+  matchAndRewrite(T op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    HWConverter converter(this->getContext());
+    SmallVector<std::string> inputs, outputs;
+    rawPortNames(op, inputs, outputs);
+    if (inputs.size() != adaptor.getOperands().size() ||
+        outputs.size() != op->getNumResults())
+      return rewriter.notifyMatchFailure(op, "no unit on raw wires for it");
+
+    for (auto [name, oprd] : llvm::zip(inputs, adaptor.getOperands()))
+      converter.addInput(name, oprd);
+    converter.addClkAndRst(((Operation *)op)->getParentOfType<hw::HWModuleOp>());
+    for (auto [name, type] : llvm::zip(outputs, op->getResultTypes()))
+      converter.addOutput(name, lowerType(type));
+    hw::InstanceOp instOp = converter.convertToInstance(op, rewriter);
+    return instOp ? success() : failure();
+  }
+};
 
 /// Converts a Handshake-level instance operation to an equivalent HW-level one.
 /// The module the instance references may already exist (an external module,
@@ -2764,7 +2857,23 @@ public:
         ConvertToHWInstance<handshake::SpecSaveCommitOp>,
         ConvertToHWInstance<handshake::SpeculatorOp>,
         ConvertToHWInstance<handshake::SpeculatingBranchOp>,
-        ConvertToHWInstance<handshake::NonSpecOp>
+        ConvertToHWInstance<handshake::NonSpecOp>,
+        // arith on raw wires
+        ConvertRawToHWInstance<arith::AndIOp>,
+        ConvertRawToHWInstance<arith::OrIOp>,
+        ConvertRawToHWInstance<arith::XOrIOp>,
+        ConvertRawToHWInstance<arith::AddIOp>,
+        ConvertRawToHWInstance<arith::SubIOp>,
+        ConvertRawToHWInstance<arith::MulIOp>,
+        ConvertRawToHWInstance<arith::ShLIOp>,
+        ConvertRawToHWInstance<arith::ShRUIOp>,
+        ConvertRawToHWInstance<arith::ShRSIOp>,
+        ConvertRawToHWInstance<arith::SelectOp>,
+        ConvertRawToHWInstance<arith::CmpIOp>,
+        ConvertRawToHWInstance<arith::TruncIOp>,
+        ConvertRawToHWInstance<arith::ExtUIOp>,
+        ConvertRawToHWInstance<arith::ExtSIOp>,
+        ConvertRawToHWInstance<arith::ConstantOp>
         // clang-format on
         >(typeConverter, funcOp->getContext());
 
@@ -2772,8 +2881,10 @@ public:
     ConversionTarget target(*ctx);
     target.addLegalOp<hw::HWModuleOp, hw::HWModuleExternOp, hw::InstanceOp,
                       hw::OutputOp>();
+    // arith is illegal too: an operation on raw wires either has a unit or
+    // stops the lowering here, by name, rather than reaching the exporter.
     target.addIllegalDialect<handshake::HandshakeDialect,
-                             memref::MemRefDialect>();
+                             memref::MemRefDialect, arith::ArithDialect>();
 
     if (failed(applyPartialConversion(modOp, target, std::move(patterns))))
       return signalPassFailure();
