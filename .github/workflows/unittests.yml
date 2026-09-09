@@ -38,6 +38,10 @@ jobs:
 
       - name: Update apt and install prerequisites
         run: |
+          # The runner image carries Google's Chrome apt source, whose index has
+          # failed its hash check more than once and taken every apt step down
+          # with it; nothing here installs from it.
+          sudo rm -f /etc/apt/sources.list.d/google-chrome*
           sudo apt-get -y update
           sudo apt-get -y install software-properties-common
           sudo add-apt-repository ppa:deadsnakes/ppa

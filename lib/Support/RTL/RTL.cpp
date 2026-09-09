@@ -306,6 +306,11 @@ LogicalResult RTLMatch::registerParameters(hw::HWModuleExternOp &modOp) {
 LogicalResult RTLMatch::registerBitwidthParameter(hw::HWModuleExternOp &modOp,
                                                   llvm::StringRef handshakeOp,
                                                   hw::ModuleType &modType) {
+  // A unit on raw wires (`arith.*`) carries its widths as parameters of its
+  // own, set by the module discriminator; its ports are bare integers, which
+  // the machinery below cannot read.
+  if (handshakeOp.starts_with("arith."))
+    return success();
   if (
       // clang-format off
       // default (All(Data)TypesMatch)
@@ -453,6 +458,9 @@ LogicalResult
 RTLMatch::registerExtraSignalParameters(hw::HWModuleExternOp &modOp,
                                         llvm::StringRef handshakeOp,
                                         hw::ModuleType &modType) {
+  // Raw wires carry no extra signals.
+  if (handshakeOp.starts_with("arith."))
+    return success();
 
   if (
       // clang-format off

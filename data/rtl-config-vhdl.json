@@ -739,5 +739,175 @@
       }
     ],
     "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t queue -p num_slots=$NUM_SLOTS bitwidth=$BITWIDTH size_width=$SIZE_WIDTH space_width=$SPACE_WIDTH"
+  },
+  {
+    "name": "arith.andi",
+    "parameters": [
+      {
+        "name": "DATA_WIDTH",
+        "type": "unsigned"
+      }
+    ],
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t arith_andi -p bitwidth=$DATA_WIDTH"
+  },
+  {
+    "name": "arith.ori",
+    "parameters": [
+      {
+        "name": "DATA_WIDTH",
+        "type": "unsigned"
+      }
+    ],
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t arith_ori -p bitwidth=$DATA_WIDTH"
+  },
+  {
+    "name": "arith.xori",
+    "parameters": [
+      {
+        "name": "DATA_WIDTH",
+        "type": "unsigned"
+      }
+    ],
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t arith_xori -p bitwidth=$DATA_WIDTH"
+  },
+  {
+    "name": "arith.addi",
+    "parameters": [
+      {
+        "name": "DATA_WIDTH",
+        "type": "unsigned"
+      }
+    ],
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t arith_addi -p bitwidth=$DATA_WIDTH"
+  },
+  {
+    "name": "arith.subi",
+    "parameters": [
+      {
+        "name": "DATA_WIDTH",
+        "type": "unsigned"
+      }
+    ],
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t arith_subi -p bitwidth=$DATA_WIDTH"
+  },
+  {
+    "name": "arith.muli",
+    "parameters": [
+      {
+        "name": "DATA_WIDTH",
+        "type": "unsigned"
+      }
+    ],
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t arith_muli -p bitwidth=$DATA_WIDTH"
+  },
+  {
+    "name": "arith.shli",
+    "parameters": [
+      {
+        "name": "DATA_WIDTH",
+        "type": "unsigned"
+      }
+    ],
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t arith_shli -p bitwidth=$DATA_WIDTH"
+  },
+  {
+    "name": "arith.shrui",
+    "parameters": [
+      {
+        "name": "DATA_WIDTH",
+        "type": "unsigned"
+      }
+    ],
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t arith_shrui -p bitwidth=$DATA_WIDTH"
+  },
+  {
+    "name": "arith.shrsi",
+    "parameters": [
+      {
+        "name": "DATA_WIDTH",
+        "type": "unsigned"
+      }
+    ],
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t arith_shrsi -p bitwidth=$DATA_WIDTH"
+  },
+  {
+    "name": "arith.select",
+    "parameters": [
+      {
+        "name": "DATA_WIDTH",
+        "type": "unsigned"
+      }
+    ],
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t arith_select -p bitwidth=$DATA_WIDTH"
+  },
+  {
+    "name": "arith.cmpi",
+    "parameters": [
+      {
+        "name": "PREDICATE",
+        "type": "string"
+      },
+      {
+        "name": "DATA_WIDTH",
+        "type": "unsigned"
+      }
+    ],
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t arith_cmpi -p predicate=\"'$PREDICATE'\" bitwidth=$DATA_WIDTH"
+  },
+  {
+    "name": "arith.constant",
+    "parameters": [
+      {
+        "name": "VALUE",
+        "type": "string"
+      },
+      {
+        "name": "DATA_WIDTH",
+        "type": "unsigned"
+      }
+    ],
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t arith_constant -p value=\"'$VALUE'\" bitwidth=$DATA_WIDTH"
+  },
+  {
+    "name": "arith.trunci",
+    "parameters": [
+      {
+        "name": "INPUT_WIDTH",
+        "type": "unsigned"
+      },
+      {
+        "name": "OUTPUT_WIDTH",
+        "type": "unsigned"
+      }
+    ],
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t arith_trunci -p input_bitwidth=$INPUT_WIDTH output_bitwidth=$OUTPUT_WIDTH"
+  },
+  {
+    "name": "arith.extui",
+    "parameters": [
+      {
+        "name": "INPUT_WIDTH",
+        "type": "unsigned"
+      },
+      {
+        "name": "OUTPUT_WIDTH",
+        "type": "unsigned"
+      }
+    ],
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t arith_extui -p input_bitwidth=$INPUT_WIDTH output_bitwidth=$OUTPUT_WIDTH"
+  },
+  {
+    "name": "arith.extsi",
+    "parameters": [
+      {
+        "name": "INPUT_WIDTH",
+        "type": "unsigned"
+      },
+      {
+        "name": "OUTPUT_WIDTH",
+        "type": "unsigned"
+      }
+    ],
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t arith_extsi -p input_bitwidth=$INPUT_WIDTH output_bitwidth=$OUTPUT_WIDTH"
   }
 ]
