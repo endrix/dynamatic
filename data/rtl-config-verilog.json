@@ -2052,5 +2052,221 @@
     "generic": "$DYNAMATIC/data/verilog/handshake/bundle_control.v",
     "module-name": "bundle_control",
     "hdl": "verilog"
+  },
+  {
+    "name": "arith.andi",
+    "parameters": [
+      {
+        "name": "DATA_WIDTH",
+        "type": "unsigned",
+        "generic": true
+      }
+    ],
+    "generic": "$DYNAMATIC/data/verilog/arith/raw/andi.v",
+    "module-name": "arith_andi",
+    "hdl": "verilog"
+  },
+  {
+    "name": "arith.ori",
+    "parameters": [
+      {
+        "name": "DATA_WIDTH",
+        "type": "unsigned",
+        "generic": true
+      }
+    ],
+    "generic": "$DYNAMATIC/data/verilog/arith/raw/ori.v",
+    "module-name": "arith_ori",
+    "hdl": "verilog"
+  },
+  {
+    "name": "arith.xori",
+    "parameters": [
+      {
+        "name": "DATA_WIDTH",
+        "type": "unsigned",
+        "generic": true
+      }
+    ],
+    "generic": "$DYNAMATIC/data/verilog/arith/raw/xori.v",
+    "module-name": "arith_xori",
+    "hdl": "verilog"
+  },
+  {
+    "name": "arith.addi",
+    "parameters": [
+      {
+        "name": "DATA_WIDTH",
+        "type": "unsigned",
+        "generic": true
+      }
+    ],
+    "generic": "$DYNAMATIC/data/verilog/arith/raw/addi.v",
+    "module-name": "arith_addi",
+    "hdl": "verilog"
+  },
+  {
+    "name": "arith.subi",
+    "parameters": [
+      {
+        "name": "DATA_WIDTH",
+        "type": "unsigned",
+        "generic": true
+      }
+    ],
+    "generic": "$DYNAMATIC/data/verilog/arith/raw/subi.v",
+    "module-name": "arith_subi",
+    "hdl": "verilog"
+  },
+  {
+    "name": "arith.muli",
+    "parameters": [
+      {
+        "name": "DATA_WIDTH",
+        "type": "unsigned",
+        "generic": true
+      }
+    ],
+    "generic": "$DYNAMATIC/data/verilog/arith/raw/muli.v",
+    "module-name": "arith_muli",
+    "hdl": "verilog"
+  },
+  {
+    "name": "arith.shli",
+    "parameters": [
+      {
+        "name": "DATA_WIDTH",
+        "type": "unsigned",
+        "generic": true
+      }
+    ],
+    "generic": "$DYNAMATIC/data/verilog/arith/raw/shli.v",
+    "module-name": "arith_shli",
+    "hdl": "verilog"
+  },
+  {
+    "name": "arith.shrui",
+    "parameters": [
+      {
+        "name": "DATA_WIDTH",
+        "type": "unsigned",
+        "generic": true
+      }
+    ],
+    "generic": "$DYNAMATIC/data/verilog/arith/raw/shrui.v",
+    "module-name": "arith_shrui",
+    "hdl": "verilog"
+  },
+  {
+    "name": "arith.shrsi",
+    "parameters": [
+      {
+        "name": "DATA_WIDTH",
+        "type": "unsigned",
+        "generic": true
+      }
+    ],
+    "generic": "$DYNAMATIC/data/verilog/arith/raw/shrsi.v",
+    "module-name": "arith_shrsi",
+    "hdl": "verilog"
+  },
+  {
+    "name": "arith.select",
+    "parameters": [
+      {
+        "name": "DATA_WIDTH",
+        "type": "unsigned",
+        "generic": true
+      }
+    ],
+    "generic": "$DYNAMATIC/data/verilog/arith/raw/select.v",
+    "module-name": "arith_select",
+    "hdl": "verilog"
+  },
+  {
+    "name": "arith.cmpi",
+    "parameters": [
+      {
+        "name": "PREDICATE",
+        "type": "string"
+      },
+      {
+        "name": "DATA_WIDTH",
+        "type": "unsigned",
+        "generic": true
+      }
+    ],
+    "generator": "\"$DYNAMATIC/bin/generators/rtl-cmpi-generator\" \"$DYNAMATIC/data/verilog/arith/raw/cmpi.v\" \"$OUTPUT_DIR/$MODULE_NAME.v\" $MODULE_NAME $PREDICATE verilog",
+    "hdl": "verilog"
+  },
+  {
+    "name": "arith.constant",
+    "parameters": [
+      {
+        "name": "VALUE",
+        "type": "string"
+      },
+      {
+        "name": "DATA_WIDTH",
+        "type": "unsigned",
+        "generic": true
+      }
+    ],
+    "generator": "\"$DYNAMATIC/bin/generators/rtl-constant-generator-verilog\" \"$DYNAMATIC/data/verilog/arith/raw/constant.v\" \"$OUTPUT_DIR/$MODULE_NAME.v\" $MODULE_NAME $VALUE",
+    "hdl": "verilog"
+  },
+  {
+    "name": "arith.trunci",
+    "parameters": [
+      {
+        "name": "INPUT_WIDTH",
+        "type": "unsigned",
+        "generic": true
+      },
+      {
+        "name": "OUTPUT_WIDTH",
+        "type": "unsigned",
+        "generic": true
+      }
+    ],
+    "generic": "$DYNAMATIC/data/verilog/arith/raw/trunci.v",
+    "module-name": "arith_trunci",
+    "hdl": "verilog"
+  },
+  {
+    "name": "arith.extui",
+    "parameters": [
+      {
+        "name": "INPUT_WIDTH",
+        "type": "unsigned",
+        "generic": true
+      },
+      {
+        "name": "OUTPUT_WIDTH",
+        "type": "unsigned",
+        "generic": true
+      }
+    ],
+    "generic": "$DYNAMATIC/data/verilog/arith/raw/extui.v",
+    "module-name": "arith_extui",
+    "hdl": "verilog"
+  },
+  {
+    "name": "arith.extsi",
+    "parameters": [
+      {
+        "name": "INPUT_WIDTH",
+        "type": "unsigned",
+        "generic": true
+      },
+      {
+        "name": "OUTPUT_WIDTH",
+        "type": "unsigned",
+        "generic": true
+      }
+    ],
+    "generic": "$DYNAMATIC/data/verilog/arith/raw/extsi.v",
+    "module-name": "arith_extsi",
+    "hdl": "verilog"
   }
 ]
