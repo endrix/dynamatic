@@ -46,6 +46,10 @@ jobs:
 
       - name: Install system dependencies
         run: |
+          # The runner image carries Google's Chrome apt source, whose index has
+          # failed its hash check more than once and taken every apt step down
+          # with it; nothing here installs from it.
+          sudo rm -f /etc/apt/sources.list.d/google-chrome*
           sudo apt-get -y update
           sudo apt-get install -y clang lld cmake ninja-build python3 git
 
