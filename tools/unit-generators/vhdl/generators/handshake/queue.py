@@ -100,12 +100,19 @@ begin
   Empty <= '1' when Count = 0 else '0';
   Full  <= '1' when Count = {num_slots} else '0';
 
-  -- accept a token whenever there is room, or room is being made this cycle
-  ins_ready  <= not Full or outs_ready;
+  -- accept a token whenever there is room. Not "or room is being made this
+  -- cycle": that made ins_ready the consumer's outs_ready whenever the queue
+  -- was full, a combinational path from the consumer's decision into the
+  -- producer's, and on the CalPy picorv32 core the critical path ran that
+  -- way across the network, from one actor's round through the queue into
+  -- the next actor's. Registered, the ready ends here. A full queue takes
+  -- its next token the cycle after one leaves and settles one below full at
+  -- one token a cycle; the decoder networks are bit-exact at the same cycles.
+  ins_ready  <= not Full;
   outs_valid <= not Empty;
 
   ReadEn  <= outs_ready and not Empty;
-  WriteEn <= ins_valid and (not Full or outs_ready);
+  WriteEn <= ins_valid and not Full;
 
   -- One register, up on a write and down on a read; a simultaneous write and
   -- read leaves it alone.
