@@ -218,7 +218,14 @@ void dynamatic::buffer::writeFrequenciesAttr(
 }
 
 bool dynamatic::buffer::hasBasicBlocks(handshake::FuncOp funcOp) {
+  // The kinds the invariant check lets sit outside every block do not make a
+  // control-flow graph on their own: a memory controller's accesses carry
+  // the block of the operation that issues them wherever they sit (an esa
+  // actor's round holds them among hundreds of operations of no block).
   return llvm::any_of(funcOp.getOps(), [](Operation &op) {
+    if (isa<handshake::SinkOp, handshake::MemoryOpInterface, handshake::RAMOp>(
+            &op))
+      return false;
     return getLogicBB(&op).has_value();
   });
 }
