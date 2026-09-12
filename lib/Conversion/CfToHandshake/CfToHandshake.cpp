@@ -1327,8 +1327,14 @@ ConvertCalls::matchAndRewrite(func::CallOp callOp, OpAdaptor adaptor,
     for (unsigned i = 0; i < calledFuncOp.getNumArguments(); ++i) {
       auto nameAttr = calledFuncOp.getArgAttrOfType<mlir::StringAttr>(
           i, "handshake.arg_name");
-      assert(nameAttr && !nameAttr.getValue().empty() &&
-             "Argument name attribute is missing or empty");
+      if (!nameAttr || nameAttr.getValue().empty()) {
+        return callOp->emitError()
+               << "call to '" << calledFuncOp.getSymName() << "': argument "
+               << i
+               << " has no 'handshake.arg_name' attribute; only a function "
+                  "whose arguments are named input_*, output_* or "
+                  "parameter_* can be called as an instance";
+      }
       if (nameAttr.getValue().starts_with("input_")) {
         InstanceOpInputIndices.push_back(i);
       } else if (nameAttr.getValue().starts_with("output_")) {
@@ -1360,13 +1366,18 @@ ConvertCalls::matchAndRewrite(func::CallOp callOp, OpAdaptor adaptor,
         }
 
       } else {
-        llvm::errs() << "Argument " << i
-                     << " does not follow the naming convention\n";
-        assert(false && "Invalid argument naming");
+        return callOp->emitError()
+               << "call to '" << calledFuncOp.getSymName() << "': argument "
+               << i << " is named '" << nameAttr.getValue()
+               << "', which is not input_*, output_* or parameter_*";
       }
     }
-    assert(!InstanceOpOutputIndices.empty() &&
-           "Placeholder functions must at least have one output_ argument!");
+    if (InstanceOpOutputIndices.empty()) {
+      return callOp->emitError()
+             << "call to '" << calledFuncOp.getSymName()
+             << "': a placeholder function needs at least one output_ "
+                "argument";
+    }
     // For each operand, check if its index is in the output or parameter index
     // vector. If it is, remove that operand. This ensures that the operands
     // list only contains input arguments. We iterate in reverse to avoid

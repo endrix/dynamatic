@@ -38,7 +38,8 @@ public:
   DynOpConversionPattern(NameAnalysis &namer,
                          const TypeConverter &typeConverter, MLIRContext *ctx,
                          mlir::PatternBenefit benefit = 1)
-      : OpConversionPattern<SourceOp>(typeConverter, ctx), namer(namer) {}
+      : OpConversionPattern<SourceOp>(typeConverter, ctx, benefit),
+        namer(namer) {}
 
 protected:
   /// Reference to the running pass's naming analysis.
