@@ -598,6 +598,15 @@ void BufferPlacementMILP::addUnitTimingConstraints(Operation *unit,
       // The input/output channels must both be inside the CFDFC union
       if (!filter(in) || !filter(out))
         return;
+      // A value the model made no variables for (a signal the dialect's
+      // extensions carry beside the channels) has no timing to constrain;
+      // indexing the map would make empty variables and the expression
+      // built on them would dereference nothing.
+      if (!vars.channelVars.count(in) || !vars.channelVars.count(out)) {
+        unit->emitWarning() << "a port of this unit has no MILP variables; "
+                               "its path constraint is skipped";
+        return;
+      }
 
       // Flip channels on ready path which goes upstream
       if (signalType == SignalType::READY)

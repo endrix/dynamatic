@@ -347,6 +347,11 @@ LogicalResult HandshakePlaceBuffersPass::checkFuncInvariants(FuncInfo &info) {
 
     std::optional<unsigned> srcBB = opBlocks[&op];
     for (OpResult res : op.getResults()) {
+      // A result nothing uses has no transition to check; dereferencing its
+      // first user is a null dereference (a round of an esa actor holds the
+      // controller's accesses, whose results are not all used).
+      if (res.use_empty())
+        continue;
       Operation *user = *res.getUsers().begin();
       std::optional<unsigned> dstBB = opBlocks[user];
 

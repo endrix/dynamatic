@@ -68,7 +68,8 @@ LogicalResult readFrequenciesAttr(handshake::FuncOp funcOp,
 void writeFrequenciesAttr(handshake::FuncOp funcOp,
                           ArrayRef<experimental::ArchBB> archs);
 
-/// Whether any operation in the function is annotated with a basic block.
+/// Whether any operation in the function is annotated with a basic block,
+/// sinks and memory accesses aside (they carry a block wherever they sit).
 /// A function without any has no control-flow graph for the MILP to reason
 /// about.
 bool hasBasicBlocks(handshake::FuncOp funcOp);
