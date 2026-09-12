@@ -1464,6 +1464,26 @@ ConvertCalls::matchAndRewrite(func::CallOp callOp, OpAdaptor adaptor,
       }
     }
   } else {
+    // The callee was lowered before this call. A placeholder module keeps its
+    // role-named arguments as its argument names; a plain function does not,
+    // and is refused here as it is above, whatever the order of the two.
+    bool placeholder = false;
+    if (auto argNames = calledHandshakeFuncOp->getAttrOfType<ArrayAttr>(
+            "argNames")) {
+      for (Attribute attr : argNames) {
+        StringRef name = cast<StringAttr>(attr).getValue();
+        if (name.starts_with("input_") || name.starts_with("output_") ||
+            name.starts_with("parameter_"))
+          placeholder = true;
+      }
+    }
+    if (!placeholder) {
+      return callOp->emitError()
+             << "call to '" << calledHandshakeFuncOp.getName()
+             << "': lowered before the call and not a placeholder module; "
+                "only a function whose arguments are named input_*, output_* "
+                "or parameter_* can be called as an instance";
+    }
     resultTypes = calledHandshakeFuncOp.getFunctionType().getResults();
   }
   SmallVector<Type> handshakeResultTypes;
