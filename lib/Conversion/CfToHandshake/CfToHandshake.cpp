@@ -1327,8 +1327,14 @@ ConvertCalls::matchAndRewrite(func::CallOp callOp, OpAdaptor adaptor,
     for (unsigned i = 0; i < calledFuncOp.getNumArguments(); ++i) {
       auto nameAttr = calledFuncOp.getArgAttrOfType<mlir::StringAttr>(
           i, "handshake.arg_name");
-      assert(nameAttr && !nameAttr.getValue().empty() &&
-             "Argument name attribute is missing or empty");
+      if (!nameAttr || nameAttr.getValue().empty()) {
+        return callOp->emitError()
+               << "call to '" << calledFuncOp.getSymName() << "': argument "
+               << i
+               << " has no 'handshake.arg_name' attribute; only a function "
+                  "whose arguments are named input_*, output_* or "
+                  "parameter_* can be called as an instance";
+      }
       if (nameAttr.getValue().starts_with("input_")) {
         InstanceOpInputIndices.push_back(i);
       } else if (nameAttr.getValue().starts_with("output_")) {
@@ -1360,13 +1366,18 @@ ConvertCalls::matchAndRewrite(func::CallOp callOp, OpAdaptor adaptor,
         }
 
       } else {
-        llvm::errs() << "Argument " << i
-                     << " does not follow the naming convention\n";
-        assert(false && "Invalid argument naming");
+        return callOp->emitError()
+               << "call to '" << calledFuncOp.getSymName() << "': argument "
+               << i << " is named '" << nameAttr.getValue()
+               << "', which is not input_*, output_* or parameter_*";
       }
     }
-    assert(!InstanceOpOutputIndices.empty() &&
-           "Placeholder functions must at least have one output_ argument!");
+    if (InstanceOpOutputIndices.empty()) {
+      return callOp->emitError()
+             << "call to '" << calledFuncOp.getSymName()
+             << "': a placeholder function needs at least one output_ "
+                "argument";
+    }
     // For each operand, check if its index is in the output or parameter index
     // vector. If it is, remove that operand. This ensures that the operands
     // list only contains input arguments. We iterate in reverse to avoid
@@ -1453,6 +1464,26 @@ ConvertCalls::matchAndRewrite(func::CallOp callOp, OpAdaptor adaptor,
       }
     }
   } else {
+    // The callee was lowered before this call. A placeholder module keeps its
+    // role-named arguments as its argument names; a plain function does not,
+    // and is refused here as it is above, whatever the order of the two.
+    bool placeholder = false;
+    if (auto argNames = calledHandshakeFuncOp->getAttrOfType<ArrayAttr>(
+            "argNames")) {
+      for (Attribute attr : argNames) {
+        StringRef name = cast<StringAttr>(attr).getValue();
+        if (name.starts_with("input_") || name.starts_with("output_") ||
+            name.starts_with("parameter_"))
+          placeholder = true;
+      }
+    }
+    if (!placeholder) {
+      return callOp->emitError()
+             << "call to '" << calledHandshakeFuncOp.getName()
+             << "': lowered before the call and not a placeholder module; "
+                "only a function whose arguments are named input_*, output_* "
+                "or parameter_* can be called as an instance";
+    }
     resultTypes = calledHandshakeFuncOp.getFunctionType().getResults();
   }
   SmallVector<Type> handshakeResultTypes;
