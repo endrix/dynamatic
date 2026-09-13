@@ -344,6 +344,11 @@ def HandshakePlaceBuffers : Pass<"handshake-place-buffers"> {
     "Timeout (in seconds) for the buffer placement MILP (0 for no timeout)">,
     Option<"dumpMILPModels", "dump-milp-models", "bool", "false",
     "If true, dump MILP models into a directory named 'buffer-placement'.">,
+    Option<"initSlots", "init-slots", "unsigned", "10",
+           "Slots the on-merges placement puts on every init output, opaque "
+           "and transparent each (fast token delivery's loop-condition inits; "
+           "ten is a throughput depth, one is enough where a function runs one "
+           "token at a time)">,
     Option<"ftd", "ftd", "bool", "false",
     "If true, use FTD-specific CFDFC extraction and backedge "
     "identification.">,

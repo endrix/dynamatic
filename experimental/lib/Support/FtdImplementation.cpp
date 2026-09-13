@@ -630,12 +630,19 @@ void ftd::addSuppOperandConsumer(mlir::OpBuilder &builder,
   // consumer being a multiplexer skip because no delivery is needed
   if (consumerBlock == producerBlock &&
       (!llvm::isa<handshake::MuxOp>(consumerOp) ||
-       operand.getDefiningOp()->hasAttr(FTD_EXPLICIT_GAMMA))) {
+       (operand.getDefiningOp() &&
+        operand.getDefiningOp()->hasAttr(FTD_EXPLICIT_GAMMA)))) {
     return;
   }
 
-  if (Operation *producerOp = operand.getDefiningOp(); producerOp) {
-
+  // A function argument has no producer operation: it is produced in the
+  // entry block, every time the function runs, and a consumer in a block the
+  // entry does not always reach needs the token suppressed like any other.
+  // (Before, everything below sat under `if (producerOp)`, and an argument
+  // read inside a conditional block waited for ever at a join with a value
+  // that was suppressed.)
+  Operation *producerOp = operand.getDefiningOp();
+  if (producerOp) {
     // A conditional branch already performs suppression on the value.
     // Do not insert another suppression unit after it.
     if (llvm::isa<handshake::ConditionalBranchOp>(producerOp))
@@ -647,35 +654,35 @@ void ftd::addSuppOperandConsumer(mlir::OpBuilder &builder,
         producerOp->hasAttr(FTD_INIT_MERGE))
       return;
 
-    // Skip if either the producer or the consumer are
-    // related to memory operations, or if the consumer is a conditional
-    // branch
-    if (llvm::isa_and_nonnull<handshake::MemoryControllerOp>(consumerOp) ||
-        llvm::isa_and_nonnull<handshake::MemoryControllerOp>(producerOp) ||
-        llvm::isa_and_nonnull<handshake::LSQOp>(producerOp) ||
-        llvm::isa_and_nonnull<handshake::LSQOp>(consumerOp) ||
-        llvm::isa_and_nonnull<handshake::ControlMergeOp>(producerOp) ||
-        llvm::isa_and_nonnull<handshake::ControlMergeOp>(consumerOp) ||
-        llvm::isa_and_nonnull<handshake::ConditionalBranchOp>(consumerOp) ||
-        llvm::isa_and_nonnull<cf::BranchOp>(consumerOp) ||
-        (llvm::isa<memref::LoadOp>(consumerOp) &&
-         !llvm::isa<handshake::LoadOp>(consumerOp)) ||
-        (llvm::isa<memref::StoreOp>(consumerOp) &&
-         !llvm::isa<handshake::StoreOp>(consumerOp)) ||
-        llvm::isa<mlir::MemRefType>(operand.getType()))
+    if (llvm::isa<handshake::MemoryControllerOp, handshake::LSQOp,
+                  handshake::ControlMergeOp>(producerOp))
       return;
-
-    // Skip cf::CondBranchOp consumers unless this operand is the condition
-    // input (operand 0) of the block's terminator.
-    if (llvm::isa_and_nonnull<cf::CondBranchOp>(consumerOp) &&
-        (consumerOp != consumerBlock->getTerminator() ||
-         operand != consumerOp->getOperand(0)))
-      return;
-
-    // Handle the suppression in all the other cases (including the operand
-    // being a function argument)
-    insertDirectSuppression(builder, funcOp, consumerOp, operand, shadow);
   }
+
+  // Skip if the consumer is related to memory operations, is a conditional
+  // branch, or the value is a memory reference
+  if (llvm::isa_and_nonnull<handshake::MemoryControllerOp>(consumerOp) ||
+      llvm::isa_and_nonnull<handshake::LSQOp>(consumerOp) ||
+      llvm::isa_and_nonnull<handshake::ControlMergeOp>(consumerOp) ||
+      llvm::isa_and_nonnull<handshake::ConditionalBranchOp>(consumerOp) ||
+      llvm::isa_and_nonnull<cf::BranchOp>(consumerOp) ||
+      (llvm::isa<memref::LoadOp>(consumerOp) &&
+       !llvm::isa<handshake::LoadOp>(consumerOp)) ||
+      (llvm::isa<memref::StoreOp>(consumerOp) &&
+       !llvm::isa<handshake::StoreOp>(consumerOp)) ||
+      llvm::isa<mlir::MemRefType>(operand.getType()))
+    return;
+
+  // Skip cf::CondBranchOp consumers unless this operand is the condition
+  // input (operand 0) of the block's terminator.
+  if (llvm::isa_and_nonnull<cf::CondBranchOp>(consumerOp) &&
+      (consumerOp != consumerBlock->getTerminator() ||
+       operand != consumerOp->getOperand(0)))
+    return;
+
+  // Handle the suppression in all the other cases, the operand being a
+  // function argument included
+  insertDirectSuppression(builder, funcOp, consumerOp, operand, shadow);
 }
 
 void ftd::addSupp(handshake::FuncOp &funcOp, mlir::OpBuilder &builder,

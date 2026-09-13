@@ -189,62 +189,46 @@ LogicalResult FtdConvertIndexCast<CastOp, ExtOp>::matchAndRewrite(
   return success();
 }
 
-/// Per-block edge information captured from CF-level IR before conversion.
-struct BlockEdgeInfo {
-  bool isConditional = false;
-  bool hasSuccessors = false;
-  unsigned trueSuccIdx = 0;
-  unsigned falseSuccIdx = 0;
-  unsigned uncondSuccIdx = 0;
-};
+OriginalCFGInfo ftd::captureCFGTopology(func::FuncOp funcOp) {
+  OriginalCFGInfo info;
+  Region &region = funcOp.getBody();
+  if (region.empty())
+    return info;
 
-/// Complete CFG topology of one function, captured before conversion.
-struct OriginalCFGInfo {
-  unsigned numBlocks = 0;
-  SmallVector<BlockEdgeInfo> blockEdges;
-};
+  DenseMap<Block *, unsigned> blockIdx;
+  for (auto [idx, block] : llvm::enumerate(region))
+    blockIdx[&block] = idx;
 
-/// Walk every func::FuncOp in the module and capture its CFG topology.
-/// Must be called BEFORE applyFullConversion.
-static DenseMap<StringRef, OriginalCFGInfo>
-captureAllCFGTopologies(ModuleOp moduleOp) {
+  info.numBlocks = blockIdx.size();
+  info.blockEdges.resize(info.numBlocks);
+
+  for (auto &[block, idx] : blockIdx) {
+    BlockEdgeInfo &edge = info.blockEdges[idx];
+    Operation *term = block->getTerminator();
+
+    if (auto condBr = dyn_cast<cf::CondBranchOp>(term)) {
+      edge.isConditional = true;
+      edge.hasSuccessors = true;
+      edge.trueSuccIdx = blockIdx.lookup(condBr.getTrueDest());
+      edge.falseSuccIdx = blockIdx.lookup(condBr.getFalseDest());
+    } else if (auto br = dyn_cast<cf::BranchOp>(term)) {
+      edge.hasSuccessors = true;
+      edge.uncondSuccIdx = blockIdx.lookup(br.getDest());
+    }
+  }
+  return info;
+}
+
+DenseMap<StringRef, OriginalCFGInfo>
+ftd::captureAllCFGTopologies(ModuleOp moduleOp) {
   DenseMap<StringRef, OriginalCFGInfo> result;
-
   for (auto funcOp : moduleOp.getOps<func::FuncOp>()) {
     if (funcOp.isExternal() || funcOp.getSymName().starts_with("__init"))
       continue;
-
-    Region &region = funcOp.getBody();
-    if (region.empty())
+    if (funcOp.getBody().empty())
       continue;
-
-    OriginalCFGInfo info;
-
-    DenseMap<Block *, unsigned> blockIdx;
-    for (auto [idx, block] : llvm::enumerate(region))
-      blockIdx[&block] = idx;
-
-    info.numBlocks = blockIdx.size();
-    info.blockEdges.resize(info.numBlocks);
-
-    for (auto &[block, idx] : blockIdx) {
-      BlockEdgeInfo &edge = info.blockEdges[idx];
-      Operation *term = block->getTerminator();
-
-      if (auto condBr = dyn_cast<cf::CondBranchOp>(term)) {
-        edge.isConditional = true;
-        edge.hasSuccessors = true;
-        edge.trueSuccIdx = blockIdx.lookup(condBr.getTrueDest());
-        edge.falseSuccIdx = blockIdx.lookup(condBr.getFalseDest());
-      } else if (auto br = dyn_cast<cf::BranchOp>(term)) {
-        edge.hasSuccessors = true;
-        edge.uncondSuccIdx = blockIdx.lookup(br.getDest());
-      }
-    }
-
-    result[funcOp.getSymName()] = std::move(info);
+    result[funcOp.getSymName()] = captureCFGTopology(funcOp);
   }
-
   return result;
 }
 
@@ -302,6 +286,57 @@ static ftd::ShadowCFG buildShadowCFG(OpBuilder &builder,
   return shadow;
 }
 
+void ftd::completeFastTokenDelivery(handshake::FuncOp funcOp,
+                                    const OriginalCFGInfo &info) {
+  mlir::OpBuilder builder(funcOp.getContext());
+
+  if (info.numBlocks <= 1)
+    return;
+
+  // Build the shadow CFG — one struct, everything inside.
+  ftd::ShadowCFG shadow = buildShadowCFG(builder, funcOp, info);
+
+  // Route the select of every conditional block's terminator branch
+  // through that block's condition placeholder.
+  DenseMap<unsigned, Value> condPlaceholderByBB;
+  for (auto cstOp : funcOp.getOps<handshake::ConstantOp>()) {
+    if (!cstOp->hasAttr("ftd.cvar"))
+      continue;
+    if (auto bbAttr = cstOp->getAttrOfType<IntegerAttr>("handshake.bb"))
+      condPlaceholderByBB[bbAttr.getUInt()] = cstOp.getResult();
+  }
+  for (auto brOp : funcOp.getOps<handshake::ConditionalBranchOp>()) {
+    if (brOp->hasAttr("ftd.skip"))
+      continue;
+    auto bbAttr = brOp->getAttrOfType<IntegerAttr>("handshake.bb");
+    if (!bbAttr)
+      continue;
+    auto it = condPlaceholderByBB.find(bbAttr.getUInt());
+    if (it == condPlaceholderByBB.end())
+      continue;
+    // operand 0 of a ConditionalBranchOp is the condition (select).
+    brOp->setOperand(0, it->second);
+  }
+
+  ftd::resolveCondPlaceholders(funcOp, builder, shadow);
+
+  // Populate conditionMap from NotIOp placeholders
+  for (auto notOp : funcOp.getOps<handshake::NotIOp>()) {
+    if (!notOp->hasAttr("ftd.cvar"))
+      continue;
+    auto bbAttr = notOp->getAttrOfType<IntegerAttr>("handshake.bb");
+    if (!bbAttr)
+      continue;
+    shadow.conditionMap[bbAttr.getUInt()] = notOp.getResult();
+  }
+
+  ftd::addRegen(funcOp, builder, shadow);
+  ftd::addSupp(funcOp, builder, shadow);
+  ftd::finalizeCondPlaceholders(funcOp);
+
+  shadow.destroy();
+}
+
 namespace {
 
 struct FtdCfToHandshakePass
@@ -319,9 +354,7 @@ struct FtdCfToHandshakePass
     auto cfgTopologies = captureAllCFGTopologies(modOp);
 
     patterns.add<experimental::ftd::FtdLowerFuncToHandshake>(
-        getAnalysis<ControlDependenceAnalysis>(),
-        getAnalysis<gsa::GSAAnalysis>(), getAnalysis<NameAnalysis>(), converter,
-        ctx);
+        getAnalysis<NameAnalysis>(), converter, ctx);
 
     patterns.add<AllocaOpConversion, ConvertCalls, GetGlobalOpConversion,
                  GlobalOpConversion,
@@ -402,58 +435,10 @@ struct FtdCfToHandshakePass
     }
 
     for (auto funcOp : modOp.getOps<handshake::FuncOp>()) {
-      mlir::OpBuilder builder(funcOp.getContext());
-
       auto topoIt = cfgTopologies.find(funcOp.getName());
       if (topoIt == cfgTopologies.end())
         continue;
-      const OriginalCFGInfo &info = topoIt->second;
-
-      if (info.numBlocks <= 1)
-        continue;
-
-      // Build the shadow CFG — one struct, everything inside.
-      ftd::ShadowCFG shadow = buildShadowCFG(builder, funcOp, info);
-
-      // Route the select of every conditional block's terminator branch
-      // through that block's condition placeholder.
-      DenseMap<unsigned, Value> condPlaceholderByBB;
-      for (auto cstOp : funcOp.getOps<handshake::ConstantOp>()) {
-        if (!cstOp->hasAttr("ftd.cvar"))
-          continue;
-        if (auto bbAttr = cstOp->getAttrOfType<IntegerAttr>("handshake.bb"))
-          condPlaceholderByBB[bbAttr.getUInt()] = cstOp.getResult();
-      }
-      for (auto brOp : funcOp.getOps<handshake::ConditionalBranchOp>()) {
-        if (brOp->hasAttr("ftd.skip"))
-          continue;
-        auto bbAttr = brOp->getAttrOfType<IntegerAttr>("handshake.bb");
-        if (!bbAttr)
-          continue;
-        auto it = condPlaceholderByBB.find(bbAttr.getUInt());
-        if (it == condPlaceholderByBB.end())
-          continue;
-        // operand 0 of a ConditionalBranchOp is the condition (select).
-        brOp->setOperand(0, it->second);
-      }
-
-      ftd::resolveCondPlaceholders(funcOp, builder, shadow);
-
-      // Populate conditionMap from NotIOp placeholders
-      for (auto notOp : funcOp.getOps<handshake::NotIOp>()) {
-        if (!notOp->hasAttr("ftd.cvar"))
-          continue;
-        auto bbAttr = notOp->getAttrOfType<IntegerAttr>("handshake.bb");
-        if (!bbAttr)
-          continue;
-        shadow.conditionMap[bbAttr.getUInt()] = notOp.getResult();
-      }
-
-      ftd::addRegen(funcOp, builder, shadow);
-      ftd::addSupp(funcOp, builder, shadow);
-      ftd::finalizeCondPlaceholders(funcOp);
-
-      shadow.destroy();
+      ftd::completeFastTokenDelivery(funcOp, topoIt->second);
     }
   }
 };
@@ -594,7 +579,8 @@ LogicalResult ftd::FtdLowerFuncToHandshake::matchAndRewrite(
   // backedge is replaced with the corresponding hanshake values
   static DenseMap<Value, SmallVector<Backedge, 2>> pendingMuxOperands;
 
-  // Add the muxes as obtained by the GSA analysis pass.
+  // Add the muxes as obtained by the GSA analysis of this function.
+  gsa::GSAAnalysis gsaAnalysis(lowerFuncOp.getOperation());
   if (failed(addGsaGates(lowerFuncOp.getRegion(), rewriter, gsaAnalysis,
                          &pendingMuxOperands)))
     return failure();
