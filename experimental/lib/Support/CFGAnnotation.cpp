@@ -175,11 +175,12 @@ static cfg::CFGAnnotation getCFGEdges(Region &funcRegion, NameAnalysis &namer) {
       // this annotation needs the condition materialized first.
       Value condition = condBranchOp.getOperand(0);
       std::string conditionName;
-      if (Operation *conditionOperation = condition.getDefiningOp())
+      if (Operation *conditionOperation = condition.getDefiningOp()) {
         conditionName = namer.getName(conditionOperation).str();
-      else
-        conditionName =
-            "arg" + std::to_string(cast<BlockArgument>(condition).getArgNumber());
+      } else {
+        unsigned argNo = cast<BlockArgument>(condition).getArgNumber();
+        conditionName = "arg" + std::to_string(argNo);
+      }
 
       // Get IDs of both true and false destinations
       unsigned trueDestID = getIDBlock(condBranchOp.getTrueDest());
