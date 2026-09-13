@@ -167,9 +167,15 @@ static cfg::CFGAnnotation getCFGEdges(Region &funcRegion, NameAnalysis &namer) {
                condBranchOp) {
       // Get the name of the operation which defines the condition used for the
       // branch
-      Operation *conditionOperation =
-          condBranchOp.getOperand(0).getDefiningOp();
-      std::string conditionName = namer.getName(conditionOperation).str();
+      // A condition that is an argument (of the function or of a block) has
+      // no defining operation to name; it is named by its position.
+      Value condition = condBranchOp.getOperand(0);
+      std::string conditionName;
+      if (Operation *conditionOperation = condition.getDefiningOp())
+        conditionName = namer.getName(conditionOperation).str();
+      else
+        conditionName =
+            "arg" + std::to_string(cast<BlockArgument>(condition).getArgNumber());
 
       // Get IDs of both true and false destinations
       unsigned trueDestID = getIDBlock(condBranchOp.getTrueDest());
