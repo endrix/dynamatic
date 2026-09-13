@@ -630,7 +630,8 @@ void ftd::addSuppOperandConsumer(mlir::OpBuilder &builder,
   // consumer being a multiplexer skip because no delivery is needed
   if (consumerBlock == producerBlock &&
       (!llvm::isa<handshake::MuxOp>(consumerOp) ||
-       operand.getDefiningOp()->hasAttr(FTD_EXPLICIT_GAMMA))) {
+       (operand.getDefiningOp() &&
+        operand.getDefiningOp()->hasAttr(FTD_EXPLICIT_GAMMA)))) {
     return;
   }
 

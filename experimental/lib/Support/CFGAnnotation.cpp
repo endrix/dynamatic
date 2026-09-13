@@ -168,7 +168,11 @@ static cfg::CFGAnnotation getCFGEdges(Region &funcRegion, NameAnalysis &namer) {
       // Get the name of the operation which defines the condition used for the
       // branch
       // A condition that is an argument (of the function or of a block) has
-      // no defining operation to name; it is named by its position.
+      // no defining operation to name; it is named by its position. The
+      // name is a placeholder: `restoreCfStructure` resolves a condition by
+      // operation name and cannot resolve this one (it warns and falls back
+      // to a compare in the block), so a flow that restores the CFG from
+      // this annotation needs the condition materialized first.
       Value condition = condBranchOp.getOperand(0);
       std::string conditionName;
       if (Operation *conditionOperation = condition.getDefiningOp())

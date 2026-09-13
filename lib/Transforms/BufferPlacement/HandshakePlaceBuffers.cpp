@@ -797,7 +797,8 @@ LogicalResult HandshakePlaceBuffersPass::placeWithoutUsingMILP() {
     for (auto initOp : funcOp.getOps<handshake::InitOp>()) {
       ChannelBufProps &resProps = channelProps[initOp->getResult(0)];
       if (resProps.maxTrans.value_or(1) >= 1) {
-        resProps.minTrans = std::max(resProps.minTrans, static_cast<unsigned>(initSlots));
+        resProps.minTrans =
+            std::max(resProps.minTrans, static_cast<unsigned>(initSlots));
       } else {
         initOp->emitWarning()
             << "Cannot place transparent buffer on init operation's output "
