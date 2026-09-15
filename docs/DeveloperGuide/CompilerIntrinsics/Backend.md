@@ -256,6 +256,23 @@ Speculation. taint tracking, and tagged tokens for multi-threading, require wrap
 To avoid communication between the generators of each unit, each unit generates its own dependencies. This means there are many copies of common dependencies, such as joins and forks.
 
 
+### SRAM Macros for `handshake.ram`
+
+A `handshake.ram` is a flop array in the VHDL the `ram` generator writes (`tools/unit-generators/vhdl/generators/handshake/ram.py`): one read port, one write port, a registered read. On an ASIC a 64-word buffer is then 2,048 flip-flops and their muxes where an SRAM macro is one cell, so the generator also writes, for a memory large enough, a *synthesis view* of the same entity whose body instantiates a macro. Two options on the generator's line in `data/rtl-config-vhdl.json` control it:
+
+```
+-t ram -p ... sram_threshold=64 sram_name='fakeram7_{size}x{width}'
+```
+
+- `sram_threshold`: a memory of at least this many words gets the view; `0` means none does. The default line says 64, so an 8-word memory stays flops and a 64-word one becomes a macro.
+- `sram_name`: the macro's cell name, a Python format with `{size}` (words), `{width}` (bits) and `{addr}` (address bits). The default follows [FakeRAM2.0](https://github.com/ABKGroup/FakeRAM2.0)'s naming; the view uses its port names too (`rd_out`, `addr_in`, `we_in`, `wd_in`, `clk`, `ce_in`), a 1RW macro with a chip enable.
+
+A memory with a non-zero initial value never gets the view, whatever its size: a macro powers up empty, and the flop model's initial values are the reset content only flops carry.
+
+The view is a companion file, `sram/<module>.vhd` next to the flop model `<module>.vhd`, both holding the entity. Nothing that reads the export's directory changes (the simulation scripts, `hdl-read.sh`, the harness's yosys runs all glob `*.vhd` at the top level), so a simulation keeps the flop model; a synthesis that wants the macro reads `sram/<module>.vhd` in place of `<module>.vhd` and gives yosys the macro's liberty as a blackbox before the design (`read_liberty -lib`), which the GHDL plugin binds the unbound component to, and OpenSTA the same liberty for the macro's arcs. Generators return companion files as a second value, `{relative path: code}`, and the driver writes them beside the unit.
+
+What the 1RW macro cannot do is a load and a store in one cycle: the flop model serves both, the load reading the old word; in the view the store takes the port and the load is lost. The lowering's per-memory access chain never issues the two together (measured on the transposer's two 64-word buffers: zero such cycles over three firings, with and without backpressure); a design that does needs a 1R1W macro and a view with two ports, not this one.
+
 ### Arithmetic Units with IP cores
 
 For arithmetic units which have IP cores, the beta backend does not handle the IP cores themselves: these are generated offline, and imported into the synthesis or simulation library unconditonally.
