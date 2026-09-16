@@ -143,6 +143,11 @@ def extract_rpt_data(map_unit_to_list_unit_chars, json_output,
     latencies = read_reference_latencies(reference_json)
     # Create the output data structure
     output_data = {}
+    # A standard-cell backend's register-to-register delays: unit -> bitwidth
+    # -> ns, the floor the unit's own stages put under the clock. Written
+    # beside the model (see write_stages), not into it: the placer cannot
+    # pipeline a unit, so its model has no field for this.
+    stages = {}
     for unit_name, list_unit_chars in map_unit_to_list_unit_chars.items():
         dataDict = {}
         validDict = {"1": 0.0}
@@ -155,6 +160,11 @@ def extract_rpt_data(map_unit_to_list_unit_chars, json_output,
         traversedUnitOnce = False
         for unit_char in list_unit_chars:
             traversedParamOnce = False
+            stage_rpt = unit_char.get_stage_rpt()
+            if stage_rpt and os.path.exists(stage_rpt):
+                bitwidth = str(unit_char.get_parameter_value("DATA_TYPE"))
+                stage = extract_single_rpt(stage_rpt, synth_tool)
+                stages.setdefault(unit_name, {})[bitwidth] = max(stages.get(unit_name, {}).get(bitwidth, 0.0), stage)
             for delay_type, rpt_filename in unit_char.get_signals_type_to_rpt().items():
                 # Check if the report file exists
                 if not os.path.exists(rpt_filename):
@@ -233,3 +243,26 @@ def extract_rpt_data(map_unit_to_list_unit_chars, json_output,
     # Save the output data to the JSON file
     with open(json_output, 'w') as f:
         json.dump(output_data, f, indent=2)
+    if stages:
+        write_stages(stages, json_output)
+
+
+def write_stages(stages, json_output):
+    """
+    Write the register-to-register delays beside the model and print them.
+
+    Args:
+        stages (dict): unit -> bitwidth -> the longest register-to-register
+            path in nanoseconds (0.0 for a unit with no such path).
+        json_output (str): the model's path; the stages go to
+            `<model without .json>.stages.json`.
+    """
+    path = os.path.splitext(json_output)[0] + ".stages.json"
+    with open(path, 'w') as f:
+        json.dump(stages, f, indent=2, sort_keys=True)
+    rows = sorted(((max(widths.values()), unit) for unit, widths in stages.items()), reverse=True)
+    print(f"Register-to-register delay per unit (the floor under the clock), in {path}:")
+    for delay, unit in rows:
+        if delay > 0.0:
+            widths = ", ".join(f"{w}: {d:.3f}" for w, d in sorted(stages[unit].items(), key=lambda x: int(x[0])))
+            print(f"  {unit:<28} {delay:7.3f} ns   ({widths})")

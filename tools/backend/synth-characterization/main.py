@@ -4,16 +4,18 @@ import json
 import os
 from report_parser import extract_rpt_data
 from hdl_manager import get_hdl_files
-from utils import VhdlInterfaceInfo, parameters_ranges, skipping_units
+from pdk_backend import is_pdk
+from utils import VhdlInterfaceInfo, parameters_ranges, skipping_units, skipping_units_vivado
 from unit_characterization import run_unit_characterization
+
 
 def extract_rtl_info(unit_info):
     """
     Extract RTL information from the unit_info dictionary.
-    
+
     Args:
         unit_info (dict): Dictionary containing unit information.
-        
+
     Returns:
         tuple: A tuple containing the unit name, list of parameters, generic,
             generator, dependencies, and the name of the VHDL entity when the
@@ -39,6 +41,8 @@ def extract_rtl_info(unit_info):
 #     ...
 # }
 # The dependencies are used to copy the necessary RTL files to the output directory
+
+
 def get_dependency_dict(dataflow_units):
     """
     Extract the RTLs of all possible dependencies from the dataflow units.
@@ -87,7 +91,7 @@ def get_dependency_dict(dataflow_units):
 def run_characterization(json_input, json_output, dynamatic_dir, synth_tool, clock_period, reference_json):
     """
     Run characterization of dataflow units based on the provided JSON input.
-    
+
     Args:
         json_input (str): Path to the input JSON file containing dataflow unit RTL information.
         json_output (str): Path to the output JSON file where characterization results will be saved.
@@ -131,7 +135,7 @@ def run_characterization(json_input, json_output, dynamatic_dir, synth_tool, clo
         if unit_name == None:
             print("Skipping unit with no name.")
             continue
-        if unit_name in skipping_units:
+        if unit_name in skipping_units or (unit_name in skipping_units_vivado and not is_pdk(synth_tool)):
             print(f"Skipping unit {unit_name} as it is in the skipping list.")
             continue
         # We assume that units with no unit_name are just for dependencies
@@ -159,9 +163,10 @@ def run_characterization(json_input, json_output, dynamatic_dir, synth_tool, clo
         # `handshake.buffer`, and the model has one entry per name -- so the
         # characterizations accumulate and the assembly reduces over them.
         map_unit_to_list_unit_chars.setdefault(unit_name, []).extend(list_unit_chars)
-    
+
     # Save the results to the output JSON file
     extract_rpt_data(map_unit_to_list_unit_chars, json_output, synth_tool, reference_json)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run characterization of dataflow units")

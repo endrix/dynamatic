@@ -23,8 +23,6 @@ skipping_units = [
     "handshake.maximumf",
     "handshake.minimumf",
     "handshake.extf",
-    "handshake.divsi",
-    "handshake.divui",
     # unused units
     "handshake.join",
     "handshake.sharing_wrapper",
@@ -42,6 +40,16 @@ skipping_units = [
     "handshake.divf",
     "handshake.subf",
     "handshake.not"]
+
+# Units Vivado's characterization skips and a standard-cell one does not: the
+# dividers are pipelined (their port-to-port delays are zero and their
+# latency comes from the reference), but their VHDL is self-contained and
+# maps on any library, and the delay of one of their stages is the floor
+# they put under the clock, which is what the stage report is for.
+skipping_units_vivado = [
+    "handshake.divsi",
+    "handshake.divui",
+]
 
 # List of parameters and their ranges for characterization
 # This is used to generate the top files for characterization
@@ -327,14 +335,25 @@ class UnitCharacterization:
                 "input_ports": input_ports,
                 "output_ports": output_ports
             }
-        # Write the script
+        # Write the script; a standard-cell backend also reports the unit's
+        # longest register-to-register path (get_stage_rpt).
         if asap7:
+            self.stage_rpt = f"{rpt_dir}/rpt_stage_{self.top_entity_name}_top_{self.unique_id}.txt"
             write_pdk_script(synth_tool, self.top_entity_name, self.hdl_files, tcl_file,
-                             clock_period, map_rpt_to_ports)
+                             clock_period, map_rpt_to_ports, self.stage_rpt)
         else:
             write_tcl(self.top_entity_name, self.hdl_files, tcl_file, sdc_file, map_rpt_to_ports)
         self.tcl_file = tcl_file
         return tcl_file
+
+    def get_stage_rpt(self):
+        """
+        The register-to-register report of a standard-cell characterization.
+
+        Returns:
+            str: its path, or None on the Vivado backend.
+        """
+        return getattr(self, "stage_rpt", None)
 
     def get_signals_type_to_rpt(self) -> dict:
         """

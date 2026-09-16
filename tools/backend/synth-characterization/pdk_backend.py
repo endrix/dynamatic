@@ -138,7 +138,7 @@ def order_hdl_files(hdl_files, top_file):
 
 
 def write_pdk_script(synth_tool, top_entity_name, hdl_files, script_file,
-                     period_ns, map_rpt_to_ports):
+                     period_ns, map_rpt_to_ports, stage_rpt=None):
     """
     Write the shell script that maps one unit top and times it with OpenSTA.
 
@@ -155,6 +155,9 @@ def write_pdk_script(synth_tool, top_entity_name, hdl_files, script_file,
         period_ns (float): clock period in nanoseconds.
         map_rpt_to_ports (dict): {report file: {"input_ports": [...],
             "output_ports": [...]}}, one entry per delay class.
+        stage_rpt (str): report file for the unit's longest register-to-
+            register path, the floor its own stages put under the clock on
+            this library; None asks for no such report.
     """
     work_dir = f"{os.path.splitext(script_file)[0]}.work"
     os.makedirs(work_dir, exist_ok=True)
@@ -190,6 +193,15 @@ def write_pdk_script(synth_tool, top_entity_name, hdl_files, script_file,
             for iport in port_query_names(ports_info["input_ports"], True):
                 for oport in port_query_names(ports_info["output_ports"], False):
                     f.write(f"unit_delay {{{rpt_timing}}} {{{iport}}} {{{oport}}}\n")
+        if stage_rpt:
+            f.write("# The longest path from one register to another inside the\n"
+                    "# unit: the smallest clock its stages allow. Not in the\n"
+                    "# placer's model (it cannot pipeline a unit); a report. A\n"
+                    "# combinational unit has no registers and no such report.\n"
+                    "if {[llength [all_registers]] > 0} {\n"
+                    f"  report_checks -from [all_registers] -to [all_registers]"
+                    f" -path_delay max -format full_clock_expanded -digits 3 >> {{{stage_rpt}}}\n"
+                    "}\n")
         f.write("exit\n")
 
     yosys_cmd = (
@@ -227,7 +239,7 @@ def write_pdk_script(synth_tool, top_entity_name, hdl_files, script_file,
         # leaves none -- which is how the parser tells a measured zero from a
         # unit that never elaborated. Clearing them first keeps an earlier
         # run's reports from being read as this one's.
-        for rpt_timing in map_rpt_to_ports:
+        for rpt_timing in list(map_rpt_to_ports) + ([stage_rpt] if stage_rpt else []):
             f.write(f'rm -f "{rpt_timing}"\n')
         f.write(f'pdk_write_abc_constr "{work_dir}/abc.constr"\n')
         f.write(f'if ! yosys -m ghdl -p "{yosys_cmd}"'
