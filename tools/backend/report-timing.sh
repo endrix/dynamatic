@@ -12,7 +12,8 @@
 # sizes gates toward the clock (a net driving thousands of flip-flops is
 # otherwise one inverter with a 20 ns delay, which is what placement's
 # repair would fix), and the reset, a quasi-static input that reaches every
-# flip-flop, is a false path. The library is
+# flip-flop, is a false path.
+#
 # PLACE=1 goes one step further than synthesis: OpenROAD floorplans the
 # mapped netlist (UTILIZATION percent, 50 by default), places it, estimates
 # the wires' parasitics, buffers every net above MAX_FANOUT loads and every

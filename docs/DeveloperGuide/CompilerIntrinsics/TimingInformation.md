@@ -146,8 +146,9 @@ python3 main.py --synth-tool sky130 \
 ```
 
 A unit the characterization does not measure, one on its skipping list (the
-dividers, which are pipelined, the units with no data path, those another
-script measures) or one that leaves no report, is carried from the reference
+units with no data path, those another script measures; the dividers are
+skipped on Vivado only and measured on the PDK backends) or one that leaves
+no report, is carried from the reference
 model as it is, so that the model stays complete for the buffer placer: a
 latency is structural, the divider's 35 stages are 35 on any library, and
 such a unit's delays are not port to port. The script prints which units it
@@ -260,10 +261,11 @@ where against `components.json` it is already infeasible at 1.0 ns and needs
 
 ### What the model does not contain
 
-The characterization script skips some units (`utils.py`'s `skipping_units`)
-and the model has no entry for them: the floating-point units, `store`, `end`,
-`return`, `divsi`/`divui`, `remsi`/`remui`, `join`, `blocker`, `mem_controller` and the
-LSQ. Two more units drop out of an ASAP7 run for reasons in the RTL: the
+The characterization script skips some units (`utils.py`'s `skipping_units`:
+the floating-point units, `store`, `end`, `return`, `remsi`/`remui`, `join`,
+`blocker`, `mem_controller` and the LSQ; the dividers too, but on Vivado only)
+and carries their entries from the reference model so that the model stays
+complete for the buffer placer. Two more units drop out of an ASAP7 run for reasons in the RTL: the
 dataful `control_merge` asserts false in
 `data/vhdl/handshake/control_merge.vhd` ("implementation with data signal has
 a bug"), so it cannot be elaborated at all; and `sitofp`/`fptosi` elaborate

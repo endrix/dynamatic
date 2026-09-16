@@ -224,8 +224,8 @@ def extract_rpt_data(map_unit_to_list_unit_chars, json_output,
                                   "outport": ZERO_PORT_MODEL}
 
     # A unit this run did not characterize -- one on the skipping list (a
-    # pipelined divider, a unit with no data path, one another script
-    # measures) or one that left no report -- is carried from the reference
+    # unit with no data path, one another script measures, the dividers
+    # under Vivado) or one that left no report -- is carried from the reference
     # model as it is, so that the model stays complete for the buffer placer:
     # a latency is structural (the divider's 35 stages are 35 on any library)
     # and such a unit's delays are not port-to-port. A carried entry keeps the
