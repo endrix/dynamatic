@@ -1,5 +1,6 @@
 import argparse
 import ast
+import os
 import sys
 
 import importlib
@@ -67,8 +68,23 @@ def main(generators):
 
     generate_code = generators[args.type]
 
+    # A generator returns the unit's code, or the code and companion files:
+    # {path relative to the unit's directory: code}, a view of the same
+    # entity for another tool (the RAM's SRAM synthesis view under sram/).
+    code = generate_code(args.name, parameters)
+    companions = {}
+    if isinstance(code, tuple):
+        code, companions = code
+
     with open(args.output, "w") as file:
-        print(header + generate_code(args.name, parameters), file=file)
+        print(header + code, file=file)
+
+    out_dir = os.path.dirname(os.path.abspath(args.output))
+    for relative, text in companions.items():
+        path = os.path.join(out_dir, relative)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as file:
+            print(header + text, file=file)
 
 
 if __name__ == "__main__":
