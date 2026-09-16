@@ -145,6 +145,14 @@ python3 main.py --synth-tool sky130 \
   --clock-period 10.0
 ```
 
+A unit the characterization does not measure, one on its skipping list (the
+dividers, which are pipelined, the units with no data path, those another
+script measures) or one that leaves no report, is carried from the reference
+model as it is, so that the model stays complete for the buffer placer: a
+latency is structural, the divider's 35 stages are 35 on any library, and
+such a unit's delays are not port to port. The script prints which units it
+carried; their numbers are the reference's, not the library's.
+
 sky130's liberty is in nanoseconds where ASAP7's is in picoseconds; the
 backend hands ABC picoseconds either way and scales OpenSTA's clock and its
 reports by the PDK (`PDKS` in `pdk_backend.py`). A sky130 design clocks an

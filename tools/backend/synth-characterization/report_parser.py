@@ -213,6 +213,23 @@ def extract_rpt_data(map_unit_to_list_unit_chars, json_output,
                                   "inport": ZERO_PORT_MODEL,
                                   "outport": ZERO_PORT_MODEL}
 
+    # A unit this run did not characterize -- one on the skipping list (a
+    # pipelined divider, a unit with no data path, one another script
+    # measures) or one that left no report -- is carried from the reference
+    # model as it is, so that the model stays complete for the buffer placer:
+    # a latency is structural (the divider's 35 stages are 35 on any library)
+    # and such a unit's delays are not port-to-port. A carried entry keeps the
+    # reference's numbers, and the note below says which.
+    if reference_json and os.path.exists(reference_json):
+        with open(reference_json, 'r') as f:
+            reference = json.load(f)
+        carried = [unit for unit in reference if unit not in output_data]
+        for unit in carried:
+            output_data[unit] = reference[unit]
+        if carried:
+            print(f"Carried {len(carried)} unit(s) from the reference model, not characterized here: "
+                  + ", ".join(carried))
+
     # Save the output data to the JSON file
     with open(json_output, 'w') as f:
         json.dump(output_data, f, indent=2)
