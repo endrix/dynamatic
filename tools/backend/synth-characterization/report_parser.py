@@ -5,7 +5,7 @@ import json
 
 from pdk_backend import is_pdk, units_per_ns
 
-# Constants for parsing the report that specify which line 
+# Constants for parsing the report that specify which line
 # contains the delay information.
 # This pattern is specific to the Vivado synthesis report format.
 # If a different synthesis tool is used, you might have to define a new pattern.
@@ -40,19 +40,22 @@ ZERO_PORT_MODEL = {"delay": {"data": {"64": 0},
 # It uses a regular expression to find the delay value in nanoseconds.
 # It is specific to the Vivado synthesis report format.
 # If a different synthesis tool is used, this function may need to be modified.
+
+
 def extract_delay(line):
     """
     Extract the delay from a line in the report.
-    
+
     Args:
         line (str): A line from the report file.
-        
+
     Returns:
         float: The extracted delay in nanoseconds.
     """
     match = re.search(r'Data Path Delay:\s+([\d.]+)ns', line)
     assert match, f"Could not find data path delay in line: {line}"
     return float(match.group(1))
+
 
 def extract_delay_opensta(line, per_ns=1000.0):
     """
@@ -71,17 +74,18 @@ def extract_delay_opensta(line, per_ns=1000.0):
         return None
     return float(match.group(1)) / per_ns
 
+
 def extract_single_rpt(rpt_file, synth_tool="vivado"):
     """
     Extract data from the report file.
-    
+
     Args:
         rpt_file (str): Path to the report file.
         synth_tool (str): Value of --synth-tool, which decides the format.
 
     Returns:
         delay (float): The extracted delay in nanoseconds.
-    """    
+    """
     max_delay = 0.0
     asap7 = is_pdk(synth_tool)
     # Read the report file and extract the required data
@@ -96,8 +100,9 @@ def extract_single_rpt(rpt_file, synth_tool="vivado"):
             elif PATTERN_DELAY_INFO in line:
                 delay = extract_delay(line)
                 max_delay = max(max_delay, delay)
-                
+
     return max_delay  # Return 0.0 if no delay is found
+
 
 def read_reference_latencies(reference_json):
     """
@@ -122,12 +127,13 @@ def read_reference_latencies(reference_json):
     return {name: info["latency"] for name, info in reference.items()
             if "latency" in info}
 
+
 def extract_rpt_data(map_unit_to_list_unit_chars, json_output,
                      synth_tool="vivado", reference_json=None):
     """
     Extract the data from the map_unit_to_list_unit_chars dictionary and save it to a JSON file.
     IMPORTANT: For now we assume that only DATA_TYPE is the only parameter that can be used to characterize the unit.
-    
+
     Args:
         map_unit_to_list_unit_chars (dict): Dictionary mapping unit names to a list of UnitCharacterization objects.
         json_output (str): Path to the output JSON file.
@@ -196,17 +202,16 @@ def extract_rpt_data(map_unit_to_list_unit_chars, json_output,
 
         output_data[unit_name] = {"latency": latencies.get(unit_name,
                                                            DEFAULT_LATENCY),
-                                  "delay":{"data": dataDict,
-                                       "valid": validDict,
-                                       "ready": readyDict,
-                                       "VR": VRDelayFinal,
-                                       "CV": CVDelayFinal,
-                                       "CR": CRDelayFinal,
-                                       "VC": VCDelayFinal,
-                                       "VD": VDDelayFinal},
+                                  "delay": {"data": dataDict,
+                                            "valid": validDict,
+                                            "ready": readyDict,
+                                            "VR": VRDelayFinal,
+                                            "CV": CVDelayFinal,
+                                            "CR": CRDelayFinal,
+                                            "VC": VCDelayFinal,
+                                            "VD": VDDelayFinal},
                                   "inport": ZERO_PORT_MODEL,
                                   "outport": ZERO_PORT_MODEL}
-
 
     # Save the output data to the JSON file
     with open(json_output, 'w') as f:

@@ -3,6 +3,7 @@ from multiprocessing import Pool
 from utils import VhdlInterfaceInfo, NUM_CORES
 from pdk_backend import is_pdk
 
+
 def _synth_worker(args):
     synth_tool, tcl_file, log_file = args
     # The standard-cell backend's script is a shell script that runs yosys and
@@ -17,6 +18,7 @@ def _synth_worker(args):
     else:
         os.system(f"{synth_tool} -mode batch -source {tcl_file} > {log_file}")
 
+
 def run_synthesis(tcl_files, synth_tool, log_file):
     """
     Run synthesis for the given TCL files using the specified synthesis tool in parallel (if NUM_CORES > 1).
@@ -29,10 +31,11 @@ def run_synthesis(tcl_files, synth_tool, log_file):
     with Pool(processes=NUM_CORES) as pool:
         pool.map(_synth_worker, args_list)
 
+
 def write_sdc_constraints(sdc_file, period_ns):
     """
     Write the SDC constraints file with the specified period.
-    
+
     Args:
         sdc_file (str): Path to the SDC file.
         period_ns (float): Period in nanoseconds.

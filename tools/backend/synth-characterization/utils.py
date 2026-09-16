@@ -5,13 +5,13 @@ from pdk_backend import is_pdk, write_pdk_script
 
 # Constants for the characterization process
 
-NUM_CORES = 10 # Number of cores to use for parallel synthesis (if applicable)
+NUM_CORES = 10  # Number of cores to use for parallel synthesis (if applicable)
 
-# List of units to skip during characterization 
+# List of units to skip during characterization
 # These units are either empty, unused, or characterized by other scripts
 skipping_units = [
     # empty units
-    "handshake.constant", 
+    "handshake.constant",
     "handshake.br",
     "handshake.source",
     "handshake.extsi",
@@ -45,7 +45,7 @@ skipping_units = [
 
 # List of parameters and their ranges for characterization
 # This is used to generate the top files for characterization
-parameters_ranges = { 
+parameters_ranges = {
     "DATA_TYPE": [1, 2, 4, 8, 16, 32, 64],
     "SIZE": [2],
     # A buffer's depth. The delays this script measures are the buffer's
@@ -55,13 +55,15 @@ parameters_ranges = {
     "INDEX_TYPE": [2],
     "ADDR_TYPE": [64],
     "PREDICATE": ["ne"]
-    }
+}
 
 # Function to write the TCL file for synthesis
+
+
 def write_tcl(top_entity_name, hdl_files, tcl_file, sdc_file, map_rpt_to_ports):
     """
     Write the TCL file for synthesis based on the top file and HDL files.
-    
+
     Args:
         top_entity_name (str): Name of the top entity.
         hdl_files (list): List of HDL files needed for synthesis.
@@ -98,8 +100,8 @@ class VhdlInterfaceInfo:
     """
     generics: List[str]  # List of generics in the VHDL entity
     ports: List[str]     # List of ports in the VHDL entity
-    ins_per_type: Dict[str, str] # Dictionary of input ports with their types
-    outs_per_type: Dict[str, str] # Dictionary of output ports with their types
+    ins_per_type: Dict[str, str]  # Dictionary of input ports with their types
+    outs_per_type: Dict[str, str]  # Dictionary of output ports with their types
 
     def __init__(self, generics: List[str], ports: List[str]):
         self.generics = generics
@@ -114,7 +116,7 @@ class VhdlInterfaceInfo:
     def extract_ins_outs(self) -> Tuple[List[str], List[str]]:
         """
         Extract input and output ports from the VHDL interface.
-        
+
         Returns:
             Tuple[List[str], List[str]]: A tuple containing two lists:
                 - List of input ports
@@ -127,14 +129,14 @@ class VhdlInterfaceInfo:
         # Add 2d data_array ports to outs
         outs.extend(add_2d_ports(self.ports, "out"))
         return ins, outs
-    
+
     def categorize_ports(self, ports: List[str]) -> Dict[str, str]:
         """
         Categorize ports based on their types.
-        
+
         Args:
             ports (List[str]): List of ports to categorize.
-        
+
         Returns:
             Dict[str, str]: Dictionary with port names as keys and their types as values.
         """
@@ -159,33 +161,33 @@ class VhdlInterfaceInfo:
     def get_input_ports(self) -> List[str]:
         """
         Get the input ports of the VHDL interface.
-        
+
         Returns:
             List[str]: List of input ports.
         """
         return list(self.ins_per_type.keys())
-    
+
     def get_input_ports_by_type(self, port_type: str) -> List[str]:
         """
         Get the input ports of a specific type from the VHDL interface.
-        
+
         Args:
             port_type (str): Type of the input ports to retrieve (e.g., "valid", "ready", "data", "condition").
-        
+
         Returns:
             List[str]: List of input ports of the specified type.
         """
         assert port_type in ["valid", "ready", "data", "condition"], f"Invalid port type: {port_type}. Valid types are 'valid', 'ready', 'data', 'condition'."
         # Return ports that match the specified type
         return [port for port, ptype in self.ins_per_type.items() if ptype == port_type]
-    
+
     def get_output_ports_by_type(self, port_type: str) -> List[str]:
         """
         Get the output ports of a specific type from the VHDL interface.
-        
+
         Args:
             port_type (str): Type of the output ports to retrieve (e.g., "valid", "ready", "data", "condition").
-        
+
         Returns:
             List[str]: List of output ports of the specified type.
         """
@@ -196,16 +198,16 @@ class VhdlInterfaceInfo:
     def get_output_ports(self) -> List[str]:
         """
         Get the output ports of the VHDL interface.
-        
+
         Returns:
             List[str]: List of output ports.
         """
         return list(self.outs_per_type.keys())
-    
+
     def get_list_ports(self) -> List[str]:
         """
         Get the list of all ports (input and output) of the VHDL interface.
-        
+
         Returns:
             List[str]: List of all ports.
         """
@@ -214,11 +216,12 @@ class VhdlInterfaceInfo:
     def get_list_generics(self) -> List[str]:
         """
         Get the list of generics of the VHDL interface.
-        
+
         Returns:
             List[str]: List of generics.
         """
         return self.generics
+
 
 def add_2d_ports(ports, direction):
     """
@@ -247,30 +250,32 @@ def add_2d_ports(ports, direction):
     return result
 
 # Class that contains all information for a single unit characterization
+
+
 class UnitCharacterization:
     """
     Class to hold the characterization information for a single unit.
     This class is used to store the unit name, its VHDL interface information, and the parameters used for characterization.
     """
-    unit_name: str # Name of the unit being characterized
-    top_entity_name: str # Name of the top entity for this unit
-    params: dict # Dictionary of parameters used for characterization
-    hdl_files: List[str] # List to hold HDL files generated or copied for this unit
-    map_signals_type_to_delay_rpt: dict # Dictionary to hold delay reports for each signal
-    vhdl_interface_info: VhdlInterfaceInfo # VHDL interface information containing generics and ports
-    unique_id: int # Unique identifier for the characterization instance
-    tcl_file: str # Path to the last generated TCL file for synthesis
-    
+    unit_name: str  # Name of the unit being characterized
+    top_entity_name: str  # Name of the top entity for this unit
+    params: dict  # Dictionary of parameters used for characterization
+    hdl_files: List[str]  # List to hold HDL files generated or copied for this unit
+    map_signals_type_to_delay_rpt: dict  # Dictionary to hold delay reports for each signal
+    vhdl_interface_info: VhdlInterfaceInfo  # VHDL interface information containing generics and ports
+    unique_id: int  # Unique identifier for the characterization instance
+    tcl_file: str  # Path to the last generated TCL file for synthesis
+
     # List of delay types to be characterized
     # Each tuple contains the input and output port types to be characterized in this exact order
-    list_delay_types = [("data", "data"), ("valid", "valid"), ("ready", "ready"), 
-                         ("valid", "ready"), ("condition", "valid"), ("condition", "ready"),
-                         ("valid", "condition"), ("valid", "data")] 
+    list_delay_types = [("data", "data"), ("valid", "valid"), ("ready", "ready"),
+                        ("valid", "ready"), ("condition", "valid"), ("condition", "ready"),
+                        ("valid", "condition"), ("valid", "data")]
 
     def __init__(self, unit_name: str, top_entity_name: str, params: dict, hdl_files: List[str], vhdl_interface_info: VhdlInterfaceInfo, unique_id: int):
         """
         Initialize the UnitCharacterization object.
-        
+
         Args:
             unit_name (str): Name of the unit being characterized.
             top_entity_name (str): Name of the top entity for this unit.
@@ -325,28 +330,28 @@ class UnitCharacterization:
         # Write the script
         if asap7:
             write_pdk_script(synth_tool, self.top_entity_name, self.hdl_files, tcl_file,
-                               clock_period, map_rpt_to_ports)
+                             clock_period, map_rpt_to_ports)
         else:
             write_tcl(self.top_entity_name, self.hdl_files, tcl_file, sdc_file, map_rpt_to_ports)
         self.tcl_file = tcl_file
         return tcl_file
-    
+
     def get_signals_type_to_rpt(self) -> dict:
         """
         Get the dictionary mapping signal types to their delays.
-        
+
         Returns:
             dict: Dictionary mapping signal types to their delays.
         """
         return self.map_signals_type_to_delay_rpt
-    
+
     def get_parameter_value(self, param_name: str) -> str:
         """
         Get the value of a specific parameter.
-        
+
         Args:
             param_name (str): Name of the parameter to retrieve.
-        
+
         Returns:
             str: Value of the specified parameter.
         """
