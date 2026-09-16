@@ -29,6 +29,13 @@
 #                 awk regular expressions naming the library's flip-flops,
 #                 its buffers, and any of its cells (what is neither a cell
 #                 nor yosys' own is a macro)
+#   PDK_TECH_LEF, PDK_CELL_LEFS, PDK_TRACKS, PDK_SET_RC, PDK_SITE,
+#   PDK_PINS_H, PDK_PINS_V, OPENROAD
+#                 what report-timing.sh's PLACE=1 needs to floorplan, place
+#                 and repair a design with OpenROAD before timing it: the
+#                 technology and cell LEFs, the tracks script (empty: the
+#                 technology LEF's), the wire RC script, the placement site,
+#                 the pin layers, and the OpenROAD binary
 #
 # Every setting is overridable from the environment before this is sourced.
 PDK="${PDK:-asap7}"

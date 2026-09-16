@@ -30,9 +30,22 @@ TIME_SCALE=1000
 FLOP_RE='sky130_fd_sc_hd__[a-z]*df'
 BUF_RE='sky130_fd_sc_hd__(clk)?buf'
 CELL_RE='sky130_fd_sc_hd__'
-# The OpenRAM macros' liberty files, for a caller that sets MACRO_LIBS to
-# them (report-timing.sh reads MACRO_LIBS as blackbox cells).
+# The OpenRAM macros' liberty and LEF files, for a caller that sets
+# MACRO_LIBS and MACRO_LEFS to them (report-timing.sh reads MACRO_LIBS as
+# blackbox cells, and MACRO_LEFS when it places).
 SKY130_SRAM_LIBS="$(ls "${SKY130_DIR:-/nonexistent}"/sky130ram/*/*_TT_1p8V_25C.lib 2>/dev/null | tr '\n' ' ')"
+SKY130_SRAM_LEFS="$(ls "${SKY130_DIR:-/nonexistent}"/sky130ram/*/*.lef 2>/dev/null | tr '\n' ' ')"
+# What a placement needs (report-timing.sh's PLACE=1), as OpenROAD's flow
+# scripts set them for sky130hd: the technology and cell LEFs, the tracks
+# script, the wire RC script, the site and the pin layers.
+PDK_TECH_LEF="${PDK_TECH_LEF:-$SKY130_DIR/sky130hd/lef/sky130_fd_sc_hd.tlef}"
+PDK_CELL_LEFS="${PDK_CELL_LEFS:-$SKY130_DIR/sky130hd/lef/sky130_fd_sc_hd_merged.lef}"
+PDK_TRACKS="${PDK_TRACKS:-$SKY130_DIR/sky130hd/make_tracks.tcl}"
+PDK_SET_RC="${PDK_SET_RC:-$SKY130_DIR/sky130hd/setRC.tcl}"
+PDK_SITE="${PDK_SITE:-unithd}"
+PDK_PINS_H="${PDK_PINS_H:-met3}"
+PDK_PINS_V="${PDK_PINS_V:-met2}"
+OPENROAD="${OPENROAD:-$(command -v openroad || true)}"
 
 LIB_ARGS=""
 for _sky130_lib in $LIBERTIES; do

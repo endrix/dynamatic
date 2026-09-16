@@ -35,6 +35,18 @@ TIME_SCALE=1
 FLOP_RE='DFF[A-Za-z0-9]*_ASAP7'
 BUF_RE='BUF[a-z0-9]*_ASAP7'
 CELL_RE='_ASAP7_'
+# What a placement needs (report-timing.sh's PLACE=1): the technology and
+# cell LEFs from the platform directory the install links beside the
+# libraries, the platform's tracks script, the wire RC script, the site and
+# the pin layers, as OpenROAD's flow scripts set them.
+PDK_TECH_LEF="${PDK_TECH_LEF:-$ASAP7_DIR/platform/lef/asap7_tech_1x_201209.lef}"
+PDK_CELL_LEFS="${PDK_CELL_LEFS:-$ASAP7_DIR/platform/lef/asap7sc7p5t_28_R_1x_220121a.lef}"
+PDK_TRACKS="${PDK_TRACKS:-$ASAP7_DIR/platform/openRoad/make_tracks.tcl}"
+PDK_SET_RC="${PDK_SET_RC:-$ASAP7_DIR/platform/setRC.tcl}"
+PDK_SITE="${PDK_SITE:-asap7sc7p5t}"
+PDK_PINS_H="${PDK_PINS_H:-M4}"
+PDK_PINS_V="${PDK_PINS_V:-M5}"
+OPENROAD="${OPENROAD:-$(command -v openroad || true)}"
 
 # Yosys' abc takes one -liberty per file and maps across them, the way
 # OpenROAD's flow scripts hand them over.

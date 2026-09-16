@@ -160,6 +160,27 @@ order of magnitude slower than an ASAP7 one, so the period to map toward is
 in the nanoseconds, and `report-timing.sh` is asked for thousands of
 picoseconds.
 
+### Placed and repaired: `PLACE=1`
+
+`report-timing.sh` stops at synthesis: no wires, no buffer trees. That
+overstates any high-fan-out net (a clock enable over a 32-stage divider reads
+as 86 ns on sky130) and understates every long wire. With `PLACE=1` and
+OpenROAD on the path (or `OPENROAD`), the script floorplans the mapped
+netlist (`UTILIZATION` percent, 50 by default), places it, estimates the
+wires' parasitics from the placement, buffers every net above `MAX_FANOUT`
+loads and every slew or capacitance violation (the resizer's
+`repair_design`), and times the result with the wires in; the report says
+how many buffers went in and how many cells were resized, and gives the
+slack before placement, placed, and repaired. Each recipe names what the
+placement needs (`PDK_TECH_LEF`, `PDK_CELL_LEFS`, `PDK_TRACKS`,
+`PDK_SET_RC`, `PDK_SITE`, `PDK_PINS_H`, `PDK_PINS_V`); macros' LEFs come
+from `MACRO_LEFS`. On the transposer: sky130 10,817 ps at synthesis,
+14,409 ps placed and repaired (831 buffers in, 4,913 cells resized); ASAP7
+1,737 ps and 2,037 ps (no buffer needed, 9,334 resized). The divider's stage
+above is 6.2 ns once placed and repaired. The characterization's stage
+report stays post-synthesis: a placement per unit and width would take
+hours, and the whole-design report is where the placed number matters.
+
 ### What the numbers mean
 
 The mapping recipe lives in `tools/backend/asap7-lib.sh` (sky130's in
