@@ -9,9 +9,15 @@ def generate_merge(name, params):
     size = params["size"]
     bitwidth = params["bitwidth"]
     extra_signals = params.get("extra_signals", None)
+    # The slot behind the merge (a one_slot_break_r, the ready cut and a
+    # register per bit) can be left out (tehb=0) where the consumer cuts
+    # ready itself: an actor's state ring, whose init is a transparent slot.
+    tehb = params.get("tehb", 1)
 
     if extra_signals:
-        return _generate_merge_signal_manager(name, size, bitwidth, extra_signals)
+        return _generate_merge_signal_manager(name, size, bitwidth, extra_signals, tehb)
+    if not tehb:
+        return generate_merge_notehb(name, {"size": size, "bitwidth": bitwidth})
     elif bitwidth == 0:
         return _generate_merge_dataless(name, size)
     else:
@@ -147,9 +153,14 @@ end architecture;
     return dependencies + entity + architecture
 
 
-def _generate_merge_signal_manager(name, size, bitwidth, extra_signals):
+def _generate_merge_signal_manager(name, size, bitwidth, extra_signals, tehb=1):
     # Haven't tested this function yet
     extra_signals_bitwidth = get_concat_extra_signals_bitwidth(extra_signals)
+    inner_width = bitwidth + extra_signals_bitwidth
+    if tehb:
+        def inner(name): return _generate_merge(name, size, inner_width)
+    else:
+        def inner(name): return generate_merge_notehb(name, {"size": size, "bitwidth": inner_width})
     return generate_concat_signal_manager(
         name,
         [{
@@ -164,4 +175,4 @@ def _generate_merge_signal_manager(name, size, bitwidth, extra_signals):
             "extra_signals": extra_signals
         }],
         extra_signals,
-        lambda name: _generate_merge(name, size, bitwidth + extra_signals_bitwidth))
+        inner)
