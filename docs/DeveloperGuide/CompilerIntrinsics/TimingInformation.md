@@ -125,9 +125,37 @@ and then asks OpenSTA for the largest combinational delay between each
 about. `--clock-period` is what ABC maps toward and what OpenSTA's clock is set
 to; the whole set is a couple of minutes on a multi-core machine.
 
+### Characterizing for sky130
+
+The same backend maps to the SkyWater sky130 high-density library with
+`--synth-tool sky130`: `data/components-sky130.json` is the units measured on
+`sky130_fd_sc_hd` at the typical corner (25C, 1.8V), the way
+`components-asap7.json` is on ASAP7. The recipe is `tools/backend/sky130-lib.sh`,
+selected through `tools/backend/pdk-lib.sh` by `PDK=sky130`, and the library is
+located by `SKY130_DIR`, a directory holding `sky130hd/lib/` (the liberty
+file) and `sky130ram/<macro>/` (OpenRAM's SRAM macros), as OpenROAD's flow
+scripts ship them under `flow/platforms`:
+
+```sh
+export SKY130_DIR=/path/to/sky130       # sky130hd/lib/*.lib, sky130ram/*/
+python3 main.py --synth-tool sky130 \
+  --dynamatic-dir "$DYNAMATIC" \
+  --json-input "$DYNAMATIC/data/rtl-config-vhdl-vivado.json" \
+  --json-output "$DYNAMATIC/data/components-sky130.json" \
+  --clock-period 10.0
+```
+
+sky130's liberty is in nanoseconds where ASAP7's is in picoseconds; the
+backend hands ABC picoseconds either way and scales OpenSTA's clock and its
+reports by the PDK (`PDKS` in `pdk_backend.py`). A sky130 design clocks an
+order of magnitude slower than an ASAP7 one, so the period to map toward is
+in the nanoseconds, and `report-timing.sh` is asked for thousands of
+picoseconds.
+
 ### What the numbers mean
 
-The mapping recipe lives in `tools/backend/asap7-lib.sh` and is the same one
+The mapping recipe lives in `tools/backend/asap7-lib.sh` (sky130's in
+`sky130-lib.sh`; `pdk-lib.sh` selects one by `PDK`) and is the same one
 `tools/backend/report-timing.sh` uses to time a whole exported design: the five
 ASAP7 RVT typical-corner liberty files, the cells OpenROAD's flow scripts keep
 out of ASAP7 designs, yosys' constrained-liberty ABC script with fan-out

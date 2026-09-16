@@ -3,7 +3,7 @@ import os
 import re
 import json
 
-from asap7_backend import is_asap7
+from pdk_backend import is_pdk, units_per_ns
 
 # Constants for parsing the report that specify which line 
 # contains the delay information.
@@ -21,7 +21,8 @@ RE_DELAY_OPENSTA = re.compile(r'^\s+([\d.]+)\s+data arrival time\s*$')
 
 # ASAP7's liberty files declare their time unit as picoseconds, so that is what
 # OpenSTA prints; the timing model is in nanoseconds.
-OPENSTA_TIME_UNIT_NS = 0.001
+# OpenSTA prints in the liberty's time unit; the PDK says how many make a
+# nanosecond (pdk_backend.units_per_ns).
 
 # A unit whose latency this run cannot know, and which the reference model does
 # not list either: a combinational unit, one implementation, no internal delay.
@@ -53,12 +54,13 @@ def extract_delay(line):
     assert match, f"Could not find data path delay in line: {line}"
     return float(match.group(1))
 
-def extract_delay_opensta(line):
+def extract_delay_opensta(line, per_ns=1000.0):
     """
     Extract the delay from a line in an OpenSTA path report.
 
     Args:
         line (str): A line from the report file.
+        per_ns (float): OpenSTA time units in a nanosecond (the liberty's).
 
     Returns:
         float: The extracted delay in nanoseconds, or None if the line is the
@@ -67,7 +69,7 @@ def extract_delay_opensta(line):
     match = RE_DELAY_OPENSTA.match(line)
     if not match:
         return None
-    return float(match.group(1)) * OPENSTA_TIME_UNIT_NS
+    return float(match.group(1)) / per_ns
 
 def extract_single_rpt(rpt_file, synth_tool="vivado"):
     """
@@ -81,14 +83,14 @@ def extract_single_rpt(rpt_file, synth_tool="vivado"):
         delay (float): The extracted delay in nanoseconds.
     """    
     max_delay = 0.0
-    asap7 = is_asap7(synth_tool)
+    asap7 = is_pdk(synth_tool)
     # Read the report file and extract the required data
     with open(rpt_file, 'r') as f:
         for line in f:
             # Extract delay of the data path
             if asap7:
                 if PATTERN_DELAY_INFO_OPENSTA in line:
-                    delay = extract_delay_opensta(line)
+                    delay = extract_delay_opensta(line, units_per_ns(synth_tool))
                     if delay is not None:
                         max_delay = max(max_delay, delay)
             elif PATTERN_DELAY_INFO in line:

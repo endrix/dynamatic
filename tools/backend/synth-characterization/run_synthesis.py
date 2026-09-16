@@ -1,13 +1,13 @@
 import os
 from multiprocessing import Pool
 from utils import VhdlInterfaceInfo, NUM_CORES
-from asap7_backend import is_asap7
+from pdk_backend import is_pdk
 
 def _synth_worker(args):
     synth_tool, tcl_file, log_file = args
-    # The ASAP7 backend's script is a shell script that runs yosys and OpenSTA
-    # itself; Vivado is handed the TCL script.
-    if is_asap7(synth_tool):
+    # The standard-cell backend's script is a shell script that runs yosys and
+    # OpenSTA itself; Vivado is handed the TCL script.
+    if is_pdk(synth_tool):
         status = os.system(f"bash {tcl_file} > {log_file} 2>&1")
         if status != 0:
             # A unit that does not map leaves no report behind, and the parser

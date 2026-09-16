@@ -14,9 +14,10 @@
 # repair would fix), and the reset, a quasi-static input that reaches every
 # flip-flop, is a false path. The library is
 # ASAP7 (RVT, typical corner) as streamblocks' install_synthesis_tools.sh lays
-# it out: ASAP7_DIR holds the five RVT TT liberty files, unpacked. Yosys'
-# abc takes one -liberty per file and maps across them, the way OpenROAD's
-# flow scripts hand them over, and the cells those scripts keep out of
+# it out: ASAP7_DIR holds the five RVT TT liberty files, unpacked; PDK=sky130
+# maps to the SkyWater high-density library instead (SKY130_DIR, see
+# sky130-lib.sh). Yosys' abc takes one -liberty per file and maps across
+# them, the way OpenROAD's flow scripts hand them over, and the cells those scripts keep out of
 # ASAP7 designs are kept out here. Another library works through LIBERTIES
 # (the files, space-separated) and SEQ_LIBERTY (the one with the flip-flops).
 #
@@ -41,10 +42,11 @@ PERIOD="${3:-1000}"
 LOG_DIR="${4:-$HDL_DIR/timing}"
 mkdir -p "$LOG_DIR"
 
-# The library, the cells kept out of it, the ABC script, the boundary
-# conditions and the reset port: tools/backend/asap7-lib.sh, shared with the
-# ASAP7 backend of the dataflow-unit characterization.
-source "$(dirname "${BASH_SOURCE[0]}")/asap7-lib.sh"
+# The library (PDK=asap7, the default, or sky130), the cells kept out of it,
+# the ABC script, the boundary conditions and the reset port:
+# tools/backend/pdk-lib.sh, shared with the standard-cell backend of the
+# dataflow-unit characterization.
+source "$(dirname "${BASH_SOURCE[0]}")/pdk-lib.sh" || exit $?
 # How the export is read into yosys: tools/backend/hdl-read.sh, shared with
 # report-lut6.sh, so that the timing and the LUT count are of one design.
 source "$(dirname "${BASH_SOURCE[0]}")/hdl-read.sh"
@@ -60,7 +62,7 @@ if [[ -z "$STA" || ! -x "$STA" ]]; then
   exit 2
 fi
 if [[ -z "$LIBERTIES" || -z "$SEQ_LIBERTY" || ! -f "$SEQ_LIBERTY" ]]; then
-  echo "report-timing: no cell library; set ASAP7_DIR (or LIBERTIES and SEQ_LIBERTY)" >&2
+  echo "report-timing: no cell library; set $PDK_DIR_VAR (or LIBERTIES and SEQ_LIBERTY)" >&2
   exit 2
 fi
 
@@ -68,7 +70,11 @@ hdl_read_design report-timing "$HDL_DIR" "$TOP" || exit $?
 
 MAPPED="$LOG_DIR/$TOP.mapped.v"
 CONSTR="$LOG_DIR/$TOP.abc.constr"
-asap7_write_abc_constr "$CONSTR"
+pdk_write_abc_constr "$CONSTR"
+# ABC maps toward picoseconds whatever the liberty's unit; OpenSTA speaks the
+# liberty's unit, so its clock and its slacks are scaled.
+PERIOD_STA=$(awk -v p="$PERIOD" -v s="$TIME_SCALE" 'BEGIN { if (s == 1) print p; else printf "%.4f", p / s }')
+DIGITS=$([[ "$TIME_SCALE" == "1" ]] && echo 1 || echo 4)
 SYNTH_LOG="$LOG_DIR/$TOP.synth.log"
 STA_LOG="$LOG_DIR/$TOP.timing.rpt"
 
@@ -88,7 +94,9 @@ YS_SCRIPT="$LOG_DIR/$TOP.synth.ys"
   echo "dfflibmap -liberty $SEQ_LIBERTY"
   echo "abc $LIB_ARGS -constr $CONSTR -D $PERIOD -script $ABC_SCRIPT"
   echo "opt_clean"
-  echo "stat"
+  # stat with every liberty, the macros' included (MACRO_LIBS): the cell
+  # count and the cell area, a macro one cell at the liberty's area.
+  echo "stat$(for lib in $LIBERTIES ${MACRO_LIBS:-}; do printf ' -liberty %s' "$lib"; done)"
   echo "write_verilog -noattr -noexpr -norename $MAPPED"
 } > "$YS_SCRIPT"
 if ! "${YOSYS[@]}" -s "$YS_SCRIPT" > "$SYNTH_LOG" 2>&1; then
@@ -99,19 +107,19 @@ fi
 
 STA_SCRIPT="$LOG_DIR/$TOP.sta.tcl"
 {
-  for lib in $LIBERTIES; do
+  for lib in $LIBERTIES ${MACRO_LIBS:-}; do
     echo "read_liberty $lib"
   done
   cat <<EOF
 read_verilog $MAPPED
 link_design $TOP
-create_clock -name clk -period $PERIOD [get_ports clk]
+create_clock -name clk -period $PERIOD_STA [get_ports clk]
 set_input_delay 0 -clock clk [delete_from_list [all_inputs] [get_ports clk]]
 set_output_delay 0 -clock clk [all_outputs]
 set_false_path -from [get_ports $RESET_PORT]
-report_checks -path_delay max -group_path_count 5 -format full_clock_expanded -digits 1
-puts "WNS [format %.1f [sta::worst_slack -max]]"
-puts "TNS [format %.1f [sta::total_negative_slack -max]]"
+report_checks -path_delay max -group_path_count 5 -format full_clock_expanded -digits $DIGITS
+puts "WNS [format %.${DIGITS}f [sta::worst_slack -max]]"
+puts "TNS [format %.${DIGITS}f [sta::total_negative_slack -max]]"
 exit
 EOF
 } > "$STA_SCRIPT"
@@ -126,14 +134,23 @@ if [[ -z "$WNS" ]]; then
   echo "report-timing: no slack in $STA_LOG" >&2
   exit 1
 fi
-CRITICAL=$(awk -v p="$PERIOD" -v w="$WNS" 'BEGIN { printf "%.1f", p - w }')
+CRITICAL=$(awk -v p="$PERIOD" -v w="$WNS" -v s="$TIME_SCALE" 'BEGIN { printf "%.1f", p - w * s }')
 GHZ=$(awk -v c="$CRITICAL" 'BEGIN { if (c > 0) printf "%.2f", 1000 / c; else print "-" }')
-# The last `stat` table: "   N cells", then "   N   CELLNAME" per type.
-CELLS=$(grep -E "^\s+[0-9]+ cells$" "$SYNTH_LOG" | tail -1 | awk '{print $1}')
-FLOPS=$(awk '/^ +[0-9]+ cells$/ {n = 0; s = 0} /^ +[0-9]+ +DFF[A-Za-z0-9]*_ASAP7/ {s += $1} END {print s + 0}' "$SYNTH_LOG")
-BUFS=$(awk '/^ +[0-9]+ cells$/ {s = 0} /^ +[0-9]+ +BUF[a-z0-9]*_ASAP7/ {s += $1} END {print s + 0}' "$SYNTH_LOG")
-echo "report-timing: $TOP on ASAP7 RVT TT, post-synthesis"
-echo "  cells $CELLS, flip-flops $FLOPS, fan-out buffers $BUFS"
+# The last `stat` table, with -liberty: "   N   AREA cells", then
+# "   N   AREA   CELLNAME" per type ("-" for an area the libraries lack;
+# the area may be printed as 1.57E+03). A cell type's line has three spaces
+# before its name, the summary lines above it one. The library's own cells
+# match CELL_RE; what is neither those nor yosys' own ($scopeinfo) is a
+# macro, counted with the liberty's area.
+NUM='[0-9.Ee+-]+'
+CELLS=$(grep -E "^\s+[0-9]+ +$NUM cells$" "$SYNTH_LOG" | tail -1 | awk '{print $1}')
+AREA=$(grep -E "^\s+[0-9]+ +$NUM cells$" "$SYNTH_LOG" | tail -1 | awk '{printf "%.1f", $2}')
+FLOPS=$(awk -v n="$NUM" -v re="$FLOP_RE" '$0 ~ "^ +[0-9]+ +" n " cells$" {s = 0} $0 ~ "^ +[0-9]+ +" n " +" re {s += $1} END {print s + 0}' "$SYNTH_LOG")
+BUFS=$(awk -v n="$NUM" -v re="$BUF_RE" '$0 ~ "^ +[0-9]+ +" n " cells$" {s = 0} $0 ~ "^ +[0-9]+ +" n " +" re {s += $1} END {print s + 0}' "$SYNTH_LOG")
+MACROS=$(awk -v n="$NUM" -v re="$CELL_RE" '$0 ~ "^ +[0-9]+ +" n " cells$" {s = ""} $0 ~ "^ +[0-9]+ +" n "   [A-Za-z_]" && $3 !~ re {s = s sprintf("%s%d x %s (%.3f um2 each)", (s == "" ? "" : ", "), $1, $3, $2 / $1)} END {print s}' "$SYNTH_LOG")
+echo "report-timing: $TOP on $PDK_LABEL, post-synthesis"
+echo "  cells $CELLS, flip-flops $FLOPS, fan-out buffers $BUFS, cell area $AREA um2"
+[[ -n "$MACROS" ]] && echo "  macros: $MACROS"
 echo "  critical path $CRITICAL ps at a $PERIOD ps clock (slack $WNS): up to $GHZ GHz"
 echo "  paths: $STA_LOG"
 exit 0

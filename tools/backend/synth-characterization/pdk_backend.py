@@ -1,22 +1,24 @@
-# ASAP7 (standard-cell) backend for the dataflow-unit characterization.
+# Standard-cell backend for the dataflow-unit characterization: ASAP7 or
+# sky130.
 #
-# Selected with `--synth-tool asap7`. Where the Vivado backend writes a Tcl
-# script that Vivado runs, this one writes a shell script that maps the unit's
-# top with yosys (VHDL through the GHDL plugin) onto the ASAP7 RVT typical
-# corner and then asks OpenSTA, for every (input port, output port) pair the
-# Vivado backend would have asked Vivado about, for the largest combinational
-# delay between them.
+# Selected with `--synth-tool asap7` or `--synth-tool sky130`. Where the
+# Vivado backend writes a Tcl script that Vivado runs, this one writes a shell
+# script that maps the unit's top with yosys (VHDL through the GHDL plugin)
+# onto the library's typical corner and then asks OpenSTA, for every (input
+# port, output port) pair the Vivado backend would have asked Vivado about,
+# for the largest combinational delay between them.
 #
-# The mapping recipe -- the five liberty files, the cells kept out of them, the
+# The mapping recipe -- the liberty files, the cells kept out of them, the
 # ABC script, the driving cell and load at the boundary, the reset false path
-# -- is tools/backend/asap7-lib.sh, the same file tools/backend/report-timing.sh
-# sources to time a whole design. A unit delay and a design's critical path are
-# then two measurements from one flow.
+# -- is tools/backend/<pdk>-lib.sh through tools/backend/pdk-lib.sh, the same
+# files tools/backend/report-timing.sh sources to time a whole design. A unit
+# delay and a design's critical path are then two measurements from one flow.
 #
 # What the numbers are: post-synthesis, so no placement and no wire delay, at
-# the typical corner. OpenSTA reports in the liberty file's time unit, which is
-# picoseconds for ASAP7; the model wants nanoseconds, so the parser divides by
-# 1000 (see report_parser.py).
+# the typical corner. OpenSTA reports in the liberty file's time unit,
+# picoseconds for ASAP7 and nanoseconds for sky130; the model wants
+# nanoseconds, so the parser divides by the PDK's scale (see PDKS and
+# report_parser.py).
 #
 # A pair with no combinational path between its ports -- a pipelined unit's
 # data path, say, where the only route from input to output runs through a
@@ -27,12 +29,17 @@
 import os
 import re
 
-# The name that selects this backend on the command line.
-SYNTH_TOOL = "asap7"
+# The names that select this backend on the command line, each with the
+# environment variable that locates its library and the number of OpenSTA
+# time units in a nanosecond (the liberty's unit).
+PDKS = {
+    "asap7": {"dir_var": "ASAP7_DIR", "units_per_ns": 1000.0},
+    "sky130": {"dir_var": "SKY130_DIR", "units_per_ns": 1.0},
+}
 
-# tools/backend/asap7-lib.sh, next to this package's parent directory.
-ASAP7_LIB_SH = os.path.normpath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "asap7-lib.sh"))
+# tools/backend/pdk-lib.sh, next to this package's parent directory.
+PDK_LIB_SH = os.path.normpath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "pdk-lib.sh"))
 
 # Ports that are never a path's start point.
 CONTROL_PORT_NAMES = ("clk", "clock", "rst", "reset")
@@ -40,17 +47,35 @@ CONTROL_PORT_NAMES = ("clk", "clock", "rst", "reset")
 _INDEXED_PORT = re.compile(r"^(.*)\[\d+\]$")
 
 
-def is_asap7(synth_tool):
+def is_pdk(synth_tool):
     """
-    Whether the given --synth-tool selects the ASAP7 backend.
+    Whether the given --synth-tool selects this backend (a PDK name).
 
     Args:
         synth_tool (str): value of the --synth-tool argument.
 
     Returns:
-        bool: True for the ASAP7 backend, False for Vivado.
+        bool: True for a PDK in PDKS, False for Vivado.
     """
-    return synth_tool.strip() == SYNTH_TOOL
+    return synth_tool.strip() in PDKS
+
+
+def is_asap7(synth_tool):
+    """is_pdk under its old name."""
+    return is_pdk(synth_tool)
+
+
+def units_per_ns(synth_tool):
+    """
+    How many of OpenSTA's time units make a nanosecond for the PDK.
+
+    Args:
+        synth_tool (str): value of the --synth-tool argument.
+
+    Returns:
+        float: 1000.0 for ASAP7 (picoseconds), 1.0 for sky130.
+    """
+    return PDKS[synth_tool.strip()]["units_per_ns"]
 
 
 def netlist_port_name(port):
@@ -112,8 +137,8 @@ def order_hdl_files(hdl_files, top_file):
     return packages + rest + [top_file]
 
 
-def write_asap7_script(top_entity_name, hdl_files, script_file, period_ns,
-                       map_rpt_to_ports):
+def write_pdk_script(synth_tool, top_entity_name, hdl_files, script_file,
+                     period_ns, map_rpt_to_ports):
     """
     Write the shell script that maps one unit top and times it with OpenSTA.
 
@@ -123,6 +148,7 @@ def write_asap7_script(top_entity_name, hdl_files, script_file, period_ns,
     port pair to the report file its delay class was given.
 
     Args:
+        synth_tool (str): the PDK, a key of PDKS.
         top_entity_name (str): name of the unit's entity (the top is `tb`).
         hdl_files (list): HDL files for the unit, the generated top first.
         script_file (str): path of the shell script to write.
@@ -132,9 +158,12 @@ def write_asap7_script(top_entity_name, hdl_files, script_file, period_ns,
     """
     work_dir = f"{os.path.splitext(script_file)[0]}.work"
     os.makedirs(work_dir, exist_ok=True)
-    # ASAP7's liberty files are in picoseconds, and so is everything OpenSTA
-    # prints back; ABC's -D and create_clock take the same unit.
+    pdk = synth_tool.strip()
+    # ABC's -D is picoseconds whatever the liberty's unit; OpenSTA's clock is
+    # in the liberty's unit (picoseconds for ASAP7, nanoseconds for sky130).
     period_ps = int(round(period_ns * 1000))
+    scale = PDKS[pdk]["units_per_ns"]
+    period_sta = period_ps if scale == 1000.0 else f"{period_ns:.4f}"
 
     top_file = hdl_files[0]
     ordered_files = " ".join(order_hdl_files(hdl_files, top_file))
@@ -175,22 +204,22 @@ def write_asap7_script(top_entity_name, hdl_files, script_file, period_ns,
 
     with open(script_file, 'w') as f:
         f.write("#!/usr/bin/env bash\n")
-        f.write(f"# ASAP7 characterization of {top_entity_name}"
+        f.write(f"# {pdk} characterization of {top_entity_name}"
                 f" at a {period_ns} ns clock.\n")
         f.write("set -uo pipefail\n")
-        f.write(f'source "{ASAP7_LIB_SH}"\n')
+        f.write(f'PDK={pdk} source "{PDK_LIB_SH}" || exit $?\n')
         f.write('if [[ -z "$LIBERTIES" || -z "$SEQ_LIBERTY" '
                 '|| ! -f "$SEQ_LIBERTY" ]]; then\n'
-                '  echo "asap7: no cell library; set ASAP7_DIR'
+                f'  echo "{pdk}: no cell library; set {PDKS[pdk]["dir_var"]}'
                 ' (or LIBERTIES and SEQ_LIBERTY)" >&2\n'
                 '  exit 2\n'
                 'fi\n')
         f.write('if ! command -v yosys >/dev/null 2>&1; then\n'
-                '  echo "asap7: yosys is not installed" >&2\n'
+                f'  echo "{pdk}: yosys is not installed" >&2\n'
                 '  exit 2\n'
                 'fi\n')
         f.write('if [[ -z "$STA" || ! -x "$STA" ]]; then\n'
-                '  echo "asap7: OpenSTA (sta) is not installed" >&2\n'
+                f'  echo "{pdk}: OpenSTA (sta) is not installed" >&2\n'
                 '  exit 2\n'
                 'fi\n')
         # OpenSTA creates each report as it writes the first path into it, so
@@ -200,10 +229,10 @@ def write_asap7_script(top_entity_name, hdl_files, script_file, period_ns,
         # run's reports from being read as this one's.
         for rpt_timing in map_rpt_to_ports:
             f.write(f'rm -f "{rpt_timing}"\n')
-        f.write(f'asap7_write_abc_constr "{work_dir}/abc.constr"\n')
+        f.write(f'pdk_write_abc_constr "{work_dir}/abc.constr"\n')
         f.write(f'if ! yosys -m ghdl -p "{yosys_cmd}"'
                 f' > "{work_dir}/yosys.log" 2>&1; then\n'
-                f'  echo "asap7: yosys failed on {top_entity_name}'
+                f'  echo "{pdk}: yosys failed on {top_entity_name}'
                 f' (see {work_dir}/yosys.log)" >&2\n'
                 f'  exit 1\n'
                 f'fi\n')
@@ -211,7 +240,7 @@ def write_asap7_script(top_entity_name, hdl_files, script_file, period_ns,
                 '  for lib in $LIBERTIES; do echo "read_liberty $lib"; done\n'
                 f'  echo "read_verilog {work_dir}/mapped.v"\n'
                 '  echo "link_design tb"\n'
-                f'  echo "create_clock -name clk -period {period_ps}'
+                f'  echo "create_clock -name clk -period {period_sta}'
                 ' [get_ports clk]"\n'
                 '  echo "set_input_delay 0 -clock clk'
                 ' [delete_from_list [all_inputs] [get_ports clk]]"\n'
@@ -221,7 +250,7 @@ def write_asap7_script(top_entity_name, hdl_files, script_file, period_ns,
                 f'}} > "{work_dir}/sta.tcl"\n')
         f.write(f'if ! "$STA" -no_init -no_splash -exit "{work_dir}/sta.tcl"'
                 f' > "{work_dir}/sta.log" 2>&1; then\n'
-                f'  echo "asap7: sta failed on {top_entity_name}'
+                f'  echo "{pdk}: sta failed on {top_entity_name}'
                 f' (see {work_dir}/sta.log)" >&2\n'
                 f'  exit 1\n'
                 f'fi\n')

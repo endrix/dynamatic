@@ -1,11 +1,13 @@
-# asap7-lib.sh -- the ASAP7 mapping recipe, shared. Sourced, never run.
+# asap7-lib.sh -- the ASAP7 mapping recipe. Sourced through pdk-lib.sh
+# (PDK=asap7, the default), never run.
 #
-# report-timing.sh times a whole exported design against it; the ASAP7 backend
-# of tools/backend/synth-characterization times one dataflow unit at a time
-# against it. Both read the same libraries, keep the same cells out, hand ABC
-# the same script and the same driver and load, and call the same input a
-# reset. A unit delay and a design's critical path are then two measurements
-# from one flow, and comparing them means something.
+# report-timing.sh times a whole exported design against it; the
+# standard-cell backend of tools/backend/synth-characterization times one
+# dataflow unit at a time against it. Both read the same libraries, keep the
+# same cells out, hand ABC the same script and the same driver and load, and
+# call the same input a reset. A unit delay and a design's critical path are
+# then two measurements from one flow, and comparing them means something.
+# The names every recipe defines are listed in pdk-lib.sh.
 #
 # Every setting below is overridable from the environment; the defaults are
 # ASAP7 (RVT, typical corner) as streamblocks' install_synthesis_tools.sh lays
@@ -26,6 +28,13 @@ RESET_PORT="${RESET_PORT:-rst}"
 DRIVER_CELL="${DRIVER_CELL:-BUFx2_ASAP7_75t_R}"
 LOAD_FF="${LOAD_FF:-3.898}"
 STA="${STA:-$(command -v sta || true)}"
+PDK_LABEL="ASAP7 RVT TT"
+PDK_DIR_VAR="ASAP7_DIR"
+# The liberty files are in picoseconds.
+TIME_SCALE=1
+FLOP_RE='DFF[A-Za-z0-9]*_ASAP7'
+BUF_RE='BUF[a-z0-9]*_ASAP7'
+CELL_RE='_ASAP7_'
 
 # Yosys' abc takes one -liberty per file and maps across them, the way
 # OpenROAD's flow scripts hand them over.
@@ -44,7 +53,7 @@ unset _asap7_lib _asap7_pattern
 # in a +script; {D} is the clock.
 ABC_SCRIPT="+strash;&get,-n;&fraig,-x;&put;scorr;dc2;dretime;strash;&get,-n;&dch,-f;&nf,{D};&put;buffer,-p,-N,$MAX_FANOUT;upsize,{D};dnsize,{D};stime,-p"
 
-# asap7_write_abc_constr <file>: what ABC assumes at the design's boundary.
+# asap7_write_abc_constr <file>: pdk_write_abc_constr under its old name.
 asap7_write_abc_constr() {
   printf 'set_driving_cell %s\nset_load %s\n' "$DRIVER_CELL" "$LOAD_FF" > "$1"
 }

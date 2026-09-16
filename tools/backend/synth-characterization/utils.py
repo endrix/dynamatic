@@ -1,7 +1,7 @@
 import os
 import re
 from typing import List, Tuple, Dict
-from asap7_backend import is_asap7, write_asap7_script
+from pdk_backend import is_pdk, write_pdk_script
 
 # Constants for the characterization process
 
@@ -303,7 +303,7 @@ class UnitCharacterization:
         Returns:
             str: Path to the generated script.
         """
-        asap7 = is_asap7(synth_tool)
+        asap7 = is_pdk(synth_tool)
         # Create a script for each parameter set
         suffix = "sh" if asap7 else "tcl"
         tcl_file = (f"{tcl_dir}/synth_{self.top_entity_name}"
@@ -324,7 +324,7 @@ class UnitCharacterization:
             }
         # Write the script
         if asap7:
-            write_asap7_script(self.top_entity_name, self.hdl_files, tcl_file,
+            write_pdk_script(synth_tool, self.top_entity_name, self.hdl_files, tcl_file,
                                clock_period, map_rpt_to_ports)
         else:
             write_tcl(self.top_entity_name, self.hdl_files, tcl_file, sdc_file, map_rpt_to_ports)
