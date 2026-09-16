@@ -114,6 +114,10 @@ if ! "${YOSYS[@]}" -s "$YS_SCRIPT" > "$SYNTH_LOG" 2>&1; then
   tail -5 "$SYNTH_LOG" >&2
   exit 1
 fi
+# yosys writes `wire signed [31:0] x;` for a design's signed locals (picorv32.v
+# has two) and OpenSTA's Verilog reader rejects the keyword. Nothing in a
+# netlist's timing depends on a declaration's signedness.
+sed -i 's/^\(\s*\(wire\|reg\|input\|output\)\) signed /\1 /' "$MAPPED"
 
 if [[ "${PLACE:-0}" == "1" ]]; then
   # OpenROAD: floorplan, place, parasitics, repair, time. Its STA is OpenSTA,
