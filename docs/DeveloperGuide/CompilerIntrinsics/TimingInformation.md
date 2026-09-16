@@ -125,9 +125,67 @@ and then asks OpenSTA for the largest combinational delay between each
 about. `--clock-period` is what ABC maps toward and what OpenSTA's clock is set
 to; the whole set is a couple of minutes on a multi-core machine.
 
+### Characterizing for sky130
+
+The same backend maps to the SkyWater sky130 high-density library with
+`--synth-tool sky130`: `data/components-sky130.json` is the units measured on
+`sky130_fd_sc_hd` at the typical corner (25C, 1.8V), the way
+`components-asap7.json` is on ASAP7. The recipe is `tools/backend/sky130-lib.sh`,
+selected through `tools/backend/pdk-lib.sh` by `PDK=sky130`, and the library is
+located by `SKY130_DIR`, a directory holding `sky130hd/lib/` (the liberty
+file) and `sky130ram/<macro>/` (OpenRAM's SRAM macros), as OpenROAD's flow
+scripts ship them under `flow/platforms`:
+
+```sh
+export SKY130_DIR=/path/to/sky130       # sky130hd/lib/*.lib, sky130ram/*/
+python3 main.py --synth-tool sky130 \
+  --dynamatic-dir "$DYNAMATIC" \
+  --json-input "$DYNAMATIC/data/rtl-config-vhdl-vivado.json" \
+  --json-output "$DYNAMATIC/data/components-sky130.json" \
+  --clock-period 10.0
+```
+
+A unit the characterization does not measure, one on its skipping list (the
+units with no data path, those another script measures; the dividers are
+skipped on Vivado only and measured on the PDK backends) or one that leaves
+no report, is carried from the reference
+model as it is, so that the model stays complete for the buffer placer: a
+latency is structural, the divider's 35 stages are 35 on any library, and
+such a unit's delays are not port to port. The script prints which units it
+carried; their numbers are the reference's, not the library's.
+
+sky130's liberty is in nanoseconds where ASAP7's is in picoseconds; the
+backend hands ABC picoseconds either way and scales OpenSTA's clock and its
+reports by the PDK (`PDKS` in `pdk_backend.py`). A sky130 design clocks an
+order of magnitude slower than an ASAP7 one, so the period to map toward is
+in the nanoseconds, and `report-timing.sh` is asked for thousands of
+picoseconds.
+
+### Placed and repaired: `PLACE=1`
+
+`report-timing.sh` stops at synthesis: no wires, no buffer trees. That
+overstates any high-fan-out net (a clock enable over a 32-stage divider reads
+as 86 ns on sky130) and understates every long wire. With `PLACE=1` and
+OpenROAD on the path (or `OPENROAD`), the script floorplans the mapped
+netlist (`UTILIZATION` percent, 50 by default), places it, estimates the
+wires' parasitics from the placement, buffers every net above `MAX_FANOUT`
+loads and every slew or capacitance violation (the resizer's
+`repair_design`), and times the result with the wires in; the report says
+how many buffers went in and how many cells were resized, and gives the
+slack before placement, placed, and repaired. Each recipe names what the
+placement needs (`PDK_TECH_LEF`, `PDK_CELL_LEFS`, `PDK_TRACKS`,
+`PDK_SET_RC`, `PDK_SITE`, `PDK_PINS_H`, `PDK_PINS_V`); macros' LEFs come
+from `MACRO_LEFS`. On the transposer: sky130 10,817 ps at synthesis,
+14,409 ps placed and repaired (831 buffers in, 4,913 cells resized); ASAP7
+1,737 ps and 2,037 ps (no buffer needed, 9,334 resized). The divider's stage
+above is 6.2 ns once placed and repaired. The characterization's stage
+report stays post-synthesis: a placement per unit and width would take
+hours, and the whole-design report is where the placed number matters.
+
 ### What the numbers mean
 
-The mapping recipe lives in `tools/backend/asap7-lib.sh` and is the same one
+The mapping recipe lives in `tools/backend/asap7-lib.sh` (sky130's in
+`sky130-lib.sh`; `pdk-lib.sh` selects one by `PDK`) and is the same one
 `tools/backend/report-timing.sh` uses to time a whole exported design: the five
 ASAP7 RVT typical-corner liberty files, the cells OpenROAD's flow scripts keep
 out of ASAP7 designs, yosys' constrained-liberty ABC script with fan-out
@@ -203,10 +261,11 @@ where against `components.json` it is already infeasible at 1.0 ns and needs
 
 ### What the model does not contain
 
-The characterization script skips some units (`utils.py`'s `skipping_units`)
-and the model has no entry for them: the floating-point units, `store`, `end`,
-`return`, `divsi`/`divui`, `remsi`/`remui`, `join`, `blocker`, `mem_controller` and the
-LSQ. Two more units drop out of an ASAP7 run for reasons in the RTL: the
+The characterization script skips some units (`utils.py`'s `skipping_units`:
+the floating-point units, `store`, `end`, `return`, `remsi`/`remui`, `join`,
+`blocker`, `mem_controller` and the LSQ; the dividers too, but on Vivado only)
+and carries their entries from the reference model so that the model stays
+complete for the buffer placer. Two more units drop out of an ASAP7 run for reasons in the RTL: the
 dataful `control_merge` asserts false in
 `data/vhdl/handshake/control_merge.vhd` ("implementation with data signal has
 a bug"), so it cannot be elaborated at all; and `sitofp`/`fptosi` elaborate

@@ -180,9 +180,10 @@ follow all three:
 
 ## Using a New Synthesis Tool
 
-There is a second backend already: `--synth-tool asap7` measures the same units
-on the ASAP7 standard-cell library with yosys and OpenSTA, in
-`asap7_backend.py`. See [the ASAP7 section of the timing model
+There is a second backend already: `--synth-tool asap7` or `--synth-tool
+sky130` measures the same units on a standard-cell library with yosys and
+OpenSTA, in `pdk_backend.py`, which takes its library from the PDK's recipe
+under `tools/backend`. See [the ASAP7 section of the timing model
 doc](../CompilerIntrinsics/TimingInformation.md#characterizing-for-asap7) for
 what it does and what its numbers mean.
 

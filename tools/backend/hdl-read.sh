@@ -30,6 +30,13 @@ hdl_read_design() {
       case "$(basename "$f")" in
         types.vhd|"$top.vhd") continue ;;
       esac
+      # SRAM macros: with HDL_SRAM=1 a unit that has a synthesis view under
+      # sram/ (a handshake.ram above the generator's threshold, the same
+      # entity wrapping a macro) is read from there instead of the flop model
+      # next to it; the macros themselves come from MACRO_LIBS (below).
+      if [[ "${HDL_SRAM:-0}" == "1" && -f "$dir/sram/$(basename "$f")" ]]; then
+        f="$dir/sram/$(basename "$f")"
+      fi
       files="$files $f"
     done
     files="$files $dir/$top.vhd"
@@ -38,5 +45,16 @@ hdl_read_design() {
   else
     echo "$tool: no Verilog or VHDL file in $dir" >&2
     return 1
+  fi
+  # MACRO_LIBS: liberty files of the SRAM macros the sram/ views instantiate,
+  # read as blackbox cells BEFORE the design so that the ghdl plugin binds the
+  # unbound components to them; synth keeps a blackbox through -flatten and
+  # stat counts it as one cell with the liberty's area.
+  if [[ -n "${MACRO_LIBS:-}" ]]; then
+    local lib macros=""
+    for lib in $MACRO_LIBS; do
+      macros="${macros}read_liberty -lib $lib; "
+    done
+    READ="$macros$READ"
   fi
 }

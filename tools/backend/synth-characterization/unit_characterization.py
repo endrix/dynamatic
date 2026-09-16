@@ -3,8 +3,9 @@ import os
 import re
 from itertools import product
 from utils import parameters_ranges, VhdlInterfaceInfo, UnitCharacterization
-from asap7_backend import is_asap7
+from pdk_backend import is_pdk
 from typing import List, Tuple
+
 
 def extract_generics_ports(vhdl_code, entity_name):
     """
@@ -45,10 +46,10 @@ def extract_generics_ports(vhdl_code, entity_name):
 
     # Extract generics and ports
     generics_match = re.search(r'generic\s*\((.*?)\)\s*;', entity_block, re.DOTALL | re.IGNORECASE)
-    ports_match    = re.search(r'port\s*\(((?:[^()]*|\([^()]*\))*)\)\s*;', entity_block, re.DOTALL | re.IGNORECASE)
+    ports_match = re.search(r'port\s*\(((?:[^()]*|\([^()]*\))*)\)\s*;', entity_block, re.DOTALL | re.IGNORECASE)
 
     generics_raw = generics_match.group(1).strip() if generics_match else ''
-    ports_raw    = ports_match.group(1).strip() if ports_match else ''
+    ports_raw = ports_match.group(1).strip() if ports_match else ''
 
     # Split on semicolon while keeping line breaks (in case of multiple declarations)
     def split_definitions(raw: str) -> List[str]:
@@ -56,7 +57,7 @@ def extract_generics_ports(vhdl_code, entity_name):
         return [line.strip() for line in lines if line.strip()]
 
     generics = split_identifier_lists(split_definitions(generics_raw))
-    ports    = split_identifier_lists(split_definitions(ports_raw))
+    ports = split_identifier_lists(split_definitions(ports_raw))
 
     return entity_name, VhdlInterfaceInfo(generics, ports)
 
@@ -93,12 +94,12 @@ def split_identifier_lists(definitions: List[str]) -> List[str]:
 def generate_wrapper_top(entity_name, vhdl_interface_info, param_names):
     """
     Generate the wrapper for the top file from the given top definition file.
-    
+
     Args:
         entity_name (str): Name of the top entity.
         vhdl_interface_info (VhdlInterfaceInfo): VHDL interface information containing generics and ports.
         param_names (List[str]): List of parameter names to be used in the wrapper.
-        
+
     Returns:
         str: The wrapper for the top file.
     """
@@ -136,21 +137,22 @@ generic map (
         if param != "PREDICATE":
             wrapper_top += f"{param} => {param}_const_value,\n"
     wrapper_top = wrapper_top.rstrip(",\n") + "\n" \
-                     ")\n" \
-                        "port map (\n"
+        ")\n" \
+        "port map (\n"
     for port in ports:
         port_name = port.split(":")[0].strip()  # Get the port name before the colon
         wrapper_top += f"{port_name} => {port_name},\n"
     wrapper_top = wrapper_top.rstrip(",\n") + "\n" \
-                     ");\n" \
-                        "end architecture;\n"
+        ");\n" \
+        "end architecture;\n"
 
     return wrapper_top, entity_name
+
 
 def run_unit_characterization(unit_name, list_params, hdl_out_dir, synth_tool, top_def_file, tcl_dir, rpt_dir, log_dir, clock_period, module_name=None):
     """
     Run characterization for a single unit using the specified synthesis tool.
-    
+
     Args:
         unit_name (str): Name of the unit to characterize.
         list_params (list): List of parameters for the unit.
@@ -166,7 +168,7 @@ def run_unit_characterization(unit_name, list_params, hdl_out_dir, synth_tool, t
             `handshake.fork` is the entity `handshake_fork`, and all six
             buffer implementations are `handshake.buffer` -- and the entity to
             read the interface off cannot be found by the unit name alone.
-    
+
     Returns:
         List[UnitCharacterization]: List of UnitCharacterization objects for the unit.
     """
@@ -200,7 +202,7 @@ def run_unit_characterization(unit_name, list_params, hdl_out_dir, synth_tool, t
     # Create sdc constraints file (Vivado reads it; the ASAP7 backend is given
     # the period directly and writes its own constraints)
     sdc_file = f"{tcl_dir}/period.sdc"
-    if not is_asap7(synth_tool):
+    if not is_pdk(synth_tool):
         write_sdc_constraints(sdc_file, clock_period)
     # Create a top file for each combination of parameters and the corresponding tcl file
     list_tcls = []
@@ -208,7 +210,7 @@ def run_unit_characterization(unit_name, list_params, hdl_out_dir, synth_tool, t
     unit_characterization_list = []
     id = 0
     for combination in param_combinations:
-        top_file = f"{hdl_out_dir}/{top_entity_name}_top_{id}.vhd" 
+        top_file = f"{hdl_out_dir}/{top_entity_name}_top_{id}.vhd"
         wrapper_top_combined = wrapper_top
         for param_name, param_value in zip(param_names, combination):
             # Replace the constant value in the template
@@ -223,6 +225,6 @@ def run_unit_characterization(unit_name, list_params, hdl_out_dir, synth_tool, t
 
     # Run the synthesis tool for each tcl file
     log_file = f"{log_dir}/synth_{unit_name}_log.txt"
-    run_synthesis(list_tcls, synth_tool, log_file)    
+    run_synthesis(list_tcls, synth_tool, log_file)
 
     return unit_characterization_list
