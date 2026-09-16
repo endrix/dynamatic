@@ -90,7 +90,7 @@
         "type": "string"
       }
     ],
-    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t ram -p data_width=$DATA_WIDTH addr_width=$ADDR_WIDTH size=$SIZE values=\"($INITIAL_VALUES)\" sram_threshold=64 sram_name=\"'fakeram7_{size}x{width}'\""
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t ram -p data_width=$DATA_WIDTH addr_width=$ADDR_WIDTH size=$SIZE values=\"($INITIAL_VALUES)\" sram_threshold=64 sram_name=\"'fakeram7_{size}x{width}'\" sram_interface=\"'${SRAM_INTERFACE:-fakeram}'\" sram_macros=\"${SRAM_MACROS:-[]}\""
   },
   {
     "name": "handshake.cmpi",
