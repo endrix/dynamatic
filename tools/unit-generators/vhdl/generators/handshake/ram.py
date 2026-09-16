@@ -16,8 +16,9 @@ def generate_ram(name, params):
     # read-write and one read port, fixed sizes). `sram_macros` lists the
     # macros on hand as (name, words, width) triples; the smallest one that
     # holds the memory is taken, padded with zeros where it is deeper or
-    # wider. FakeRAM needs no list. See _generate_ram_sram and
-    # _generate_ram_openram.
+    # wider. FakeRAM generates a macro of the memory's own size from the
+    # name pattern and reads no list: its view is never padded. See
+    # _generate_ram_sram and _generate_ram_openram.
     sram_threshold = params.get("sram_threshold", 0)
     sram_name = params.get("sram_name", "fakeram7_{size}x{width}")
     sram_interface = params.get("sram_interface", "fakeram")
@@ -33,9 +34,10 @@ def generate_ram(name, params):
         return code
     if sram_interface not in ("fakeram", "openram"):
         raise ValueError(f"sram_interface {sram_interface!r} is not fakeram or openram")
-    macro = _pick_macro(sram_macros, size, data_width)
-    if macro is None and sram_interface == "fakeram":
+    if sram_interface == "fakeram":
         macro = (sram_name.format(size=size, width=data_width, addr=addr_width), size, data_width)
+    else:
+        macro = _pick_macro(sram_macros, size, data_width)
     if macro is None:
         sys.stderr.write(f"{name}: no macro in sram_macros holds {size} x {data_width}; "
                          "the memory stays flops\n")
@@ -211,8 +213,10 @@ def _generate_ram_openram(
     its body a component instantiation with OpenRAM's port names -- port 0
     (clk0, csb0, web0, wmask0, addr0, din0, dout0) is read-write and serves
     the store, port 1 (clk1, csb1, addr1, dout1) is read-only and serves the
-    load, so a load and a store in ONE cycle are both served, the load
-    reading the old word as the flop model does. Chip select and write
+    load, so a load and a store in ONE cycle at different addresses are
+    both served; at the same address the macro's read data is undefined
+    (OpenRAM's model says so), where the flop model reads the old word.
+    Chip select and write
     enable are active low; the write mask is byte-wise (ceil(width / 8)
     lanes) and all lanes are written. A macro deeper or wider than the
     memory is padded: the address and the data extended with zeros, the
