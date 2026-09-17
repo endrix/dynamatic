@@ -218,8 +218,8 @@ Measured at `--clock-period 1.0`:
 
 | unit | ASAP7 (ns) | for comparison |
 | --- | --- | --- |
-| `addi`, 32-bit, data | 0.777 | `report-timing.sh` on the same 32-bit adder in a top of its own: 777.1 ps |
-| `addi`, 64-bit, data | 1.488 | |
+| `addi`, 32-bit, data | 0.754 | `report-timing.sh` on the same 32-bit adder in a top of its own: 753.8 ps (777.1 ps with `ADDER=yosys`, the model's value before the Sklansky adder) |
+| `addi`, 64-bit, data | 1.463 | |
 | `mux`, valid | 0.157 | a mux in a whole-design ASAP7 report: about 150 ps |
 | `mux`, 32-bit, data | 0.053 | |
 | `cmpi`, 32-bit, data | 0.178 | |
