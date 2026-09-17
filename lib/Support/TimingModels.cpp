@@ -130,6 +130,14 @@ FailureOr<double> TimingDatabase::getLatency(Operation *op,
   if (signalType != SignalType::DATA)
     return 0.0;
 
+  // A latency the operation carries is its latency: a unit whose
+  // implementation was chosen before placement (a sequential divider or
+  // multiplier, BITWIDTH cycles a result where the model's pipelined unit
+  // takes a fixed few) says so on the op, and the model's entry is for the
+  // other implementation.
+  if (auto attr = op->getAttrOfType<IntegerAttr>("latency"))
+    return static_cast<double>(attr.getInt());
+
   const TimingModel *model = getModel(op);
   if (!model) {
     op->emitWarning() << "TimingDatabase::getLatency: no timing model for op";
