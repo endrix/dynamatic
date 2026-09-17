@@ -606,12 +606,29 @@ ModuleDiscriminator::ModuleDiscriminator(Operation *op) {
         addType("DATA_TYPE", cmergeOp.getResult());
         addType("INDEX_TYPE", cmergeOp.getIndex());
       })
-      .Case<handshake::MergeOp, handshake::FirstOp>([&](auto) {
-        // Number of input data channels and data bitwidth. `first` is the
-        // first-wins merge with full consumption: the same generics as
-        // `merge`, the same generator inputs (rtl-config: size, bitwidth).
+      .Case<handshake::FirstOp>([&](auto) {
+        // Number of input channels and bitwidth
         addUnsigned("SIZE", op->getNumOperands());
         addType("DATA_TYPE", op->getResult(0));
+      })
+      .Case<handshake::MergeOp>([&](handshake::MergeOp mergeOp) {
+        // Number of input channels and bitwidth; and whether the unit keeps
+        // the slot behind its arbiter (`TEHB`, 1 unless the op's
+        // hw.parameters say 0: a consumer that cuts ready itself, such as an
+        // actor's state ring, needs no second slot).
+        addUnsigned("SIZE", mergeOp.getNumOperands());
+        addType("DATA_TYPE", mergeOp.getResult());
+        // `init` copied the op's own hw.parameters already; the value is
+        // re-added in the unsigned encoding the RTL config verifies.
+        unsigned tehb = 1;
+        if (auto paramsAttr = mergeOp->getAttrOfType<mlir::DictionaryAttr>(
+                RTL_PARAMETERS_ATTR_NAME))
+          if (auto v =
+                  dyn_cast_or_null<mlir::IntegerAttr>(paramsAttr.get("TEHB")))
+            tehb = v.getValue().getZExtValue();
+        llvm::erase_if(parameters,
+                       [](NamedAttribute a) { return a.getName() == "TEHB"; });
+        addUnsigned("TEHB", tehb);
       })
       .Case<handshake::JoinOp, handshake::BlockerOp>([&](auto) {
         // Number of input channels

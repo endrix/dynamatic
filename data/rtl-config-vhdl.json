@@ -356,9 +356,13 @@
       {
         "name": "SIZE",
         "type": "unsigned"
+      },
+      {
+        "name": "TEHB",
+        "type": "unsigned"
       }
     ],
-    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t merge -p size=$SIZE bitwidth=$BITWIDTH extra_signals=$EXTRA_SIGNALS",
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t merge -p size=$SIZE bitwidth=$BITWIDTH extra_signals=$EXTRA_SIGNALS tehb=$TEHB",
     "dependencies": [
       "types"
     ]
