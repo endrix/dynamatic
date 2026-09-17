@@ -130,13 +130,18 @@ FailureOr<double> TimingDatabase::getLatency(Operation *op,
   if (signalType != SignalType::DATA)
     return 0.0;
 
-  // A latency the operation carries is its latency: a unit whose
-  // implementation was chosen before placement (a sequential divider or
-  // multiplier, BITWIDTH cycles a result where the model's pipelined unit
-  // takes a fixed few) says so on the op, and the model's entry is for the
-  // other implementation.
+  // A latency the operation carries is its latency when its implementation
+  // was chosen before placement: a sequential divider or multiplier
+  // (hw.parameters IMPL = "sequential", BITWIDTH cycles a result where the
+  // model's pipelined unit takes a fixed few) says so on the op, and the
+  // model's entry is for the other implementation. Any other op's latency
+  // is the model's, whatever it carries: set-unit-impl-attr may run again
+  // with another model or period and must not read its own earlier write.
   if (auto attr = op->getAttrOfType<IntegerAttr>("latency"))
-    return static_cast<double>(attr.getInt());
+    if (auto params = op->getAttrOfType<DictionaryAttr>("hw.parameters"))
+      if (auto impl = dyn_cast_or_null<StringAttr>(params.get("IMPL")))
+        if (impl.getValue() == "sequential")
+          return static_cast<double>(attr.getInt());
 
   const TimingModel *model = getModel(op);
   if (!model) {
