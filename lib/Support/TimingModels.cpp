@@ -118,6 +118,36 @@ const TimingModel *TimingDatabase::getModel(Operation *op) const {
     return getModel(timingModelKey);
   }
 
+  // An implementation chosen before placement is named in the op's
+  // hw.parameters, and the model keys it the way it keys the floating-point
+  // units: the sequential divider is `handshake.divui.sequential` and the
+  // sequential multiplier `handshake.muli.sequential.<STEP>`, since STEP
+  // multiplier bits a cycle are STEP rows of adders and a delay of their own.
+  // The step is in the key rather than in the entry because the entry's
+  // nesting is by retiming path, bitwidth and clock period, and an
+  // implementation is not one of those.
+  if (auto params =
+          op->getAttrOfType<DictionaryAttr>("hw.parameters")) {
+    if (auto impl = dyn_cast_or_null<StringAttr>(params.get("IMPL"))) {
+      std::string implKey = (baseName + "." + impl.getValue()).str();
+      std::string variantKey = implKey;
+      if (auto step = dyn_cast_or_null<IntegerAttr>(params.get("STEP")))
+        variantKey += "." + std::to_string(step.getValue().getZExtValue());
+      if (const TimingModel *model = getModel(StringRef(variantKey)))
+        return model;
+      if (const TimingModel *model = getModel(StringRef(implKey)))
+        return model;
+      // The model does not describe the implementation this operation will be
+      // built as, and the base entry is some other implementation's: say so,
+      // once per key, since a model is asked for an operation once per signal
+      // and once per constraint.
+      if (reportedMissingImpls.insert(variantKey).second)
+        op->emitRemark() << "TimingDatabase::getModel: no timing model for \""
+                         << variantKey << "\"; the entry for \"" << baseName
+                         << "\" is used instead";
+    }
+  }
+
   return getModel(baseName);
 }
 

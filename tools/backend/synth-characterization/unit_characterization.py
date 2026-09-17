@@ -130,15 +130,21 @@ end entity;
 architecture tb_arch of tb is
 begin
 dut: entity work.{entity_name}
-generic map (
 """
 
-    for param in param_names:
-        if param != "PREDICATE":
+    # The generics to map. A parameter that names the implementation rather
+    # than configuring it is not one (PREDICATE picks which comparison the
+    # generator writes), and a unit whose generator bakes its width in -- the
+    # sequential divider and multiplier -- has no generic at all, where an
+    # empty `generic map ()` would not compile.
+    generic_params = [param for param in param_names if param != "PREDICATE"]
+    if generic_params:
+        wrapper_top += "generic map (\n"
+        for param in generic_params:
             wrapper_top += f"{param} => {param}_const_value,\n"
-    wrapper_top = wrapper_top.rstrip(",\n") + "\n" \
-        ")\n" \
-        "port map (\n"
+        wrapper_top = wrapper_top.rstrip(",\n") + "\n" \
+            ")\n"
+    wrapper_top += "port map (\n"
     for port in ports:
         port_name = port.split(":")[0].strip()  # Get the port name before the colon
         wrapper_top += f"{port_name} => {port_name},\n"
@@ -149,7 +155,7 @@ generic map (
     return wrapper_top, entity_name
 
 
-def run_unit_characterization(unit_name, list_params, hdl_out_dir, synth_tool, top_def_file, tcl_dir, rpt_dir, log_dir, clock_period, module_name=None):
+def run_unit_characterization(unit_name, list_params, hdl_out_dir, synth_tool, top_def_file, tcl_dir, rpt_dir, log_dir, clock_period, module_name=None, baked_params=None, id_offset=0, latency_cycles=None):
     """
     Run characterization for a single unit using the specified synthesis tool.
 
@@ -168,6 +174,15 @@ def run_unit_characterization(unit_name, list_params, hdl_out_dir, synth_tool, t
             `handshake.fork` is the entity `handshake_fork`, and all six
             buffer implementations are `handshake.buffer` -- and the entity to
             read the interface off cannot be found by the unit name alone.
+        baked_params (dict): Parameters the generator has already baked into
+            the RTL, which the wrapper cannot sweep through a generic. The
+            sequential divider and multiplier are written at one width, so the
+            width is here rather than in the sweep, and the caller runs this
+            function once per width.
+        id_offset (int): First unique id to use, so that several calls for one
+            unit (one per baked width) do not write over each other's reports.
+        latency_cycles (int): The unit's latency in cycles, when the caller
+            knows it and the reference model does not list the unit.
 
     Returns:
         List[UnitCharacterization]: List of UnitCharacterization objects for the unit.
@@ -208,7 +223,7 @@ def run_unit_characterization(unit_name, list_params, hdl_out_dir, synth_tool, t
     list_tcls = []
     # List to hold objects of UnitCharacterization
     unit_characterization_list = []
-    id = 0
+    id = id_offset
     for combination in param_combinations:
         top_file = f"{hdl_out_dir}/{top_entity_name}_top_{id}.vhd"
         wrapper_top_combined = wrapper_top
@@ -217,14 +232,18 @@ def run_unit_characterization(unit_name, list_params, hdl_out_dir, synth_tool, t
             wrapper_top_combined = wrapper_top_combined.replace(f"{param_name}_const_value", str(param_value))
         with open(top_file, 'w') as f:
             f.write(wrapper_top_combined)
-        unit_char_obj = UnitCharacterization(unit_name, top_entity_name, dict(zip(param_names, combination)), [top_file] + hdl_files, vhdl_interface_info, id)
+        params = dict(zip(param_names, combination))
+        if baked_params:
+            params.update(baked_params)
+        unit_char_obj = UnitCharacterization(unit_name, top_entity_name, params, [top_file] + hdl_files, vhdl_interface_info, id)
+        unit_char_obj.latency_cycles = latency_cycles
         # Write the tcl file for synthesis
         list_tcls.append(unit_char_obj.generate_tcl(tcl_dir, rpt_dir, sdc_file, synth_tool, clock_period))
         id += 1
         unit_characterization_list.append(unit_char_obj)
 
     # Run the synthesis tool for each tcl file
-    log_file = f"{log_dir}/synth_{unit_name}_log.txt"
+    log_file = f"{log_dir}/synth_{unit_name}_{id_offset}_log.txt"
     run_synthesis(list_tcls, synth_tool, log_file)
 
     return unit_characterization_list
