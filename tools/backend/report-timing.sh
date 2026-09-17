@@ -89,6 +89,19 @@ DIGITS=$([[ "$TIME_SCALE" == "1" ]] && echo 1 || echo 4)
 SYNTH_LOG="$LOG_DIR/$TOP.synth.log"
 STA_LOG="$LOG_DIR/$TOP.timing.rpt"
 
+# The adder. Yosys maps every carry chain to a Brent-Kung lookahead unit and
+# ABC then rebuilds it as a ripple-carry chain of majority gates, about 28 ps
+# a bit on ASAP7: a 64-bit accumulate was 1.9 ns, the Mul body's whole clock.
+# On an FPGA the carry chain is dedicated silicon and the question never
+# comes up; on a cell library the script has to ask for a parallel-prefix
+# adder, and Sklansky is the one that measured best (Mul body 1,930 to
+# 1,434 ps for 3% more cells; Kogge-Stone 1,452 for 10% more; Han-Carlson
+# 1,488). ADDER=sklansky|kogge-stone|han-carlson picks one, ADDER=yosys
+# keeps yosys' own. The characterization (pdk_backend.py) reads the same
+# variable, so the timing models are of the same adders as the reports.
+ADDER="${ADDER:-sklansky}"
+SYNTH_ADDER=""
+[[ "$ADDER" != "yosys" ]] && SYNTH_ADDER=" -extra-map +/choices/$ADDER.v"
 # Generic synthesis, then the flip-flops from the sequential liberty and the
 # logic from the others. `-noexpr` keeps the netlist a plain instance list for
 # OpenSTA to link; `-norename` keeps yosys' own names on the nets and cells
@@ -101,7 +114,7 @@ STA_LOG="$LOG_DIR/$TOP.timing.rpt"
 YS_SCRIPT="$LOG_DIR/$TOP.synth.ys"
 {
   printf '%s\n' "$READ" | sed 's/; */\n/g'
-  echo "synth -top $TOP -flatten"
+  echo "synth -top $TOP -flatten$SYNTH_ADDER"
   echo "dfflibmap -liberty $SEQ_LIBERTY"
   echo "abc $LIB_ARGS -constr $CONSTR -D $PERIOD -script $ABC_SCRIPT"
   echo "opt_clean"

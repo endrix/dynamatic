@@ -137,6 +137,16 @@ def order_hdl_files(hdl_files, top_file):
     return packages + rest + [top_file]
 
 
+def synth_adder():
+    """The parallel-prefix adder yosys maps carry chains to, as in
+    report-timing.sh: ADDER=sklansky (the default; kogge-stone and
+    han-carlson are the others) or ADDER=yosys for yosys' own Brent-Kung
+    unit, which ABC rebuilds as a ripple-carry chain. The same choice as the
+    reports, so the models are of the same adders."""
+    adder = os.environ.get("ADDER", "sklansky").strip()
+    return "" if adder == "yosys" else f" -extra-map +/choices/{adder}.v"
+
+
 def write_pdk_script(synth_tool, top_entity_name, hdl_files, script_file,
                      period_ns, map_rpt_to_ports, stage_rpt=None):
     """
@@ -207,7 +217,7 @@ def write_pdk_script(synth_tool, top_entity_name, hdl_files, script_file,
     yosys_cmd = (
         f"ghdl --std=08 -fsynopsys {ordered_files} -e tb; "
         f"hierarchy -top tb; "
-        f"synth -top tb -flatten; "
+        f"synth -top tb -flatten{synth_adder()}; "
         f"dfflibmap -liberty $SEQ_LIBERTY; "
         f"abc $LIB_ARGS -constr {work_dir}/abc.constr -D {period_ps}"
         f" -script $ABC_SCRIPT; "
