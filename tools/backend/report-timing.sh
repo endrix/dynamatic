@@ -100,8 +100,8 @@ STA_LOG="$LOG_DIR/$TOP.timing.rpt"
 # (1,155 against Sklansky's 1,533). ADDER=sklansky|kogge-stone|han-carlson
 # picks one, ADDER=yosys keeps yosys' own. The characterization
 # (pdk_backend.py) reads the same variable, so new timing models are of the
-# same adders as the reports; the checked-in components-*.json were made
-# with yosys' own adder and are stale until re-characterised.
+# same adders as the reports; the checked-in components-asap7.json and
+# components-sky130.json were re-characterised with it on 2026-09-17.
 ADDER="$(echo "${ADDER:-}" | tr -d '[:space:]')"
 ADDER="${ADDER:-sklansky}"
 SYNTH_ADDER=""
