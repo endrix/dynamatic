@@ -143,7 +143,7 @@ def synth_adder():
     han-carlson are the others) or ADDER=yosys for yosys' own Brent-Kung
     unit, which ABC rebuilds as a ripple-carry chain. The same choice as the
     reports, so the models are of the same adders."""
-    adder = os.environ.get("ADDER", "sklansky").strip()
+    adder = os.environ.get("ADDER", "").strip() or "sklansky"  # as bash's :-
     return "" if adder == "yosys" else f" -extra-map +/choices/{adder}.v"
 
 
