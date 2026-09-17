@@ -226,9 +226,17 @@
       {
         "name": "LATENCY",
         "type": "unsigned"
+      },
+      {
+        "name": "IMPL",
+        "type": "string"
+      },
+      {
+        "name": "STEP",
+        "type": "unsigned"
       }
     ],
-    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t muli -p bitwidth=$BITWIDTH latency=$LATENCY extra_signals=$EXTRA_SIGNALS"
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t muli -p bitwidth=$BITWIDTH latency=$LATENCY impl='\"$IMPL\"' step=$STEP extra_signals=$EXTRA_SIGNALS"
   },
   {
     "name": "handshake.select",
