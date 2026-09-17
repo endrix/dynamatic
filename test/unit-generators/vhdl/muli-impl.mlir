@@ -3,14 +3,19 @@
 // RUN: FileCheck %s -input-file %t/handshake_muli_1.vhd --check-prefix=PIPE
 
 // The two multipliers. IMPL=sequential adds STEP multiplier bits a cycle
-// on one register set, the product held until taken; IMPL=pipelined is the
-// one-cycle product behind the unit's latency in registers.
+// on one register set -- a carry-save accumulator that no carry crosses,
+// resolved by one add at the end -- the product held until taken;
+// IMPL=pipelined is the one-cycle product behind the unit's latency in
+// registers.
 
 // SEQ: entity handshake_muli_0_join is
 // SEQ: entity handshake_muli_0 is
-// SEQ: signal busy, done : std_logic;
-// SEQ: partial <= a_reg * b_reg(4 - 1 downto 0);
+// SEQ: signal busy, resolving, done : std_logic;
+// SEQ: signal sum_reg, carry_reg : unsigned(32 - 1 downto 0);
+// SEQ: pp3 <= shift_left(a_reg, 3) and ppm3;
+// SEQ: csa{{[0-9]+}}_c{{[0-9]+}} <= shift_left(({{.*}} and {{.*}}) or {{.*}}, 1);
 // SEQ: a_reg <= shift_left(a_reg, 4);
+// SEQ: sum_reg   <= sum_reg + carry_reg;
 // SEQ: result_valid <= done;
 
 // PIPE: entity handshake_muli_1_valid_buffer is
@@ -22,6 +27,6 @@ module {
     %mul1.result = hw.instance "mul1" @handshake_muli_1(lhs: %c: !handshake.channel<i32>, rhs: %d: !handshake.channel<i32>, clk: %clk: i1, rst: %rst: i1) -> (result: !handshake.channel<i32>)
     hw.output %mul0.result, %mul1.result : !handshake.channel<i32>, !handshake.channel<i32>
   }
-  hw.module.extern @handshake_muli_0(in %lhs : !handshake.channel<i32>, in %rhs : !handshake.channel<i32>, in %clk : i1, in %rst : i1, out result : !handshake.channel<i32>) attributes {hw.name = "handshake.muli", hw.parameters = {DATA_TYPE = !handshake.channel<i32>, IMPL = "sequential", LATENCY = 9 : ui32, STEP = 4 : ui32}}
+  hw.module.extern @handshake_muli_0(in %lhs : !handshake.channel<i32>, in %rhs : !handshake.channel<i32>, in %clk : i1, in %rst : i1, out result : !handshake.channel<i32>) attributes {hw.name = "handshake.muli", hw.parameters = {DATA_TYPE = !handshake.channel<i32>, IMPL = "sequential", LATENCY = 10 : ui32, STEP = 4 : ui32}}
   hw.module.extern @handshake_muli_1(in %lhs : !handshake.channel<i32>, in %rhs : !handshake.channel<i32>, in %clk : i1, in %rst : i1, out result : !handshake.channel<i32>) attributes {hw.name = "handshake.muli", hw.parameters = {DATA_TYPE = !handshake.channel<i32>, IMPL = "pipelined", LATENCY = 4 : ui32, STEP = 1 : ui32}}
 }

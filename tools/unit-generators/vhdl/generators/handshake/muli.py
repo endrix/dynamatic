@@ -59,15 +59,55 @@ def _generate_muli_pipelined(name, params):
     )
 
 
+def _csa_rows_to_two(rows):
+    """One Wallace reduction: 3:2 compressors take three rows to two, the
+    odd rows fall through, until two are left. Every row is a word modulo
+    2^BITWIDTH, so the carry row is the majority shifted left one place and
+    what leaves the top is dropped. Returns the signal names it declares,
+    the concurrent assignments, the last two rows and the number of levels
+    -- the depth of full adders one cycle carries."""
+
+    declared = []
+    assignments = []
+    level = 0
+    cur = list(rows)
+    while len(cur) > 2:
+        nxt = []
+        i = 0
+        idx = 0
+        while len(cur) - i >= 3:
+            x, y, z = cur[i], cur[i + 1], cur[i + 2]
+            s = f"csa{level}_s{idx}"
+            c = f"csa{level}_c{idx}"
+            declared += [s, c]
+            assignments.append(f"  {s} <= {x} xor {y} xor {z};")
+            assignments.append(
+                f"  {c} <= shift_left(({x} and {y}) or ({x} and {z}) or "
+                f"({y} and {z}), 1);")
+            nxt += [s, c]
+            i += 3
+            idx += 1
+        nxt += cur[i:]
+        cur = nxt
+        level += 1
+    return declared, assignments, cur, level
+
+
 def _generate_muli_sequential(name, params):
-    """One multiply at a time, STEP multiplier bits a cycle: each cycle adds
-    the multiplicand times the next STEP bits of the multiplier, shifted, to
-    the accumulator, all modulo 2^BITWIDTH -- the low BITWIDTH bits of the
-    product, which are what the unit returns whatever the operands' sign
-    (the two's complement of the low bits is the same). The operands are
-    joined and taken when the unit is idle and no product is waiting; the
-    product is held until taken; ceil(BITWIDTH / STEP) + 1 cycles a
-    multiply. STEP multiplier bits a cycle cost STEP rows of adders."""
+    """One multiply at a time, STEP multiplier bits a cycle, on a carry-save
+    accumulator: the accumulator is a redundant (sum, carry) pair, and each
+    cycle reduces the STEP partial-product rows -- the multiplicand times
+    one multiplier bit, shifted -- together with those two rows back to two
+    through a tree of 3:2 compressors. No carry crosses the word while the
+    multiply runs: a cycle is a few full adders deep whatever the width.
+    One carry-propagate add at the end resolves the pair into the result,
+    and that cycle is the only one that carries a carry. Everything is
+    modulo 2^BITWIDTH -- the low BITWIDTH bits of the product, which are
+    what the unit returns whatever the operands' sign (the two's complement
+    of the low bits is the same). The operands are joined and taken when
+    the unit is idle and no product is waiting; the product is held until
+    taken; ceil(BITWIDTH / STEP) + 2 cycles a multiply, the extra one the
+    resolving add."""
 
     bitwidth = params["bitwidth"]
     step = int(params.get("step", 1))
@@ -79,6 +119,22 @@ def _generate_muli_sequential(name, params):
     iterations = -(-bitwidth // step)
     padded = iterations * step
 
+    # the rows a cycle reduces: the accumulator's two and one per multiplier
+    # bit of the step
+    rows = ["sum_reg", "carry_reg"] + [f"pp{i}" for i in range(step)]
+    csa_signals, csa_body, (sum_next, carry_next), levels = _csa_rows_to_two(rows)
+
+    pp_decl = "".join(
+        f"  signal pp{i}, ppm{i} : unsigned({bitwidth} - 1 downto 0);\n"
+        for i in range(step))
+    pp_body = "".join(
+        f"  ppm{i} <= (others => b_reg({i}));\n"
+        f"  pp{i} <= {'a_reg' if i == 0 else f'shift_left(a_reg, {i})'} and ppm{i};\n"
+        for i in range(step))
+    csa_decl = "".join(
+        f"  signal {s} : unsigned({bitwidth} - 1 downto 0);\n"
+        for s in csa_signals)
+
     join_name = f"{name}_join"
     dependencies = generate_join(join_name, {"size": 2})
 
@@ -87,7 +143,7 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
--- Entity of muli (sequential, {step} bits a cycle)
+-- Entity of muli (sequential carry-save, {step} bits a cycle)
 entity {name} is
   port(
     clk: in std_logic;
@@ -109,19 +165,19 @@ end entity;
 """
 
     architecture = f"""
--- Architecture of muli (sequential, {step} bits a cycle)
+-- Architecture of muli (sequential carry-save, {step} bits a cycle,
+-- {levels} levels of 3:2 compressors a cycle)
 architecture arch of {name} is
   signal join_valid, accept, idle : std_logic;
-  signal busy, done : std_logic;
+  signal busy, resolving, done : std_logic;
   signal count : unsigned({iterations.bit_length()} - 1 downto 0);
   signal a_reg : unsigned({bitwidth} - 1 downto 0);
   signal b_reg : unsigned({padded} - 1 downto 0);
-  signal acc : unsigned({bitwidth} - 1 downto 0);
-  signal partial : unsigned({bitwidth} + {step} - 1 downto 0);
-begin
+  signal sum_reg, carry_reg : unsigned({bitwidth} - 1 downto 0);
+{pp_decl}{csa_decl}begin
   -- the operands are taken together, when nothing is running and no
   -- product is waiting (or it goes this cycle)
-  idle <= (not busy) and ((not done) or result_ready);
+  idle <= (not busy) and (not resolving) and ((not done) or result_ready);
   join_inputs : entity work.{join_name}(arch)
     port map(
       ins_valid(0) => lhs_valid,
@@ -133,41 +189,53 @@ begin
     );
   accept <= join_valid and idle;
 
-  -- the multiplicand, already shifted, times the next {step} multiplier bits
-  partial <= a_reg * b_reg({step} - 1 downto 0);
+  -- the multiplicand, already shifted, times each of the next {step}
+  -- multiplier bits: one row a bit
+{pp_body}
+  -- those rows and the accumulator's two, reduced back to two by 3:2
+  -- compressors -- a sum row and a carry row, the carry shifted one place
+{chr(10).join(csa_body)}
 
   process (clk) is
   begin
     if rising_edge(clk) then
       if rst = '1' then
-        busy  <= '0';
-        done  <= '0';
-        count <= (others => '0');
+        busy      <= '0';
+        resolving <= '0';
+        done      <= '0';
+        count     <= (others => '0');
       else
         if done = '1' and result_ready = '1' then
           done <= '0';
         end if;
         if accept = '1' then
-          a_reg <= unsigned(lhs);
-          b_reg <= resize(unsigned(rhs), {padded});
-          acc   <= (others => '0');
-          count <= (others => '0');
-          busy  <= '1';
+          a_reg     <= unsigned(lhs);
+          b_reg     <= resize(unsigned(rhs), {padded});
+          sum_reg   <= (others => '0');
+          carry_reg <= (others => '0');
+          count     <= (others => '0');
+          busy      <= '1';
         elsif busy = '1' then
-          acc   <= acc + partial({bitwidth} - 1 downto 0);
-          a_reg <= shift_left(a_reg, {step});
-          b_reg <= shift_right(b_reg, {step});
+          sum_reg   <= {sum_next};
+          carry_reg <= {carry_next};
+          a_reg     <= shift_left(a_reg, {step});
+          b_reg     <= shift_right(b_reg, {step});
           if count = {iterations} - 1 then
-            busy <= '0';
-            done <= '1';
+            busy      <= '0';
+            resolving <= '1';
           end if;
           count <= count + 1;
+        elsif resolving = '1' then
+          -- the one carry-propagate add: the pair resolved in place
+          sum_reg   <= sum_reg + carry_reg;
+          resolving <= '0';
+          done      <= '1';
         end if;
       end if;
     end if;
   end process;
 
-  result       <= std_logic_vector(acc);
+  result       <= std_logic_vector(sum_reg);
   result_valid <= done;
 end architecture;
 """
