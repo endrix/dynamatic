@@ -958,6 +958,25 @@ void BufferPlacementMILP::addUnitThroughputConstraints(CFDFC &cfdfc) {
     // (debug mode only)
     unitVars.validate();
 
+    // The FPGA'20 formulation models every unit as pipelined: the unit
+    // retiming constraint below ("through_unitRetiming", the paper's
+    // throughput constraint on a unit, Theta * latency = retOut - retIn) is
+    // Little's law, and nothing bounds the tokens it puts inside the unit,
+    // so the MILP is free to believe a unit holds as many as it has cycles
+    // of latency. A unit that runs one operation at a time holds one, and
+    // takes a new set of operands every `interval` cycles; the CFDFC crosses
+    // it once an iteration, so its throughput cannot exceed one token every
+    // `interval` cycles.
+    double interval = timingDB.getInitiationInterval(unit);
+    if (interval > 1.0) {
+      unit->emitRemark() << "buffer placement: " << getUniqueName(unit)
+                         << " takes a token every "
+                         << static_cast<int64_t>(interval)
+                         << " cycles, not every cycle";
+      model->addConstr(cfVars.throughput * interval <= 1.0,
+                       "throughput_unitInterval");
+    }
+
     // For each retiming path through the unit
     for (RetPathVars &retPath : unitVars.retPathVarList) {
       double latency = *retPath.latency;
@@ -1696,7 +1715,26 @@ void BufferPlacementMILP::addCycleTimeConstraints(
     double maxRequiredLatency =
         computeCycleForcedLatencyLowerBound(*maxCycleIt, cfdfcGraph);
 
-    double iiCFC = std::max(1.0, std::ceil(maxRequiredLatency));
+    // The cycles' latency is one lower bound on the CFDFC's II; a unit that
+    // runs one operation at a time is another, wherever it sits in the
+    // CFDFC. The iteration cannot come round faster than the unit takes a
+    // new set of operands, so the II is at least that interval (Paper:
+    // Section 5, Equation 8 reads the II back as the occupancy each channel
+    // needs).
+    double maxUnitInterval = 1.0;
+    for (Operation *unit : cfdfc->units) {
+      double interval = timingDB.getInitiationInterval(unit);
+      if (interval <= 1.0)
+        continue;
+      unit->emitRemark() << "buffer placement: " << getUniqueName(unit)
+                         << " takes a token every "
+                         << static_cast<int64_t>(interval)
+                         << " cycles, not every cycle";
+      maxUnitInterval = std::max(maxUnitInterval, interval);
+    }
+
+    double iiCFC =
+        std::max({1.0, std::ceil(maxRequiredLatency), maxUnitInterval});
     computedII = std::max(computedII, iiCFC);
     iiMap[cfdfc] = iiCFC;
 
