@@ -94,11 +94,15 @@ STA_LOG="$LOG_DIR/$TOP.timing.rpt"
 # a bit on ASAP7: a 64-bit accumulate was 1.9 ns, the Mul body's whole clock.
 # On an FPGA the carry chain is dedicated silicon and the question never
 # comes up; on a cell library the script has to ask for a parallel-prefix
-# adder, and Sklansky is the one that measured best (Mul body 1,930 to
-# 1,434 ps for 3% more cells; Kogge-Stone 1,452 for 10% more; Han-Carlson
-# 1,488). ADDER=sklansky|kogge-stone|han-carlson picks one, ADDER=yosys
-# keeps yosys' own. The characterization (pdk_backend.py) reads the same
-# variable, so the timing models are of the same adders as the reports.
+# adder. Which one wins depends on the design: on the Mul body Sklansky
+# measured best (1,930 to 1,434 ps for 3% more cells; Kogge-Stone 1,452 for
+# 10% more; Han-Carlson 1,488), on a bare 64-bit adder Kogge-Stone does
+# (1,155 against Sklansky's 1,533). ADDER=sklansky|kogge-stone|han-carlson
+# picks one, ADDER=yosys keeps yosys' own. The characterization
+# (pdk_backend.py) reads the same variable, so new timing models are of the
+# same adders as the reports; the checked-in components-*.json were made
+# with yosys' own adder and are stale until re-characterised.
+ADDER="$(echo "${ADDER:-}" | tr -d '[:space:]')"
 ADDER="${ADDER:-sklansky}"
 SYNTH_ADDER=""
 [[ "$ADDER" != "yosys" ]] && SYNTH_ADDER=" -extra-map +/choices/$ADDER.v"
