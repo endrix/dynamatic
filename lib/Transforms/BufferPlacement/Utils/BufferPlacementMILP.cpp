@@ -1720,7 +1720,9 @@ void BufferPlacementMILP::addCycleTimeConstraints(
     // CFDFC. The iteration cannot come round faster than the unit takes a
     // new set of operands, so the II is at least that interval (Paper:
     // Section 5, Equation 8 reads the II back as the occupancy each channel
-    // needs).
+    // needs). The equality below then holds every cycle of the CFDFC to
+    // that II, so a cycle the unit is not on is padded to it as well (a
+    // counter buffer's latency on its back edge).
     double maxUnitInterval = 1.0;
     for (Operation *unit : cfdfc->units) {
       double interval = timingDB.getInitiationInterval(unit);
