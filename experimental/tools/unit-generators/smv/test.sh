@@ -119,6 +119,8 @@ test_generator -t divsi --abstract-data -p bitwidth=32 latency=35
 echo -e "\nTesting divui..."
 test_generator -t divui -p bitwidth=32 latency=35
 test_generator -t divui --abstract-data -p bitwidth=32 latency=35
+test_generator -t divui -p bitwidth=32 latency=33 impl='"sequential"'
+test_generator -t divui --abstract-data -p bitwidth=32 latency=33 impl='"sequential"'
 
 echo -e "\nTesting extf..."
 test_generator -t extf --abstract-data -p latency=0
@@ -146,6 +148,8 @@ test_generator -t mulf --abstract-data -p is_double=0 latency=4
 echo -e "\nTesting muli..."
 test_generator -t muli -p bitwidth=32 latency=4
 test_generator -t muli --abstract-data -p bitwidth=32 latency=4
+test_generator -t muli -p bitwidth=32 latency=5 impl='"sequential"'
+test_generator -t muli --abstract-data -p bitwidth=32 latency=5 impl='"sequential"'
 
 echo -e "\nTesting negf..."
 test_generator -t negf --abstract-data -p is_double=0 latency=0
