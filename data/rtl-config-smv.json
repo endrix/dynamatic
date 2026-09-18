@@ -194,7 +194,17 @@
   },
   {
     "name": "handshake.divui",
-    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t divui --abstract-data -p latency=35 bitwidth=$BITWIDTH",
+    "parameters": [
+      {
+        "name": "LATENCY",
+        "type": "unsigned"
+      },
+      {
+        "name": "IMPL",
+        "type": "string"
+      }
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t divui --abstract-data -p latency=$LATENCY impl='\"$IMPL\"' bitwidth=$BITWIDTH",
     "hdl": "smv"
   },
   {
@@ -234,7 +244,17 @@
   },
   {
     "name": "handshake.muli",
-    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t muli --abstract-data -p latency=4 bitwidth=$BITWIDTH",
+    "parameters": [
+      {
+        "name": "LATENCY",
+        "type": "unsigned"
+      },
+      {
+        "name": "IMPL",
+        "type": "string"
+      }
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t muli --abstract-data -p latency=$LATENCY impl='\"$IMPL\"' bitwidth=$BITWIDTH",
     "hdl": "smv"
   },
   {

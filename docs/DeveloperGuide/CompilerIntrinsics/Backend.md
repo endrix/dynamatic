@@ -241,6 +241,65 @@ However, systems like speculation and taint tracking means that even simple unit
 
 While pivoting from the Hardware IR is not possible in the immediate future, the goal is to remove both sets of if statements, and the JSON file, relatively soon. Instead interfaces will be used such that each Handshake operation has its own code to build its (correctly serialized) `HWModuleExternOp` dictionary.
 
+## The sequential divider and multiplier in the three configurations
+
+`handshake.muli` and `handshake.divui` have two implementations. The
+pipelined one takes a pair of operands every cycle: the Vitis long division,
+one stage a quotient bit, and the product in one cycle behind the unit's
+latency in registers. The sequential one runs a single operation at a time on
+one register set: the divider a quotient bit a cycle, the multiplier `STEP`
+multiplier bits a cycle. On an FPGA the pipelined units are what the tool
+retimes; on a cell library nothing retimes them, and the sequential units are
+a fraction of the cells.
+
+Which one an op gets is the op's own. `HandshakeToHW` writes `IMPL`
+(`pipelined` or `sequential`) and, for the multiplier, `STEP` into the
+`hw.parameters` of the `HWModuleExternOp`, from the `hw.parameters` the
+frontend put on the op, and `LATENCY` comes from the op's latency attribute.
+The three RTL configurations then read the same three parameters, each in the
+way its own units are written.
+
+- `rtl-config-vhdl.json` has one entry per op. The generator is given
+  `impl` and `step`, and `tools/unit-generators/vhdl/generators/handshake/`
+  dispatches on `impl` and writes the entity.
+- `rtl-config-verilog.json` has no generator tree: its units are
+  parameterized files. So it has two entries per op. The first names
+  `data/verilog/arith/muli_sequential.v` or `divui_sequential.v` and matches
+  only when `IMPL` is `sequential`, with `DATA_TYPE` and `STEP` as module
+  parameters; the second is the pipelined entry, which carries no `IMPL`
+  constraint and stays the fallback. A match is the first component whose
+  parameters are all satisfied, so the order of the two entries is what makes
+  the sequential one win.
+- `rtl-config-smv.json` passes `latency=$LATENCY` and `impl` to the SMV
+  generator. Both were fixed before: the model of a divider carried 35 cycles
+  and a multiplier 4, whatever the op said. The sequential model is not the
+  pipelined one with another latency: the pipelined model is a join and a
+  delay buffer, which accepts a pair every cycle, where a sequential unit
+  accepts a pair every `LATENCY` cycles and holds its result until it is
+  taken.
+
+The Verilog and the VHDL units are the same circuit, the Verilog one written
+from the VHDL generator's output. Both were run against the same operand
+streams under the same handshake testbench (exhaustive at 8 bits, 20,000
+pairs at 32 and 64 with the edges, operands offered in different cycles and
+the result channel's ready driven by an LFSR) and produce the same results
+on the same cycles.
+
+A whole `esa` design still does not export as Verilog, and the arithmetic is
+not what stops it. On the picorv32 Core five kinds of unit find no component:
+`handshake.blocker`, `handshake.init` and `handshake.queue`, which the
+Verilog configuration does not name at all, and `handshake.bundle` and
+`handshake.unbundle` when they carry an extra signal, which its entries
+refuse. Every `muli` and `divui` of that design matches.
+
+The Verilog configuration keeps the pipelined entry as the fallback, so an
+op whose `IMPL` is neither `pipelined` nor `sequential` gets the pipelined
+unit without a word, where the VHDL and SMV generators refuse the name.
+`rtl-config-verilog-beta.json` is not covered: it is opt-in
+(`--hdl verilog-beta`), its multiplier generator is fixed at a latency of 4
+and knows no `IMPL`, and it has no divider generator, so a sequential op
+through it gets the pipelined multiplier.
+
 ## The Beta Backend
 
 The majority of the Beta Backend is very simple: it prints RTL code which is only lightly parameterized.
