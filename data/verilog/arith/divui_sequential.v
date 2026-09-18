@@ -59,7 +59,13 @@ module divui_sequential #(
   assign accept = join_valid & idle;
 
   // one restoring step: the Vitis IP's, on registers instead of stages
-  assign comb = {remd[DATA_TYPE - 2 : 0], dividend[DATA_TYPE - 1]};
+  // the remainder shifted left one place with the dividend's top bit shifted
+  // in: the low DATA_TYPE bits of the pair, written so that DATA_TYPE = 1
+  // (a null remainder range) elaborates too
+  wire [DATA_TYPE : 0] shifted = {remd, dividend[DATA_TYPE - 1]};
+  assign comb = shifted[DATA_TYPE - 1 : 0];
+  // the dividend register shifted left one place with the quotient bit in
+  wire [DATA_TYPE : 0] quotient_shift = {dividend, ~cal[DATA_TYPE]};
   assign cal  = {1'b0, comb} - {1'b0, divisor};
 
   always @(posedge clk) begin
@@ -79,7 +85,7 @@ module divui_sequential #(
       end else if (busy) begin
         // the quotient bit shifts in from the right; after DATA_TYPE steps
         // the dividend register holds the quotient
-        dividend <= {dividend[DATA_TYPE - 2 : 0], ~cal[DATA_TYPE]};
+        dividend <= quotient_shift[DATA_TYPE - 1 : 0];
         if (cal[DATA_TYPE])
           remd <= comb;
         else

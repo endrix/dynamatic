@@ -11,6 +11,9 @@
 // (tools/unit-generators/vhdl/generators/handshake/muli.py).
 module muli_sequential #(
   parameter DATA_TYPE = 32,
+  // a STEP above DATA_TYPE is one iteration with a STEP-wide partial
+  // product, wider than asked; the VHDL generator refuses it, this file
+  // takes it
   parameter STEP = 1
 )(
   // inputs
