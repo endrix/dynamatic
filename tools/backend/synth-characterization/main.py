@@ -5,7 +5,7 @@ import os
 from report_parser import extract_rpt_data
 from hdl_manager import get_hdl_files
 from pdk_backend import is_pdk
-from utils import VhdlInterfaceInfo, parameters_ranges, skipping_units, skipping_units_vivado
+from utils import VhdlInterfaceInfo, parameters_ranges, skipping_units, skipping_units_vivado, impl_variants
 from unit_characterization import run_unit_characterization
 
 
@@ -129,7 +129,10 @@ def run_characterization(json_input, json_output, dynamatic_dir, synth_tool, clo
 
     map_unit_to_list_unit_chars = {}
 
-    for unit_info in dataflow_units:
+    # The units the config lists, then the implementations it selects with a
+    # parameter rather than with a file of its own (utils.impl_variants: the
+    # sequential divider and multiplier, each under its own model key).
+    for unit_info in list(dataflow_units) + impl_variants:
         # Extract the unit name and its RTL information
         unit_name, list_params, generic, generator, dependencies, module_name = extract_rtl_info(unit_info)
         if unit_name == None:
@@ -150,14 +153,38 @@ def run_characterization(json_input, json_output, dynamatic_dir, synth_tool, clo
                     break
             if skip_unit:
                 continue
-        # Clean previous RTL files and tcl files
-        os.system(f"rm -rf {hdl_dir}/*")
-        os.system(f"rm -rf {tcl_dir}/*")
-        # Copy the RTL files or generate them if necessary
         print(f"Processing unit: {unit_name}")
-        top_def_file = get_hdl_files(unit_name, generic, generator, dependencies, hdl_dir, dynamatic_dir, all_dependencies_dict)
-        # After generating the HDL files, we can proceed with characterization
-        list_unit_chars = run_unit_characterization(unit_name, list_params, hdl_dir, synth_tool, top_def_file, tcl_dir, rpt_dir, log_dir, clock_period, module_name)
+        # A unit whose generator bakes its width into the RTL is generated and
+        # characterized once per width ($BITWIDTH in its command); a unit with
+        # a DATA_TYPE generic is generated once and the width swept in the
+        # wrapper.
+        bitwidths = unit_info.get("bitwidths")
+        latency_of = unit_info.get("latency")
+        if bitwidths:
+            list_unit_chars = []
+            for bitwidth in bitwidths:
+                # Clean previous RTL files and tcl files
+                os.system(f"rm -rf {hdl_dir}/*")
+                os.system(f"rm -rf {tcl_dir}/*")
+                top_def_file = get_hdl_files(
+                    unit_name, generic,
+                    generator.replace("$BITWIDTH", str(bitwidth)),
+                    dependencies, hdl_dir, dynamatic_dir,
+                    all_dependencies_dict, module_name)
+                list_unit_chars.extend(run_unit_characterization(
+                    unit_name, list_params, hdl_dir, synth_tool, top_def_file,
+                    tcl_dir, rpt_dir, log_dir, clock_period, module_name,
+                    baked_params={"DATA_TYPE": bitwidth},
+                    id_offset=len(list_unit_chars),
+                    latency_cycles=latency_of(bitwidth) if latency_of else None))
+        else:
+            # Clean previous RTL files and tcl files
+            os.system(f"rm -rf {hdl_dir}/*")
+            os.system(f"rm -rf {tcl_dir}/*")
+            # Copy the RTL files or generate them if necessary
+            top_def_file = get_hdl_files(unit_name, generic, generator, dependencies, hdl_dir, dynamatic_dir, all_dependencies_dict, module_name)
+            # After generating the HDL files, we can proceed with characterization
+            list_unit_chars = run_unit_characterization(unit_name, list_params, hdl_dir, synth_tool, top_def_file, tcl_dir, rpt_dir, log_dir, clock_period, module_name)
         # Store the results in the map_unit_to_list_unit_chars dictionary.
         # A unit name can name several implementations -- six of them are
         # `handshake.buffer`, and the model has one entry per name -- so the

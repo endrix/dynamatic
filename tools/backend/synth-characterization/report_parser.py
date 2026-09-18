@@ -148,6 +148,13 @@ def extract_rpt_data(map_unit_to_list_unit_chars, json_output,
     # beside the model (see write_stages), not into it: the placer cannot
     # pipeline a unit, so its model has no field for this.
     stages = {}
+    # The latency table of a unit the reference model does not list and whose
+    # latency the caller knows (the sequential divider and multiplier, whose
+    # latency is a formula of the width and the step): unit -> bitwidth ->
+    # cycles. The model writes the latency under the unit's internal
+    # combinational delay, which for these units is the delay of one
+    # iteration, so the two are assembled together below.
+    measured_latency = {}
     for unit_name, list_unit_chars in map_unit_to_list_unit_chars.items():
         dataDict = {}
         validDict = {"1": 0.0}
@@ -165,6 +172,9 @@ def extract_rpt_data(map_unit_to_list_unit_chars, json_output,
                 bitwidth = str(unit_char.get_parameter_value("DATA_TYPE"))
                 stage = extract_single_rpt(stage_rpt, synth_tool)
                 stages.setdefault(unit_name, {})[bitwidth] = max(stages.get(unit_name, {}).get(bitwidth, 0.0), stage)
+                cycles = getattr(unit_char, "latency_cycles", None)
+                if cycles is not None:
+                    measured_latency.setdefault(unit_name, {})[bitwidth] = cycles
             for delay_type, rpt_filename in unit_char.get_signals_type_to_rpt().items():
                 # Check if the report file exists
                 if not os.path.exists(rpt_filename):
@@ -210,8 +220,17 @@ def extract_rpt_data(map_unit_to_list_unit_chars, json_output,
             print("\033[91m" + f"[ERROR] No reports found for unit {unit_name}." + "\033[0m")
             continue
 
-        output_data[unit_name] = {"latency": latencies.get(unit_name,
-                                                           DEFAULT_LATENCY),
+        # The latency table: the reference model's, or -- for a unit it does
+        # not list and whose latency the caller gave -- the measured
+        # iteration delay and the cycles that many iterations take.
+        if unit_name in measured_latency:
+            latency_table = {"0": {
+                bitwidth: {f"{stages[unit_name][bitwidth]:.6f}": cycles}
+                for bitwidth, cycles in measured_latency[unit_name].items()}}
+        else:
+            latency_table = latencies.get(unit_name, DEFAULT_LATENCY)
+
+        output_data[unit_name] = {"latency": latency_table,
                                   "delay": {"data": dataDict,
                                             "valid": validDict,
                                             "ready": readyDict,

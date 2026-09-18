@@ -118,6 +118,11 @@ python3 main.py --synth-tool asap7 \
   --clock-period 1.0
 ```
 
+Some generator entries run through `$DYNAMATIC/bin/generators/`, symlinks
+that `build.sh` makes and a checkout configured by hand with cmake does not
+have; make them as `build.sh` does (its `create_symlink` calls) before
+characterizing such a checkout.
+
 `--synth-tool asap7` swaps the Vivado backend for one that, per unit and per
 bitwidth, maps the generated top with yosys (VHDL read through the GHDL plugin)
 and then asks OpenSTA for the largest combinational delay between each
@@ -259,6 +264,102 @@ against `components-asap7.json` and reports the MILP infeasible at 0.5 ns,
 where against `components.json` it is already infeasible at 1.0 ns and needs
 2.0 ns.
 
+### The units keyed by implementation
+
+A unit whose implementation is chosen before buffer placement gets an entry of
+its own, keyed by the operation's name and the implementation, the way the
+floating-point units are (`handshake.addf.flopoco`, `handshake.cmpf.vivado`).
+Two units are keyed this way today, the ones the backend generates on a
+parameter (`data/rtl-config-vhdl.json`, `IMPL` and `STEP` in an operation's
+`hw.parameters`):
+
+| key | what it is |
+| --- | --- |
+| `handshake.divui` | the pipelined Vitis long division, a stage a quotient bit |
+| `handshake.divui.sequential` | one division at a time, a quotient bit a cycle on one register set |
+| `handshake.muli` | the whole product in one cycle behind delay registers |
+| `handshake.muli.sequential.<STEP>` | one multiply at a time, `STEP` multiplier bits a cycle |
+
+The step is in the key and not in the entry because an entry nests by
+retiming path, bitwidth and clock period, and an implementation is none of
+those; `STEP` rows of adders a cycle are a different unit, not a different
+width of one. `TimingDatabase::getModel` reads the operation's `hw.parameters`
+and looks for `<name>.<IMPL>.<STEP>`, then `<name>.<IMPL>`, then `<name>`, and
+says once per key when it has to fall back:
+
+```
+remark: TimingDatabase::getModel: no timing model for
+"handshake.muli.sequential.2"; the entry for "handshake.muli" is used instead
+```
+
+The characterization writes these entries itself. The input RTL config lists
+the pipelined units under `handshake.divui` and `handshake.muli`, so the
+sequential ones are characterized as units of their own, from
+`tools/backend/synth-characterization/utils.py`'s `impl_variants`: an RTL
+entry each, with the model key as its name, the VHDL entity as its
+`module-name`, and a `bitwidths` list saying that the generator bakes the
+width into the RTL (`$BITWIDTH` in the generator command) and is therefore
+run once per width, where a unit with a `DATA_TYPE` generic is generated once
+and the width swept in the wrapper. `latency` is the unit's latency in cycles
+at a width, the generator's own formula (`BITWIDTH + 1` for the divider,
+`ceil(BITWIDTH / STEP) + 1` for the multiplier); the reference model cannot
+supply it, since it does not list these units. The divider is characterized
+at every width the model holds and the multiplier at steps 4 and 8, from the
+step upwards. A step the model does not hold is timed by the nearest larger
+one it does: `esa-unit-impl` clamps the step to the width, so a 5-bit
+multiplier under step 8 asks for `handshake.muli.sequential.5` and is timed
+by the step-8 entry, the same unit at that width; a step above every
+characterized one falls to the base entry, with a remark. An op that names
+`pipelined` is timed by the base entry with no remark.
+
+An entry of theirs says what a sequential unit is. Its data and valid paths
+are registered, so they are 0.0 like a pipelined unit's; its ready path is
+short, because the operands are taken through a join gated by one idle
+signal. The latency table carries the measured delay of one iteration -- the
+floor the unit puts under the clock -- against the cycles that many
+iterations take, which is what `getInternalCombinationalDelay` and
+`getLatency` read.
+
+One iteration, measured (`components-asap7.stages.json` at 1.0 ns and
+`components-sky130.stages.json` at 10.0 ns, in nanoseconds), beside the
+pipelined multiplier's own stage:
+
+| unit | 8 | 16 | 32 | 64 |
+| --- | --- | --- | --- | --- |
+| ASAP7 `divui.sequential` | 0.342 | 0.494 | 0.870 | 1.526 |
+| ASAP7 `muli.sequential.4` | 0.468 | 0.670 | 1.049 | 1.634 |
+| ASAP7 `muli.sequential.8` | 0.431 | 0.672 | 1.041 | 1.166 |
+| ASAP7 `muli` (pipelined) | 0.438 | 0.704 | 1.062 | 1.699 |
+| sky130 `divui.sequential` | 2.139 | 3.747 | 6.323 | 9.030 |
+| sky130 `muli.sequential.4` | 2.802 | 4.117 | 6.111 | 10.557 |
+| sky130 `muli.sequential.8` | 2.852 | 5.222 | 7.263 | 9.762 |
+| sky130 `muli` (pipelined) | 2.732 | 4.648 | 7.308 | 10.199 |
+
+The divider is also characterized at 1, 2 and 4 bits (ASAP7: 0.168, 0.230,
+0.251). Read the multiplier rows with the accumulator in mind: the step is a
+partial product and a full-width add, and at 32 bits the add is most of it,
+which is why the step at 4 and the step at 8 are within 2% of each other
+there and of the whole product. The step separates from the product at 64
+bits, where the sequential unit at step 8 is 1.166 ns against the pipelined
+unit's 1.699.
+
+The ready path is where the two implementations differ port to port. On
+ASAP7 the sequential multiplier's is 0.048 ns and the pipelined one's
+0.180 ns; on sky130 they are 0.389 ns (step 8; 0.407 at step 4) and
+6.854 ns. `handshake.divui`'s
+delays are carried from the reference model and are all zero, so the
+sequential divider's 0.051 ns (ASAP7) and 0.407 ns (sky130) are the first
+measured numbers that unit has.
+
+Only the placers that model the ready and valid paths read those numbers
+(`fpl22`, `costaware`). `fpga20` models the data path alone, and for a unit
+with a latency reads only the port-to-register delays, zero in every entry;
+and a sequential unit's latency comes from the op's `latency` attribute
+before the model's table (`esa-unit-impl` writes it). So on the esa flow an
+`fpga20` placement is the same with these entries and without them; the
+latency table is read only for an op that names the implementation and
+carries no `latency`.
+
 ### What the model does not contain
 
 The characterization script skips some units (`utils.py`'s `skipping_units`:
@@ -296,7 +397,11 @@ worth re-measuring.
 Latency is not measured here. `main.py` copies each unit's latency table from
 `--reference-json` (by default `data/components.json`), since a unit's pipeline
 depth is a property of its RTL and not of what it is mapped onto; units the
-reference does not list get a combinational, zero-latency table. `inport` and
+reference does not list get a combinational, zero-latency table. The
+exception is a unit the reference cannot list because the config does not
+name it, the sequential divider and multiplier above: their latency is a
+formula of the width and the step, and it is written against the measured
+delay of one iteration. `inport` and
 `outport` are zero, as they are in `components.json`, and the placer does not
 read them.
 

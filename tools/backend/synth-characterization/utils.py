@@ -51,6 +51,63 @@ skipping_units_vivado = [
     "handshake.divui",
 ]
 
+# The implementations an RTL config selects with a parameter rather than with
+# a file of its own, and which the timing model keys by name the way it keys
+# the floating-point units (`handshake.addf.flopoco`): the sequential divider
+# and the sequential multiplier
+# (tools/unit-generators/vhdl/generators/handshake/{divui,muli}.py, chosen by
+# `IMPL` and, for the multiplier, `STEP` multiplier bits a cycle). The units
+# the input config lists under `handshake.divui` and `handshake.muli` are the
+# pipelined ones, so a sequential unit is characterized as a unit of its own
+# and written under its own key.
+#
+# Each entry is an RTL entry as the input config writes them, with three
+# additions: `name` is the model key, `module-name` the VHDL entity, and
+# `bitwidths` says the generator bakes the width into the RTL ($BITWIDTH in
+# the command), so it is run once per width instead of the width being swept
+# through a generic. `latency` is the unit's latency in cycles at a width,
+# which the reference model cannot supply for a unit it does not list; the
+# formula is the generator's.
+VHDL_UNIT_GENERATOR = (
+    "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py"
+    " -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd")
+
+impl_variants = [
+    {
+        # A quotient bit a cycle over one register set, at every width the
+        # model holds.
+        "name": "handshake.divui.sequential",
+        "module-name": "divui_sequential",
+        "generator": (f"{VHDL_UNIT_GENERATOR} -t divui"
+                      " -p bitwidth=$BITWIDTH latency=0 impl='\"sequential\"'"),
+        "bitwidths": [1, 2, 4, 8, 16, 32, 64],
+        "latency": lambda width: width + 1,
+    },
+    {
+        # Four multiplier bits a cycle, so four rows of adders in the step.
+        # A width below the step is not a unit the generator writes (the pass
+        # that names the implementation clamps the step to the width), so the
+        # sweep starts at the step.
+        "name": "handshake.muli.sequential.4",
+        "module-name": "muli_sequential_4",
+        "generator": (f"{VHDL_UNIT_GENERATOR} -t muli"
+                      " -p bitwidth=$BITWIDTH latency=0 impl='\"sequential\"'"
+                      " step=4"),
+        "bitwidths": [4, 8, 16, 32, 64],
+        "latency": lambda width: -(-width // 4) + 1,
+    },
+    {
+        # Eight multiplier bits a cycle: the step the ledger's runs use.
+        "name": "handshake.muli.sequential.8",
+        "module-name": "muli_sequential_8",
+        "generator": (f"{VHDL_UNIT_GENERATOR} -t muli"
+                      " -p bitwidth=$BITWIDTH latency=0 impl='\"sequential\"'"
+                      " step=8"),
+        "bitwidths": [8, 16, 32, 64],
+        "latency": lambda width: -(-width // 8) + 1,
+    },
+]
+
 # List of parameters and their ranges for characterization
 # This is used to generate the top files for characterization
 parameters_ranges = {

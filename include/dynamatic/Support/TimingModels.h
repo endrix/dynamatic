@@ -22,6 +22,7 @@
 #include "dynamatic/Support/LLVM.h"
 #include "dynamatic/Support/Utils/Utils.h"
 #include "llvm/ADT/StringMap.h"
+#include "llvm/ADT/StringSet.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/JSON.h"
 #include <functional>
@@ -413,6 +414,14 @@ public:
   const TimingModel *getModel(StringRef timingModelKey) const;
 
   /// Returns the timing model corresponding to the operation, if any exists.
+  ///
+  /// An operation whose implementation was chosen before placement is looked
+  /// up under a key that names that implementation: the sequential divider and
+  /// multiplier (`hw.parameters` with `IMPL = "sequential"`, and `STEP`
+  /// multiplier bits a cycle) are `handshake.divui.sequential` and
+  /// `handshake.muli.sequential.<STEP>`, the way the floating-point units are
+  /// `handshake.addf.flopoco`. A variant the model does not hold falls back to
+  /// the entry for the implementation, then to the base entry.
   const TimingModel *getModel(Operation *op) const;
 
   /// Returns the operation's latency for a specific signal type, or failure
@@ -466,6 +475,10 @@ private:
   /// Maps from an operation's timing key to their timing model.
   /// Timing keys are generated based on operation name and implementation
   llvm::StringMap<TimingModel> models;
+
+  /// The implementation keys getModel has already reported as missing, so
+  /// that the remark is emitted once per key and not once per query.
+  mutable llvm::StringSet<> reportedMissingImpls;
 
   /// Maps from an operation's timing key to their timing model.
   /// for operations which require more expressivity
