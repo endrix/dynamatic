@@ -126,15 +126,48 @@ const TimingModel *TimingDatabase::getModel(Operation *op) const {
   // The step is in the key rather than in the entry because the entry's
   // nesting is by retiming path, bitwidth and clock period, and an
   // implementation is not one of those.
-  if (auto params =
-          op->getAttrOfType<DictionaryAttr>("hw.parameters")) {
-    if (auto impl = dyn_cast_or_null<StringAttr>(params.get("IMPL"))) {
+  if (auto params = op->getAttrOfType<DictionaryAttr>("hw.parameters")) {
+    auto impl = dyn_cast_or_null<StringAttr>(params.get("IMPL"));
+    // The base entry is the pipelined implementation, the one Dynamatic
+    // ships; an op that names it is timed by it with nothing to say.
+    if (impl && impl.getValue() != "pipelined") {
       std::string implKey = (baseName + "." + impl.getValue()).str();
       std::string variantKey = implKey;
-      if (auto step = dyn_cast_or_null<IntegerAttr>(params.get("STEP")))
-        variantKey += "." + std::to_string(step.getValue().getZExtValue());
+      std::optional<uint64_t> step;
+      if (auto stepAttr = dyn_cast_or_null<IntegerAttr>(params.get("STEP"))) {
+        step = stepAttr.getValue().getZExtValue();
+        variantKey += "." + std::to_string(*step);
+      }
       if (const TimingModel *model = getModel(StringRef(variantKey)))
         return model;
+      // A step the model does not hold: the nearest larger one it holds. A
+      // multiplier's step is clamped to its width, so a narrow op under a
+      // wide step asks for its own width as the step, and the wider step's
+      // unit at that width is the same unit; a step chosen smaller than any
+      // characterised one is timed by the next one up, a bound from above.
+      if (step) {
+        std::string prefix = implKey + ".";
+        std::optional<uint64_t> nearest;
+        for (const auto &entry : models) {
+          StringRef key = entry.getKey();
+          if (!key.starts_with(prefix))
+            continue;
+          uint64_t candidate;
+          if (key.drop_front(prefix.size()).getAsInteger(10, candidate))
+            continue;
+          if (candidate >= *step && (!nearest || candidate < *nearest))
+            nearest = candidate;
+        }
+        if (nearest) {
+          std::string nearestKey = prefix + std::to_string(*nearest);
+          if (reportedMissingImpls.insert(variantKey).second)
+            op->emitRemark()
+                << "TimingDatabase::getModel: no timing model for \""
+                << variantKey << "\"; the entry for \"" << nearestKey
+                << "\", the nearest larger step, is used instead";
+          return getModel(StringRef(nearestKey));
+        }
+      }
       if (const TimingModel *model = getModel(StringRef(implKey)))
         return model;
       // The model does not describe the implementation this operation will be

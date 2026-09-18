@@ -424,7 +424,6 @@ public:
   /// the entry for the implementation, then to the base entry.
   const TimingModel *getModel(Operation *op) const;
 
-
   /// Returns the operation's latency for a specific signal type, or failure
   /// if the timing model cannot supply it (with an op-attached warning).
   /// TODO: Currently the latency is always 0 for valid and ready signals, which

@@ -118,6 +118,11 @@ python3 main.py --synth-tool asap7 \
   --clock-period 1.0
 ```
 
+Some generator entries run through `$DYNAMATIC/bin/generators/`, symlinks
+that `build.sh` makes and a checkout configured by hand with cmake does not
+have; make them as `build.sh` does (its `create_symlink` calls) before
+characterizing such a checkout.
+
 `--synth-tool asap7` swaps the Vivado backend for one that, per unit and per
 bitwidth, maps the generated top with yosys (VHDL read through the GHDL plugin)
 and then asks OpenSTA for the largest combinational delay between each
@@ -300,7 +305,12 @@ at a width, the generator's own formula (`BITWIDTH + 1` for the divider,
 `ceil(BITWIDTH / STEP) + 1` for the multiplier); the reference model cannot
 supply it, since it does not list these units. The divider is characterized
 at every width the model holds and the multiplier at steps 4 and 8, from the
-step upwards.
+step upwards. A step the model does not hold is timed by the nearest larger
+one it does: `esa-unit-impl` clamps the step to the width, so a 5-bit
+multiplier under step 8 asks for `handshake.muli.sequential.5` and is timed
+by the step-8 entry, the same unit at that width; a step above every
+characterized one falls to the base entry, with a remark. An op that names
+`pipelined` is timed by the base entry with no remark.
 
 An entry of theirs says what a sequential unit is. Its data and valid paths
 are registered, so they are 0.0 like a pipelined unit's; its ready path is
@@ -328,22 +338,27 @@ pipelined multiplier's own stage:
 The divider is also characterized at 1, 2 and 4 bits (ASAP7: 0.168, 0.230,
 0.251). Read the multiplier rows with the accumulator in mind: the step is a
 partial product and a full-width add, and at 32 bits the add is most of it,
-which is why the step at 4 and the step at 8 are within 1% of each other
+which is why the step at 4 and the step at 8 are within 2% of each other
 there and of the whole product. The step separates from the product at 64
 bits, where the sequential unit at step 8 is 1.166 ns against the pipelined
 unit's 1.699.
 
 The ready path is where the two implementations differ port to port. On
 ASAP7 the sequential multiplier's is 0.048 ns and the pipelined one's
-0.180 ns; on sky130 they are 0.389 ns and 6.854 ns. `handshake.divui`'s
+0.180 ns; on sky130 they are 0.389 ns (step 8; 0.407 at step 4) and
+6.854 ns. `handshake.divui`'s
 delays are carried from the reference model and are all zero, so the
 sequential divider's 0.051 ns (ASAP7) and 0.407 ns (sky130) are the first
 measured numbers that unit has.
 
 Only the placers that model the ready and valid paths read those numbers
-(`fpl22`, `costaware`); `fpga20` models the data path alone, and a sequential
-unit's data path is cut by its latency, so on an `fpga20` placement these
-entries change the latency the model reports and not the arrival times.
+(`fpl22`, `costaware`). `fpga20` models the data path alone, and for a unit
+with a latency reads only the port-to-register delays, zero in every entry;
+and a sequential unit's latency comes from the op's `latency` attribute
+before the model's table (`esa-unit-impl` writes it). So on the esa flow an
+`fpga20` placement is the same with these entries and without them; the
+latency table is read only for an op that names the implementation and
+carries no `latency`.
 
 ### What the model does not contain
 
