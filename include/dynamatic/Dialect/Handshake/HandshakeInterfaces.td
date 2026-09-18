@@ -372,6 +372,26 @@ def LatencyInterface : OpInterface<"LatencyInterface"> {
   Sets the operation latency.
     }], "void", "setLatency", (ins "int64_t":$latency), [{
       $_op->setAttr("latency", IntegerAttr::get(IntegerType::get($_op->getContext(), 64), latency));
+    }]>,
+
+  InterfaceMethod<[{
+    Gets the operation's initiation interval as an integer, the number of
+    cycles between two operand pairs the unit accepts. A pipelined unit
+    takes one every cycle and carries no interval; a unit that runs one
+    operation at a time over one register set (a sequential divider or
+    multiplier) carries the interval the same way it carries its latency.
+  }], "FailureOr<int64_t>", "getInitiationInterval", (ins), [{
+    Operation *op = $_op.getOperation();
+    auto attr = op->getAttrOfType<IntegerAttr>("initiation_interval");
+    if (!attr)
+      return failure();
+    return attr.getInt();
+  }]>,
+
+  InterfaceMethod<[{
+  Sets the operation's initiation interval.
+    }], "void", "setInitiationInterval", (ins "int64_t":$interval), [{
+      $_op->setAttr("initiation_interval", IntegerAttr::get(IntegerType::get($_op->getContext(), 64), interval));
     }]>
   ];
 }

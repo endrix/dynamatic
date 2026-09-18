@@ -432,6 +432,16 @@ public:
   FailureOr<double> getLatency(Operation *op, SignalType signalType,
                                double targetPeriod, unsigned pathId = 0) const;
 
+  /// Returns the operation's initiation interval in cycles: how often it
+  /// accepts a new set of operands. The model has no entry for it: the
+  /// units it describes accept one every cycle, and a sequential unit's
+  /// entry (keyed by its implementation) carries delays and latency only. A
+  /// unit whose implementation was chosen before placement and runs one
+  /// operation at a time (hw.parameters IMPL = "sequential") carries the
+  /// interval on the op, next to its latency, and that is the number
+  /// returned. Every other operation's interval is 1.
+  double getInitiationInterval(Operation *op) const;
+
   LogicalResult getInternalCombinationalDelay(Operation *op,
                                               SignalType signalType,
                                               double &delay,

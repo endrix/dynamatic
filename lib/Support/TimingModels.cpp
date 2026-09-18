@@ -264,6 +264,19 @@ FailureOr<double> TimingDatabase::getLatency(Operation *op,
   return latency;
 }
 
+double TimingDatabase::getInitiationInterval(Operation *op) const {
+  // The interval is read the same way the latency above is: only from an
+  // operation whose implementation was chosen before placement and runs one
+  // operation at a time. The model's units are pipelined, so a unit that
+  // does not say otherwise accepts an operand set every cycle.
+  if (auto attr = op->getAttrOfType<IntegerAttr>("initiation_interval"))
+    if (auto params = op->getAttrOfType<DictionaryAttr>("hw.parameters"))
+      if (auto impl = dyn_cast_or_null<StringAttr>(params.get("IMPL")))
+        if (impl.getValue() == "sequential" && attr.getInt() >= 1)
+          return static_cast<double>(attr.getInt());
+  return 1.0;
+}
+
 LogicalResult TimingDatabase::getInternalCombinationalDelay(
     Operation *op, SignalType signalType, double &delay,
     double targetPeriod) const // Our current timing model doesn't have latency
