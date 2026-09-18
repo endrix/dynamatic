@@ -297,6 +297,28 @@
         "type": "dataflow",
         "data-lb": 1,
         "extra-eq": 0
+      },
+      {
+        "name": "IMPL",
+        "type": "string",
+        "eq": "sequential",
+        "generic": false
+      }
+    ],
+    "generic": "$DYNAMATIC/data/verilog/arith/divui_sequential.v",
+    "dependencies": [
+      "join_type"
+    ],
+    "hdl": "verilog"
+  },
+  {
+    "name": "handshake.divui",
+    "parameters": [
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
       }
     ],
     "generic": "$DYNAMATIC/data/verilog/arith/divui.v",
@@ -503,6 +525,33 @@
     "parameters": [],
     "generic": "$DYNAMATIC/data/vhdl/arith/vivado/support/mulf_vivado_support.vhd",
     "module-name": "mulf_vivado_support"
+  },
+  {
+    "name": "handshake.muli",
+    "parameters": [
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      },
+      {
+        "name": "IMPL",
+        "type": "string",
+        "eq": "sequential",
+        "generic": false
+      },
+      {
+        "name": "STEP",
+        "type": "unsigned",
+        "lb": 1
+      }
+    ],
+    "generic": "$DYNAMATIC/data/verilog/arith/muli_sequential.v",
+    "dependencies": [
+      "join_type"
+    ],
+    "hdl": "verilog"
   },
   {
     "name": "handshake.muli",
