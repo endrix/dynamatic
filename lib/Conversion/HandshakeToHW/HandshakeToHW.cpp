@@ -594,10 +594,25 @@ ModuleDiscriminator::ModuleDiscriminator(Operation *op) {
         addType("DATA_TYPE", op->getOperand(0));
       })
       .Case<handshake::MuxOp>([&](handshake::MuxOp muxOp) {
-        // Number of input data channels, data bitwidth, and select bitwidth
+        // Number of input data channels, data bitwidth, and select bitwidth;
+        // and whether the unit keeps the slot behind its select (`TEHB`, 1
+        // unless the op's hw.parameters say 0: a consumer that cuts ready
+        // itself, such as the queue an actor's output port pushes into,
+        // needs no second slot).
         addUnsigned("SIZE", muxOp.getDataOperands().size());
         addType("DATA_TYPE", muxOp.getResult());
         addType("SELECT_TYPE", muxOp.getSelectOperand());
+        // `init` copied the op's own hw.parameters already; the value is
+        // re-added in the unsigned encoding the RTL config verifies.
+        unsigned tehb = 1;
+        if (auto paramsAttr = muxOp->getAttrOfType<mlir::DictionaryAttr>(
+                RTL_PARAMETERS_ATTR_NAME))
+          if (auto v =
+                  dyn_cast_or_null<mlir::IntegerAttr>(paramsAttr.get("TEHB")))
+            tehb = v.getValue().getZExtValue();
+        llvm::erase_if(parameters,
+                       [](NamedAttribute a) { return a.getName() == "TEHB"; });
+        addUnsigned("TEHB", tehb);
       })
       .Case<handshake::ControlMergeOp>([&](handshake::ControlMergeOp cmergeOp) {
         // Number of input data channels, data bitwidth, and index

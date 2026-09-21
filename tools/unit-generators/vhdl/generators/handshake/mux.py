@@ -16,18 +16,29 @@ def generate_mux(name, params):
     # e.g., {"tag0": 8, "spec": 1}
     extra_signals = params["extra_signals"]
 
+    # The slot behind the select (a one_slot_break_r, the ready cut and a
+    # register per bit) can be left out (tehb=0) where the consumer cuts
+    # ready itself, as `merge` already allows: an actor's output port, whose
+    # network queue registers its ready. Without it the unit is the select
+    # alone, combinational from its output's ready to its inputs'.
+    tehb = params.get("tehb", 1)
+
     if extra_signals:
+        if not tehb:
+            raise ValueError(
+                "mux: tehb=0 is not written for a channel with extra signals")
         return _generate_mux_signal_manager(name, size, index_bitwidth, data_bitwidth, extra_signals)
     elif data_bitwidth == 0:
-        return _generate_mux_dataless(name, size, index_bitwidth)
+        return _generate_mux_dataless(name, size, index_bitwidth, tehb)
     else:
-        return _generate_mux(name, size, index_bitwidth, data_bitwidth)
+        return _generate_mux(name, size, index_bitwidth, data_bitwidth, tehb)
 
 
-def _generate_mux(name, size, index_bitwidth, data_bitwidth):
+def _generate_mux(name, size, index_bitwidth, data_bitwidth, tehb=1):
     one_slot_break_r_name = f"{name}_one_slot_break_r"
 
-    dependencies = generate_one_slot_break_r(one_slot_break_r_name, {"bitwidth": data_bitwidth})
+    dependencies = generate_one_slot_break_r(
+        one_slot_break_r_name, {"bitwidth": data_bitwidth}) if tehb else ""
 
     entity = f"""
 library ieee;
@@ -57,13 +68,35 @@ entity {name} is
 end entity;
 """
 
+    # Without the slot the select drives the output channel directly and
+    # reads its ready; the process below is written once, against these names.
+    decl = f"""  signal sel_data                       : std_logic_vector({data_bitwidth} - 1 downto 0);
+  signal sel_valid, sel_ready : std_logic;"""
+    tail = f"""
+  one_slot_break_r : entity work.{one_slot_break_r_name}(arch)
+    port map(
+      clk => clk,
+      rst => rst,
+      -- input channel
+      ins       => sel_data,
+      ins_valid => sel_valid,
+      ins_ready => sel_ready,
+      -- output channel
+      outs       => outs,
+      outs_valid => outs_valid,
+      outs_ready => outs_ready
+    );""" if tehb else """
+  -- no slot: the select drives the output channel and reads its ready
+  outs       <= sel_data;
+  outs_valid <= sel_valid;
+  sel_ready  <= outs_ready;"""
+
     architecture = f"""
 -- Architecture of mux
 architecture arch of {name} is
-  signal one_slot_break_r_ins                       : std_logic_vector({data_bitwidth} - 1 downto 0);
-  signal one_slot_break_r_ins_valid, one_slot_break_r_ins_ready : std_logic;
+{decl}
 begin
-  process (ins, ins_valid, outs_ready, index, index_valid, one_slot_break_r_ins_ready)
+  process (ins, ins_valid, outs_ready, index, index_valid, sel_ready)
     variable selectedData                   : std_logic_vector({data_bitwidth} - 1 downto 0);
     variable selectedData_valid, indexEqual : std_logic;
   begin
@@ -80,37 +113,41 @@ begin
         selectedData       := ins(i);
         selectedData_valid := '1';
       end if;
-      ins_ready(i) <= (indexEqual and index_valid and ins_valid(i) and one_slot_break_r_ins_ready) or (not ins_valid(i));
+      ins_ready(i) <= (indexEqual and index_valid and ins_valid(i) and sel_ready) or (not ins_valid(i));
     end loop;
 
-    index_ready    <= (not index_valid) or (selectedData_valid and one_slot_break_r_ins_ready);
-    one_slot_break_r_ins       <= selectedData;
-    one_slot_break_r_ins_valid <= selectedData_valid;
+    index_ready    <= (not index_valid) or (selectedData_valid and sel_ready);
+    sel_data       <= selectedData;
+    sel_valid <= selectedData_valid;
   end process;
-
-  one_slot_break_r : entity work.{one_slot_break_r_name}(arch)
-    port map(
-      clk => clk,
-      rst => rst,
-      -- input channel
-      ins       => one_slot_break_r_ins,
-      ins_valid => one_slot_break_r_ins_valid,
-      ins_ready => one_slot_break_r_ins_ready,
-      -- output channel
-      outs       => outs,
-      outs_valid => outs_valid,
-      outs_ready => outs_ready
-    );
+{tail}
 end architecture;
 """
 
     return dependencies + entity + architecture
 
 
-def _generate_mux_dataless(name, size, index_bitwidth):
+def _generate_mux_dataless(name, size, index_bitwidth, tehb=1):
     one_slot_break_r_name = f"{name}_one_slot_break_r"
 
-    dependencies = generate_one_slot_break_r(one_slot_break_r_name, {"bitwidth": 0})
+    dependencies = generate_one_slot_break_r(
+        one_slot_break_r_name, {"bitwidth": 0}) if tehb else ""
+
+    tail = f"""
+  one_slot_break_r : entity work.{one_slot_break_r_name}(arch)
+    port map(
+      clk => clk,
+      rst => rst,
+      -- input channel
+      ins_valid => sel_valid,
+      ins_ready => sel_ready,
+      -- output channel
+      outs_valid => outs_valid,
+      outs_ready => outs_ready
+    );""" if tehb else """
+  -- no slot: the select drives the output channel and reads its ready
+  outs_valid <= sel_valid;
+  sel_ready  <= outs_ready;"""
 
     entity = f"""
 library ieee;
@@ -140,9 +177,9 @@ end entity;
     architecture = f"""
 -- Architecture of mux_dataless
 architecture arch of {name} is
-  signal one_slot_break_r_ins_valid, one_slot_break_r_ins_ready : std_logic;
+  signal sel_valid, sel_ready : std_logic;
 begin
-  process (ins_valid, outs_ready, index, index_valid, one_slot_break_r_ins_ready)
+  process (ins_valid, outs_ready, index, index_valid, sel_ready)
     variable selectedData_valid, indexEqual : std_logic;
   begin
     selectedData_valid := '0';
@@ -157,24 +194,13 @@ begin
       if indexEqual and index_valid and ins_valid(i) then
         selectedData_valid := '1';
       end if;
-      ins_ready(i) <= (indexEqual and index_valid and ins_valid(i) and one_slot_break_r_ins_ready) or (not ins_valid(i));
+      ins_ready(i) <= (indexEqual and index_valid and ins_valid(i) and sel_ready) or (not ins_valid(i));
     end loop;
 
-    index_ready    <= (not index_valid) or (selectedData_valid and one_slot_break_r_ins_ready);
-    one_slot_break_r_ins_valid <= selectedData_valid;
+    index_ready    <= (not index_valid) or (selectedData_valid and sel_ready);
+    sel_valid <= selectedData_valid;
   end process;
-
-  one_slot_break_r : entity work.{one_slot_break_r_name}(arch)
-    port map(
-      clk => clk,
-      rst => rst,
-      -- input channel
-      ins_valid => one_slot_break_r_ins_valid,
-      ins_ready => one_slot_break_r_ins_ready,
-      -- output channel
-      outs_valid => outs_valid,
-      outs_ready => outs_ready
-    );
+{tail}
 end architecture;
 """
 
