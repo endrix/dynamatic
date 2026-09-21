@@ -1,6 +1,6 @@
 // RUN: %export-vhdl
 // RUN: FileCheck %s -input-file %t/handshake_mux_0.vhd --check-prefix=SLOT
-// RUN: FileCheck %s -input-file %t/handshake_mux_1.vhd --check-prefix=BARE
+// RUN: FileCheck %s -input-file %t/handshake_mux_1.vhd --check-prefix=BARE --implicit-check-not=one_slot_break_r
 
 // The slot behind a mux's select. TEHB=1 is the unit as it was, the select
 // and a one_slot_break_r; TEHB=0 is the select alone under the unit's name,
@@ -10,7 +10,6 @@
 // SLOT: entity handshake_mux_0 is
 // SLOT: one_slot_break_r : entity work.handshake_mux_0_one_slot_break_r
 
-// BARE-NOT: one_slot_break_r :
 // BARE: entity handshake_mux_1 is
 // BARE: outs       <= sel_data;
 // BARE: sel_ready  <= outs_ready;
