@@ -91,6 +91,7 @@
   - [Floating Point Units](DeveloperGuide/Specs/FloatingPointUnits.md)
   - [HW Flattening Pass](DeveloperGuide/Specs/HWFlattening.md)
   - [Timing Characterization](DeveloperGuide/Specs/TimingCharacterization.md)
+  - [The VHDL Unit Library On A Standard-Cell Library](DeveloperGuide/Specs/UnitLibraryOnCellLibraries.md)
 
 - [XLS](DeveloperGuide/Xls/XlsIntegration.md)
   - [Lower Handshake To XLS Pass](DeveloperGuide/Xls/LowerHandshakeToXlsPass.md)
