@@ -295,6 +295,19 @@ refuse. Every `muli` and `divui` of that design matches.
 The Verilog configuration keeps the pipelined entry as the fallback, so an
 op whose `IMPL` is neither `pipelined` nor `sequential` gets the pipelined
 unit without a word, where the VHDL and SMV generators refuse the name.
+
+`divsi`, `remui` and `remsi` are the other side of that. They have a
+sequential implementation in VHDL and none in Verilog or SMV, and a
+cell-library target now asks for it by default, so the fallback would have
+handed back the Vitis unit at the pipelined latency against a compiler that
+had placed the sequential one. Their entries in those two configurations
+are therefore constrained to `IMPL` eq `pipelined`, and an op that asks for
+the sequential unit finds no component at all: `Failed to find matching RTL
+component`, which is the loud form of the same news. Writing the three
+sequential units for those backends is what would replace the refusal with
+a second entry apiece, as `divui` has. The SMV `divsi` entry hardcodes a
+latency of 35, which is the pipelined unit's, and the constraint is what
+makes that honest.
 `rtl-config-verilog-beta.json` is not covered: it is opt-in
 (`--hdl verilog-beta`), its multiplier generator is fixed at a latency of 4
 and knows no `IMPL`, and it has no divider generator, so a sequential op

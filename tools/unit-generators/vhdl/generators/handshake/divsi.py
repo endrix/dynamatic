@@ -1,7 +1,17 @@
 from generators.support.arith_binary import generate_arith_binary
+from generators.support.sequential_divider import generate_sequential_divider
 
 
 def generate_divsi(name, params):
+    impl = params.get("impl", "pipelined")
+    if impl == "sequential":
+        return _generate_divsi_sequential(name, params)
+    if impl != "pipelined":
+        raise ValueError(f"divsi: unknown impl {impl!r} (pipelined or sequential)")
+    return _generate_divsi_pipelined(name, params)
+
+
+def _generate_divsi_pipelined(name, params):
 
     latency = params["latency"]
     # FIXME: The latency of the long division depends on the bitwidth, but it
@@ -41,3 +51,17 @@ def generate_divsi(name, params):
         latency=latency,
         extra_signals=extra_signals
     )
+
+
+def _generate_divsi_sequential(name, params):
+    """The signed quotient of the shared sequential iteration: the
+    magnitudes divided, the quotient negated when the operands' signs
+    differ, so it truncates toward zero. The Vitis signed core's own
+    arrangement, bit for bit including a zero divisor. Latency BITWIDTH +
+    1."""
+
+    if params.get("extra_signals", None):
+        raise ValueError("divsi: the sequential unit carries no extra signals")
+    return generate_sequential_divider(
+        name, "divsi", params["bitwidth"], signed=True,
+        remainder=False)

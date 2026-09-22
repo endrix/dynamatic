@@ -1,7 +1,17 @@
 from generators.support.arith_binary import generate_arith_binary
+from generators.support.sequential_divider import generate_sequential_divider
 
 
 def generate_remui(name, params):
+    impl = params.get("impl", "pipelined")
+    if impl == "sequential":
+        return _generate_remui_sequential(name, params)
+    if impl != "pipelined":
+        raise ValueError(f"remui: unknown impl {impl!r} (pipelined or sequential)")
+    return _generate_remui_pipelined(name, params)
+
+
+def _generate_remui_pipelined(name, params):
 
     latency = params["latency"]
     # FIXME: The latency of the long division depends on the bitwidth, but it
@@ -41,3 +51,16 @@ def generate_remui(name, params):
         latency=latency,
         extra_signals=extra_signals
     )
+
+
+def _generate_remui_sequential(name, params):
+    """The unsigned remainder of the shared sequential iteration: the
+    same BITWIDTH restoring steps a divui runs, the remainder register
+    leaving instead of the quotient one. A zero divisor gives the dividend
+    back, the way the Vitis IP does. Latency BITWIDTH + 1."""
+
+    if params.get("extra_signals", None):
+        raise ValueError("remui: the sequential unit carries no extra signals")
+    return generate_sequential_divider(
+        name, "remui", params["bitwidth"], signed=False,
+        remainder=True)
