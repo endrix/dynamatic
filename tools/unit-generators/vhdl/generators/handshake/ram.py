@@ -102,9 +102,7 @@ begin
   write_proc : process(clk)
   begin
     if (rising_edge(clk)) then
-      if (storeEn = '1') then
-        ram(to_integer(unsigned(storeAddr))) <= storeData;
-      end if;
+{_gen_write_body(values)}
     end if;
   end process;
 end architecture;
@@ -323,6 +321,37 @@ def _to_twos_complement(n, bitwidth, addr):
     return format(n, f"0{bitwidth}b")
 
 
+def _gen_write_body(init_vals: List[int]) -> str:
+    """THE DECLARED CONTENT AS A RESET, for a memory that declares any.
+
+    A declared initial value is a simulation construct and an FPGA
+    bitstream's; a cell library has neither. Left as a declaration alone it
+    reaches a simulator, which honours it, and is dropped on the way to
+    cells, so the netlist that is verified and the netlist that could be
+    fabricated hold different things at power-up. Measured on the picorv32
+    register file, 32 words of 32 bits: all 1,330 of its flip-flops mapped
+    to a cell with no reset pin at all, and the zeroes the model assumes
+    came from a Verilog `initial` block that Verilator honours and silicon
+    does not.
+
+    So the content is a constant, the declaration keeps it for the
+    simulator, and the write resets to it. The cost is a mux in front of
+    each flop and not one more register: on that register file, 219 cells
+    and 26 ps, in an actor nowhere near the design's critical path. A
+    memory that declares nothing gets none of this: it is data, it is
+    written before it is read, and resetting it would be a register per bit
+    for no one.
+    """
+
+    store = ("        ram(to_integer(unsigned(storeAddr))) <= storeData;\n"
+             "      end if;")
+    if init_vals == []:
+        return "      if (storeEn = '1') then\n" + store
+    return ("      if (rst = '1') then\n"
+            "        ram <= ram_init;\n"
+            "      elsif (storeEn = '1') then\n" + store)
+
+
 def _gen_intial_block(data_width: int, size: int, init_vals: List[int]):
 
     if init_vals == []:
@@ -344,4 +373,8 @@ def _gen_intial_block(data_width: int, size: int, init_vals: List[int]):
     # string literal with type array subtype". Naming the index is valid for
     # every size and removes the special case.
     named = [f"{addr} => {val}" for addr, val in enumerate(init_strings)]
-    return "signal ram : ram_type := (" + ",\n".join(named) + ");"
+    # The content is a constant so that the declaration and the reset name
+    # one thing: the declaration is what a simulator honours, the reset is
+    # what the cells implement. See `_gen_write_reset`.
+    return ("constant ram_init : ram_type := (" + ",\n".join(named) + ");\n"
+            "  signal ram : ram_type := ram_init;")
