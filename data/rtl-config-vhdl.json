@@ -129,9 +129,13 @@
       {
         "name": "LATENCY",
         "type": "unsigned"
+      },
+      {
+        "name": "IMPL",
+        "type": "string"
       }
     ],
-    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t divsi -p bitwidth=$BITWIDTH latency=$LATENCY extra_signals=$EXTRA_SIGNALS",
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t divsi -p bitwidth=$BITWIDTH latency=$LATENCY impl='\"$IMPL\"' extra_signals=$EXTRA_SIGNALS",
     "dependencies": [
       "vitis_hls_cores"
     ]
@@ -142,9 +146,13 @@
       {
         "name": "LATENCY",
         "type": "unsigned"
+      },
+      {
+        "name": "IMPL",
+        "type": "string"
       }
     ],
-    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t remsi -p bitwidth=$BITWIDTH latency=$LATENCY extra_signals=$EXTRA_SIGNALS",
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t remsi -p bitwidth=$BITWIDTH latency=$LATENCY impl='\"$IMPL\"' extra_signals=$EXTRA_SIGNALS",
     "dependencies": [
       "vitis_hls_cores"
     ]
@@ -155,9 +163,13 @@
       {
         "name": "LATENCY",
         "type": "unsigned"
+      },
+      {
+        "name": "IMPL",
+        "type": "string"
       }
     ],
-    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t remui -p bitwidth=$BITWIDTH latency=$LATENCY extra_signals=$EXTRA_SIGNALS",
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t remui -p bitwidth=$BITWIDTH latency=$LATENCY impl='\"$IMPL\"' extra_signals=$EXTRA_SIGNALS",
     "dependencies": [
       "vitis_hls_cores"
     ]

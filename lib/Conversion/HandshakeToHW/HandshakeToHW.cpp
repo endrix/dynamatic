@@ -773,14 +773,17 @@ ModuleDiscriminator::ModuleDiscriminator(Operation *op) {
         addString("IMPL", impl);
         addUnsigned("STEP", step);
       })
-      .Case<handshake::DivUIOp>([&](handshake::DivUIOp divOp) {
-        // Bitwidth, and which divider (`IMPL`): the pipelined Vitis IP
-        // unless the op's hw.parameters name the sequential one, a
-        // division at a time on one register set.
+      .Case<handshake::DivUIOp, handshake::DivSIOp, handshake::RemUIOp,
+            handshake::RemSIOp>([&](auto divOp) {
+        // Bitwidth, and which unit (`IMPL`): the pipelined Vitis IP unless
+        // the op's hw.parameters name the sequential one, one division at a
+        // time on one register set. The four integer division units are the
+        // same iteration and take the same parameter.
         addType("DATA_TYPE", op->getOperand(0));
         std::string impl = "pipelined";
-        if (auto paramsAttr = divOp->getAttrOfType<mlir::DictionaryAttr>(
-                RTL_PARAMETERS_ATTR_NAME))
+        if (auto paramsAttr =
+                divOp->template getAttrOfType<mlir::DictionaryAttr>(
+                    RTL_PARAMETERS_ATTR_NAME))
           if (auto v = dyn_cast_or_null<mlir::StringAttr>(paramsAttr.get("IMPL")))
             impl = v.getValue().str();
         llvm::erase_if(parameters,
@@ -793,9 +796,6 @@ ModuleDiscriminator::ModuleDiscriminator(Operation *op) {
           handshake::AddIOp,
           handshake::AndIOp,
           handshake::DivFOp,
-          handshake::RemSIOp,
-          handshake::RemUIOp,
-          handshake::DivSIOp,
           handshake::MaximumFOp,
           handshake::MinimumFOp,
           handshake::MulFOp,

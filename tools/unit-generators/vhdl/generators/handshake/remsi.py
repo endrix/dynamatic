@@ -1,7 +1,17 @@
 from generators.support.arith_binary import generate_arith_binary
+from generators.support.sequential_divider import generate_sequential_divider
 
 
 def generate_remsi(name, params):
+    impl = params.get("impl", "pipelined")
+    if impl == "sequential":
+        return _generate_remsi_sequential(name, params)
+    if impl != "pipelined":
+        raise ValueError(f"remsi: unknown impl {impl!r} (pipelined or sequential)")
+    return _generate_remsi_pipelined(name, params)
+
+
+def _generate_remsi_pipelined(name, params):
 
     latency = params["latency"]
     # FIXME: The latency of the long division depends on the bitwidth, but it
@@ -41,3 +51,17 @@ def generate_remsi(name, params):
         latency=latency,
         extra_signals=extra_signals
     )
+
+
+def _generate_remsi_sequential(name, params):
+    """The signed remainder of the shared sequential iteration: the
+    magnitudes divided, the remainder negated when the DIVIDEND is
+    negative, which is C99's and RISC-V's sign rule and the one the Vitis
+    signed division core's own `remd` output follows. Latency BITWIDTH +
+    1."""
+
+    if params.get("extra_signals", None):
+        raise ValueError("remsi: the sequential unit carries no extra signals")
+    return generate_sequential_divider(
+        name, "remsi", params["bitwidth"], signed=True,
+        remainder=True)
