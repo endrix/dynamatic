@@ -24,8 +24,11 @@
 # understates every long wire; the placed report is the honest one, at the
 # price of a placement. The macros' LEFs come from MACRO_LEFS.
 #
-# ASAP7 (RVT, typical corner) as streamblocks' install_synthesis_tools.sh lays
-# it out: ASAP7_DIR holds the five RVT TT liberty files, unpacked; PDK=sky130
+# ASAP7 (SLVT by default, typical corner) as streamblocks'
+# install_synthesis_tools.sh lays it out: ASAP7_DIR holds the TT liberty
+# files of all three threshold flavours, and ASAP7_VT picks one (slvt, lvt,
+# rvt), which sets the cells, the driver cell, the LEF and this report's
+# label; PDK=sky130
 # maps to the SkyWater high-density library instead (SKY130_DIR, see
 # sky130-lib.sh). Yosys' abc takes one -liberty per file and maps across
 # them, the way OpenROAD's flow scripts hand them over, and the cells those scripts keep out of

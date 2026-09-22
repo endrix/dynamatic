@@ -108,7 +108,8 @@ second backend for it:
 ```sh
 export PATH="$YOSYS/bin:$GHDL/bin:$OPENSTA/bin:$PATH"
 export GHDL_PREFIX="$GHDL/lib/ghdl"     # the GHDL plugin for yosys needs it
-export ASAP7_DIR=/path/to/asap7         # the five RVT TT liberty files
+export ASAP7_DIR=/path/to/asap7         # the TT liberty files, all three flavours
+export ASAP7_VT=slvt                    # the flavour the output file is named for
 
 cd "$DYNAMATIC/tools/backend/synth-characterization"
 python3 main.py --synth-tool asap7 \
@@ -117,6 +118,42 @@ python3 main.py --synth-tool asap7 \
   --json-output "$DYNAMATIC/data/components-asap7.json" \
   --clock-period 1.0
 ```
+
+### The threshold flavour
+
+ASAP7 ships every cell at three thresholds, and the choice costs nothing in
+area: the same netlist, the same 130 cells for a 32-bit adder, a different
+leakage this flow does not report. What it buys is speed. On that adder in a
+top of its own, mapped through `report-timing.sh`:
+
+Each column is one prefix adder (`ADDER`, `sklansky` by default), and the
+cell count is the same down a column as well as across:
+
+| flavour | Sklansky | Kogge-Stone |
+| --- | --- | --- |
+| RVT | 761 ps | 568 ps |
+| LVT | 594 ps | 439 ps |
+| SLVT | 496 ps | 369 ps |
+
+`ASAP7_VT` picks one, `slvt` by default, and every script that maps cells
+reads it: the timing reports, the characterization and `PLACE=1`'s
+placement. No pass inside Dynamatic reads it; a buffer placer is handed a
+model by name, and the only place that maps the flavour to a model file is
+streamblocks' `run2.sh`. There
+is a model per flavour, because a model made of one flavour's cells describes
+no other: `data/components-asap7.json` is the default's, and
+`data/components-asap7-lvt.json` and `data/components-asap7-rvt.json` are
+the other two. There is no `-slvt` file: the default's model is the one
+under the plain name, and it is renamed when the default moves. A flavour's delays differ from RVT's by more than a quarter on
+the arithmetic and by more than half on a fork's ready path, so placing with
+the wrong one is not a rounding error.
+
+SLVT is the default because this flow is used to make circuits faster at a
+given cell count, and it is the fastest at the same cell count. It also
+leaks the most, and this flow measures delay and area and says nothing about
+power, so a design that cares about leakage should say `ASAP7_VT=lvt` or
+`rvt` rather than trust a default chosen on delay alone.
+
 
 Some generator entries run through `$DYNAMATIC/bin/generators/`, symlinks
 that `build.sh` makes and a checkout configured by hand with cmake does not
@@ -192,9 +229,10 @@ hours, and the whole-design report is where the placed number matters.
 The mapping recipe lives in `tools/backend/asap7-lib.sh` (sky130's in
 `sky130-lib.sh`; `pdk-lib.sh` selects one by `PDK`) and is the same one
 `tools/backend/report-timing.sh` uses to time a whole exported design: the five
-ASAP7 RVT typical-corner liberty files, the cells OpenROAD's flow scripts keep
-out of ASAP7 designs, yosys' constrained-liberty ABC script with fan-out
-buffering and gate sizing, a `BUFx2_ASAP7_75t_R` driving every input and a
+ASAP7 typical-corner liberty files of the chosen threshold flavour
+(`ASAP7_VT`), the cells OpenROAD's flow scripts keep out of ASAP7 designs,
+yosys' constrained-liberty ABC script with fan-out buffering and gate sizing,
+a `BUFx2` of that flavour driving every input and a
 3.898 fF load on every output, and reset as a false path. A unit's delay and a
 design's critical path therefore come out of one flow and can be compared.
 
@@ -219,7 +257,9 @@ being recorded as a zero.
 
 ### Sanity figures
 
-Measured at `--clock-period 1.0`:
+Measured at `--clock-period 1.0`, on RVT, which was the flavour the flow
+mapped to when these were taken: they check `components-asap7-rvt.json`, not
+the default's file, and every row would be about a third lower on SLVT.
 
 | unit | ASAP7 (ns) | for comparison |
 | --- | --- | --- |
