@@ -60,3 +60,7 @@ metals.sbt
 cbc_model_*.lp
 cbc_output_*.log
 cbc_solution_*.sol
+
+# The characterization writes its scratch here: generated HDL, synthesis
+# scripts, logs and reports, thousands of files with absolute paths in them.
+tools/backend/synth-characterization/tmp/

@@ -45,7 +45,10 @@ if [[ ! -f "$_pdk_dir/$PDK-lib.sh" ]]; then
   unset _pdk_dir
   return 2 2>/dev/null || exit 2
 fi
-source "$_pdk_dir/$PDK-lib.sh"
+# A recipe that refuses its own settings (an unknown ASAP7_VT, say) returns
+# non-zero, and the caller has to hear about it rather than run on with the
+# names unset.
+source "$_pdk_dir/$PDK-lib.sh" || return $?
 unset _pdk_dir
 
 # pdk_write_abc_constr <file>: what ABC assumes at the design's boundary.
