@@ -189,6 +189,9 @@
   },
   {
     "name": "handshake.divsi",
+    "parameters": [
+      {"name": "IMPL", "type": "string", "eq": "pipelined"}
+    ],
     "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t divsi --abstract-data -p latency=35 bitwidth=$BITWIDTH",
     "hdl": "smv"
   },

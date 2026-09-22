@@ -12,6 +12,17 @@ def generate_remsi(name, params):
 
 
 def _generate_remsi_pipelined(name, params):
+    # KNOWN WRONG, and kept because it is what the FPGA flow has always
+    # built: the wrapper this instantiates
+    # (data/vhdl/support/vitis_hls_cores.vhd, and data/verilog/arith/remsi.v)
+    # reaches the UNSIGNED Vitis core, so it computes the unsigned remainder
+    # under a signed name. Measured against the signed core's own remainder
+    # port: it differs on 40,386 of the 65,536 8-bit operand pairs, and
+    # -128 rem -1 comes out -128 where it is 0. The sequential
+    # implementation below is the signed answer and so does NOT agree with
+    # this one. Correcting this means rewiring onto the signed core's
+    # `remd`, which changes a shipped FPGA unit's answers and wants the
+    # integration suite as its test surface: its own change, not this one.
 
     latency = params["latency"]
     # FIXME: The latency of the long division depends on the bitwidth, but it
