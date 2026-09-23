@@ -173,3 +173,40 @@ end architecture;
 """
 
     return dependencies + entity + architecture
+
+
+def generate_delay_stages(src: str, dst: str, bitwidth: int, latency: int):
+    """
+    Delays the data `src` by `latency` register stages into `dst`, one stage
+    per slot of the valid propagation buffer generate_unary puts behind a
+    unit of that latency, all of them enabled by its ready
+    (valid_buffer_ready). At latency 0 the data is a wire, like the valid.
+
+    Returns (signals, body): the declarations and the statements, for the
+    unit's `signals` and `body`.
+    """
+    if latency == 0:
+        return "", f"{dst} <= {src};"
+
+    signals = f"""
+  type delay_stages_t is array (0 to {latency} - 1) of std_logic_vector({bitwidth} - 1 downto 0);
+  signal delay_stages : delay_stages_t;
+"""
+    body = f"""
+  {dst} <= delay_stages({latency} - 1);
+
+  process (clk)
+  begin
+    if (clk'event and clk = '1') then
+      if (rst) then
+        delay_stages <= (others => (others => '0'));
+      elsif (valid_buffer_ready) then
+        delay_stages(0) <= {src};
+        for i in 1 to {latency} - 1 loop
+          delay_stages(i) <= delay_stages(i - 1);
+        end loop;
+      end if;
+    end if;
+  end process;
+"""
+    return signals, body

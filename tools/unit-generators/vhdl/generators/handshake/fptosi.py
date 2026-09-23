@@ -1,42 +1,28 @@
-from generators.support.unary import generate_unary
+from generators.support.unary import generate_unary, generate_delay_stages
 
 
 def generate_fptosi(name, params):
     latency = params["latency"]
 
+    # The conversion is one combinational step; its result is delayed by
+    # the unit's latency, the depth of the valid propagation buffer, so data
+    # and valid leave together at any latency. (The stages were five
+    # regardless, copying the Vitis IP's latency, and the unit was wrong at
+    # any other.)
+    delay_signals, delay_body = generate_delay_stages(
+        "converted", "outs", 32, latency)
+
     signals = f"""
   signal converted : std_logic_vector(32 - 1 downto 0);
-  signal q0 : std_logic_vector(32 - 1 downto 0);
-  signal q1 : std_logic_vector(32 - 1 downto 0);
-  signal q2 : std_logic_vector(32 - 1 downto 0);
-  signal q3 : std_logic_vector(32 - 1 downto 0);
-  signal q4 : std_logic_vector(32 - 1 downto 0);
   signal float_value : float32;
+{delay_signals}
     """
 
     body = f"""
   float_value <= to_float(ins);
   converted <= std_logic_vector(to_signed(float_value, 32));
-  outs <= q4;
 
-  process (clk)
-  begin
-    if (clk'event and clk = '1') then
-      if (rst) then
-        q0 <= (others => '0');
-        q1 <= (others => '0');
-        q2 <= (others => '0');
-        q3 <= (others => '0');
-        q4 <= (others => '0');
-      elsif (valid_buffer_ready) then
-        q0 <= converted;
-        q1 <= q0;
-        q2 <= q1;
-        q3 <= q2;
-        q4 <= q3;
-      end if;
-    end if;
-  end process;
+{delay_body}
     """
 
     return generate_unary(
