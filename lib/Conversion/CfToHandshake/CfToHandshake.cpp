@@ -1261,6 +1261,13 @@ LogicalResult ConvertIndexCast<CastOp, ExtOp>::matchAndRewrite(
 
   unsigned srcWidth = getWidth(castOp.getOperand().getType());
   unsigned dstWidth = getWidth(castOp.getResult().getType());
+  // An index is as wide as an i32 here, so a cast between the two changes
+  // no bit: it is its operand. A truncation from a width to itself is
+  // refused by the verifier.
+  if (srcWidth == dstWidth) {
+    rewriter.replaceOp(castOp, adaptor.getOperands());
+    return success();
+  }
   Type dstType = handshake::ChannelType::get(rewriter.getIntegerType(dstWidth));
   Operation *newOp;
   if (srcWidth < dstWidth) {
