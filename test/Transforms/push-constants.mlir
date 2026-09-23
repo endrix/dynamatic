@@ -72,3 +72,29 @@ func.func @pushAndDelete(%arg0: i1) -> i32 {
 ^bb2:
   return %c1 : i32
 }
+
+// -----
+
+// A function nested in another operation's region is processed too: the
+// constant defined in the entry block moves to the block that uses it.
+
+// CHECK-LABEL:   func.func @nestedPush(
+// CHECK-SAME:                          %[[VAL_0:.*]]: i32) -> i32 {
+// CHECK-NOT:       arith.constant
+// CHECK:           cf.br ^bb1
+// CHECK:         ^bb1:
+// CHECK:           %[[VAL_1:.*]] = arith.constant 3 : i32
+// CHECK:           %[[VAL_2:.*]] = arith.shrsi %[[VAL_0]], %[[VAL_1]] : i32
+// CHECK:           return %[[VAL_2]] : i32
+// CHECK:         }
+module {
+  module @inner {
+    func.func @nestedPush(%arg0: i32) -> i32 {
+      %c3 = arith.constant 3 : i32
+      cf.br ^bb1
+    ^bb1:
+      %shr = arith.shrsi %arg0, %c3 : i32
+      return %shr : i32
+    }
+  }
+}

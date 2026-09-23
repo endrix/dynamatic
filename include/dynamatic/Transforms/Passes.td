@@ -539,6 +539,8 @@ def PushConstants : DynamaticPass<"push-constants"> {
     operations and their user(s) within each function. This pass will duplicate
     constant definitions if they have users in multiple blocks. It will also
     delete the original operation if it is not used within its defining block.
+    Every func::FuncOp in the module is processed, including functions nested
+    in other operations' regions.
   }];
 }
 

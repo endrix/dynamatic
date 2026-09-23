@@ -74,10 +74,17 @@ struct PushConstantsPass
   using PushConstantsBase::PushConstantsBase;
   void runDynamaticPass() override {
     ModuleOp m = getOperation();
-    // Process every function individually
-    for (auto funcOp : m.getOps<func::FuncOp>())
-      if (failed(pushConstants(funcOp, &getContext())))
-        return signalPassFailure();
+    // Process every function individually, at any depth: a function nested in
+    // another operation's region (an actor's actions, say) is a function all
+    // the same, and a constant it leaves in its entry block becomes a value
+    // threaded through every loop between the entry and its user.
+    WalkResult result = m.walk([&](func::FuncOp funcOp) {
+      return failed(pushConstants(funcOp, &getContext()))
+                 ? WalkResult::interrupt()
+                 : WalkResult::advance();
+    });
+    if (result.wasInterrupted())
+      return signalPassFailure();
   };
 };
 } // namespace
