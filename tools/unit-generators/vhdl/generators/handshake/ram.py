@@ -23,12 +23,22 @@ def generate_ram(name, params):
     sram_name = params.get("sram_name", "fakeram7_{size}x{width}")
     sram_interface = params.get("sram_interface", "fakeram")
     sram_macros = params.get("sram_macros", [])
+    # RESET TO THE DECLARED CONTENT, for a target that has no other way to
+    # load it. Off by default: on an FPGA the bitstream already loads the
+    # declared content, and a reset in the write process stops the tool
+    # inferring block RAM at all (measured with yosys synth_xilinx on a
+    # 1024x32 ROM: one RAMB36E1 without it, some 32,800 flip-flops with
+    # it). A cell library has no bitstream, so there the flow turns it on.
+    # See `_gen_write_body`. The value is 0 or 1; the command line is read
+    # with ast.literal_eval, so `true` or `yes` is refused rather than read.
+    reset_content = bool(params.get("reset_content", 0))
     code = _generate_ram(
         name,
         data_width,
         addr_width,
         size,
         values,
+        reset_content,
     )
     if not _is_sram(size, values, sram_threshold):
         return code
@@ -63,6 +73,7 @@ def _generate_ram(
     addr_width: int,
     size: int,
     values: List[int],
+    reset_content: bool = False,
 ):
     entity = f"""
 library ieee;
@@ -88,7 +99,7 @@ end entity;
     architecture = f"""
 architecture arch of {name} is
   type ram_type is array (0 to {size} - 1) of std_logic_vector({data_width} - 1 downto 0);
-  {_gen_intial_block(data_width, size, values)}
+  {_gen_intial_block(data_width, size, values, reset_content)}
 begin
   read_proc : process(clk)
   begin
@@ -102,9 +113,7 @@ begin
   write_proc : process(clk)
   begin
     if (rising_edge(clk)) then
-      if (storeEn = '1') then
-        ram(to_integer(unsigned(storeAddr))) <= storeData;
-      end if;
+{_gen_write_body(values, reset_content)}
     end if;
   end process;
 end architecture;
@@ -323,7 +332,47 @@ def _to_twos_complement(n, bitwidth, addr):
     return format(n, f"0{bitwidth}b")
 
 
-def _gen_intial_block(data_width: int, size: int, init_vals: List[int]):
+def _gen_write_body(init_vals: List[int], reset_content: bool = False) -> str:
+    """THE DECLARED CONTENT AS A RESET, when the target asks for it.
+
+    A declared initial value is a simulator's and an FPGA bitstream's; a
+    cell library has neither. Left as a declaration alone it is honoured in
+    simulation and dropped on the way to cells, so the netlist that is
+    verified and the netlist that could be fabricated hold different things
+    at power-up. Measured on the picorv32 register file, 32 words of 32
+    bits: all 1,330 of its flip-flops mapped to a cell with no reset pin,
+    and the zeroes the model assumes came from a Verilog `initial` block
+    that Verilator honours and silicon does not.
+
+    With `reset_content`, the content is a constant, the declaration keeps
+    it for the simulator, and the write resets to it: a mux in front of
+    each flop and not one more register (on that register file, 219 cells
+    and 26 ps). Without it the unit is exactly what it was, which is what an
+    FPGA wants: there the bitstream loads the content and a reset would stop
+    block RAM being inferred.
+
+    Every memory this flow builds declares content -- a `memref.alloca`
+    becomes a memory of zeros, and the flow reads a never-written word as
+    zero -- so on a cell library every memory resets, zeros included. The
+    empty case is kept for a caller that passes none.
+
+    `_is_sram` treats all-zero content as no content, so a memory of zeros
+    large enough for a macro gets an SRAM view that does not reset while its
+    flop model here does. That view is what the macro is; the divergence is
+    known and applies only under HDL_SRAM=1.
+    """
+
+    store = ("        ram(to_integer(unsigned(storeAddr))) <= storeData;\n"
+             "      end if;")
+    if not (reset_content and init_vals):
+        return "      if (storeEn = '1') then\n" + store
+    return ("      if (rst = '1') then\n"
+            "        ram <= ram_init;\n"
+            "      elsif (storeEn = '1') then\n" + store)
+
+
+def _gen_intial_block(data_width: int, size: int, init_vals: List[int],
+                      reset_content: bool = False):
 
     if init_vals == []:
         return "  signal ram : ram_type;\n"
@@ -344,4 +393,10 @@ def _gen_intial_block(data_width: int, size: int, init_vals: List[int]):
     # string literal with type array subtype". Naming the index is valid for
     # every size and removes the special case.
     named = [f"{addr} => {val}" for addr, val in enumerate(init_strings)]
-    return "signal ram : ram_type := (" + ",\n".join(named) + ");"
+    if not (reset_content and init_vals):
+        return "signal ram : ram_type := (" + ",\n".join(named) + ");"
+    # With the reset, the content is a constant so that the declaration and
+    # the reset name one thing: the declaration is what a simulator honours,
+    # the reset is what the cells implement. See `_gen_write_body`.
+    return ("constant ram_init : ram_type := (" + ",\n".join(named) + ");\n"
+            "  signal ram : ram_type := ram_init;")
