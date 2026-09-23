@@ -1,6 +1,7 @@
 // RUN: %export-vhdl
 // RUN: FileCheck %s -input-file %t/handshake_divui_0.vhd --check-prefix=SEQ
 // RUN: FileCheck %s -input-file %t/handshake_divui_1.vhd --check-prefix=PIPE
+// RUN: ls %t | FileCheck %s --check-prefix=DEPS
 
 // The two dividers. IMPL=sequential is one register set stepped BITWIDTH
 // times, the quotient held until taken; IMPL=pipelined is the Vitis IP
@@ -16,6 +17,9 @@
 // PIPE: entity handshake_divui_1_valid_buffer is
 // PIPE: entity handshake_divui_1 is
 // PIPE: divui_vitis_hls_wrapper_U1 : entity work.divui_vitis_hls_wrapper
+
+// The pipelined unit brings the Vitis cores it instantiates.
+// DEPS: vitis_hls_cores.vhd
 module {
   hw.module @test(in %a : !handshake.channel<i32>, in %b : !handshake.channel<i32>, in %c : !handshake.channel<i32>, in %d : !handshake.channel<i32>, in %clk : i1, in %rst : i1, out out0 : !handshake.channel<i32>, out out1 : !handshake.channel<i32>) {
     %div0.result = hw.instance "div0" @handshake_divui_0(lhs: %a: !handshake.channel<i32>, rhs: %b: !handshake.channel<i32>, clk: %clk: i1, rst: %rst: i1) -> (result: !handshake.channel<i32>)
