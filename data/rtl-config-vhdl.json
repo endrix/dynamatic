@@ -132,6 +132,22 @@
       },
       {
         "name": "IMPL",
+        "type": "string",
+        "eq": "sequential"
+      }
+    ],
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t divsi -p bitwidth=$BITWIDTH latency=$LATENCY impl='\"$IMPL\"' extra_signals=$EXTRA_SIGNALS",
+    "dependencies": []
+  },
+  {
+    "name": "handshake.divsi",
+    "parameters": [
+      {
+        "name": "LATENCY",
+        "type": "unsigned"
+      },
+      {
+        "name": "IMPL",
         "type": "string"
       }
     ],
@@ -139,6 +155,22 @@
     "dependencies": [
       "vitis_hls_cores"
     ]
+  },
+  {
+    "name": "handshake.remsi",
+    "parameters": [
+      {
+        "name": "LATENCY",
+        "type": "unsigned"
+      },
+      {
+        "name": "IMPL",
+        "type": "string",
+        "eq": "sequential"
+      }
+    ],
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t remsi -p bitwidth=$BITWIDTH latency=$LATENCY impl='\"$IMPL\"' extra_signals=$EXTRA_SIGNALS",
+    "dependencies": []
   },
   {
     "name": "handshake.remsi",
@@ -166,6 +198,22 @@
       },
       {
         "name": "IMPL",
+        "type": "string",
+        "eq": "sequential"
+      }
+    ],
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t remui -p bitwidth=$BITWIDTH latency=$LATENCY impl='\"$IMPL\"' extra_signals=$EXTRA_SIGNALS",
+    "dependencies": []
+  },
+  {
+    "name": "handshake.remui",
+    "parameters": [
+      {
+        "name": "LATENCY",
+        "type": "unsigned"
+      },
+      {
+        "name": "IMPL",
         "type": "string"
       }
     ],
@@ -173,6 +221,22 @@
     "dependencies": [
       "vitis_hls_cores"
     ]
+  },
+  {
+    "name": "handshake.divui",
+    "parameters": [
+      {
+        "name": "LATENCY",
+        "type": "unsigned"
+      },
+      {
+        "name": "IMPL",
+        "type": "string",
+        "eq": "sequential"
+      }
+    ],
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t divui -p bitwidth=$BITWIDTH latency=$LATENCY impl='\"$IMPL\"' extra_signals=$EXTRA_SIGNALS",
+    "dependencies": []
   },
   {
     "name": "handshake.divui",
