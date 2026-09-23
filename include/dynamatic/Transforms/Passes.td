@@ -403,7 +403,15 @@ def HandshakeSetUnitImplAttributes : Pass<
     - the latencies of the pipeline units.
   }];
   let options = [
-    Option<"impl", "impl", "::std::string", "\"VIVADO\"", "Which FPU impl to use.">,
+    // The enum's string forms are lowercase and the lookup is
+    // case-sensitive. The default is the portable FloPoCo cores: the
+    // interface's own fallback, the frontend's argument, and the only
+    // implementation that builds without vendor IP (on a cell library as
+    // well as an FPGA). This pass does not know the target; a caller that
+    // wants the Vivado IP asks for impl=vivado.
+    Option<"impl", "impl", "::std::string", "\"flopoco\"",
+    "Which FPU impl to use: flopoco (default, portable) or vivado (Xilinx "
+    "IP, FPGA only).">,
     Option<"timingModels", "timing-models", "std::string", "",
     "Path to JSON-formatted file containing timing models for dataflow "
     "components.">,
