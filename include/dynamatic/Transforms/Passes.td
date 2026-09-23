@@ -548,7 +548,10 @@ def PushConstants : DynamaticPass<"push-constants"> {
     the constant and branches to the successor. The value then no longer
     rides the branch: after the lowering to handshake it would be a data
     `cond_br` on the constant, while the edge block's control token is the
-    control `cond_br` the branch has anyway.
+    control `cond_br` the branch has anyway. The edge block is placed right
+    after the branch's block, so an edge that was a back edge (to a lower
+    block) still is one. An edge whose terminator produces some of the
+    successor's operands is left alone.
   }];
   let options =
     [Option<"throughBranches", "through-branches", "bool", "false",
