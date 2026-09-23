@@ -79,7 +79,7 @@ end entity;
 def _generate_shift_reg_break_dv(name, num_slots, bitwidth):
     inner_name = f"{name}_inner"
 
-    dependencies = _generate_shift_reg_break_dv_dataless(inner_name)
+    dependencies = _generate_shift_reg_break_dv_dataless(inner_name, num_slots)
 
     entity = f"""
 
