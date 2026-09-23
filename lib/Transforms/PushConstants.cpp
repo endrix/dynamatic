@@ -49,9 +49,9 @@ static void splitConstantEdges(func::FuncOp funcOp, OpBuilder &builder) {
       // branch from the edge block.
       if (operands.getProducedOperandCount() != 0)
         continue;
-      if (llvm::any_of(
-              operands.getForwardedOperands(),
-              [](Value v) { return v.getDefiningOp<arith::ConstantOp>(); }))
+      if (llvm::any_of(operands.getForwardedOperands(), [](Value v) {
+            return v.getDefiningOp<arith::ConstantOp>();
+          }))
         edges.emplace_back(branch, i);
     }
   }
