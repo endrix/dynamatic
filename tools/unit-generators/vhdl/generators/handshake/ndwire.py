@@ -40,9 +40,9 @@ entity {name} is
     ins_ready : out std_logic;
     {data(potential_input, bitwidth)}
     -- output channel
+    {data(potential_output, bitwidth)}
     outs_valid : out std_logic;
     outs_ready : in  std_logic
-    {data(potential_output, bitwidth)}
   );
 end entity;
 
@@ -59,6 +59,7 @@ architecture arch of {name} is
   -- If the formal tools does not implicitly treat undriven signals
   -- like primary inputs this needs to be done explicitly.
   signal nd_next_state : nd_state_t;
+  signal is_running : std_logic;
 
 begin
   process (clk, rst)
@@ -71,22 +72,23 @@ begin
     end if;
   end process;
 
-  process (state, ins_valid, outs_ready)
+  process (state, nd_next_state, ins_valid, outs_ready)
   begin
     -- If the wire is sleeping it can always switch to the running state.
     -- If (ins_valid and outs_ready) we either have a transaction
     -- and can freely choose the state again.
     if (state = SLEEPING) then
       next_state <= nd_next_state;
-    elsif (ins_valid and outs_ready) then
+    elsif (ins_valid and outs_ready) = '1' then
       next_state <= nd_next_state;
     else
       next_state <= state;
     end if;
   end process;
 
-  ins_ready <= outs_ready and (state = RUNNING);
-  outs_valid <= ins_valid and (state = RUNNING);
+  is_running <= '1' when state = RUNNING else '0';
+  ins_ready <= outs_ready and is_running;
+  outs_valid <= ins_valid and is_running;
   {data(potential_assignment, bitwidth)}
 
 end architecture;

@@ -41,6 +41,12 @@ config.excludes = ["CMakeLists.txt", "README.md"]
 # on PATH, since the pass runs the `cbc` executable.
 if getattr(config, "enable_cbc", False) and shutil.which("cbc"):
     config.available_features.add("cbc")
+# GHDL, for the tests that analyse and elaborate the VHDL a generator writes.
+# A GHDL installed outside its configured prefix needs GHDL_PREFIX.
+if shutil.which("ghdl"):
+    config.available_features.add("ghdl")
+    if "GHDL_PREFIX" in os.environ:
+        config.environment["GHDL_PREFIX"] = os.environ["GHDL_PREFIX"]
 if config.cmake_build_type == "Release":
     print("[WARNING] Skipping `invalid.mlir` in Release mode")
     config.excludes.append("invalid.mlir")
