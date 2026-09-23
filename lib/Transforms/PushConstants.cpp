@@ -12,10 +12,12 @@
 
 #include "dynamatic/Support/LLVM.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/Interfaces/ControlFlowInterfaces.h"
 #include "mlir/Support/IndentedOstream.h"
 
 using namespace mlir;
@@ -29,9 +31,46 @@ namespace dynamatic {
 } // namespace dynamatic
 // [END Boilerplate code for the MLIR pass]
 
+/// Gives every edge of a multi-successor branch that forwards a constant a
+/// block of its own: the edge block defines the constant and branches to the
+/// successor with the edge's operands. A constant bound to a block argument
+/// through a `cf.cond_br` is otherwise routed by that branch, which is a data
+/// `cond_br` on the constant once the function is handshake; the edge block's
+/// control token is the branch's control `cond_br`, which exists anyway.
+static void splitConstantEdges(func::FuncOp funcOp, OpBuilder &builder) {
+  SmallVector<std::pair<BranchOpInterface, unsigned>> edges;
+  for (Block &block : funcOp.getBody()) {
+    auto branch = dyn_cast<BranchOpInterface>(block.getTerminator());
+    if (!branch || block.getNumSuccessors() < 2)
+      continue;
+    for (unsigned i = 0, e = block.getNumSuccessors(); i < e; ++i)
+      if (llvm::any_of(
+              branch.getSuccessorOperands(i).getForwardedOperands(),
+              [](Value v) { return v.getDefiningOp<arith::ConstantOp>(); }))
+        edges.emplace_back(branch, i);
+  }
+
+  for (auto [branch, i] : edges) {
+    Block *succ = branch->getSuccessor(i);
+    SuccessorOperands operands = branch.getSuccessorOperands(i);
+    SmallVector<Value> forwarded(operands.getForwardedOperands());
+    Block *edge = builder.createBlock(succ);
+    for (Value &v : forwarded)
+      if (auto cst = v.getDefiningOp<arith::ConstantOp>())
+        v = arith::ConstantOp::create(builder, cst->getLoc(), cst.getValue());
+    cf::BranchOp::create(builder, branch->getLoc(), succ, forwarded);
+    operands.erase(operands.getProducedOperandCount(),
+                   operands.getForwardedOperands().size());
+    branch->setSuccessor(edge, i);
+  }
+}
+
 /// Pushes all of a function's constants in blocks using them.
-static LogicalResult pushConstants(func::FuncOp funcOp, MLIRContext *ctx) {
+static LogicalResult pushConstants(func::FuncOp funcOp, MLIRContext *ctx,
+                                   bool throughBranches) {
   OpBuilder builder(ctx);
+  if (throughBranches)
+    splitConstantEdges(funcOp, builder);
 
   for (auto constantOp :
        llvm::make_early_inc_range(funcOp.getOps<arith::ConstantOp>())) {
@@ -79,7 +118,7 @@ struct PushConstantsPass
     // the same, and a constant it leaves in its entry block becomes a value
     // threaded through every loop between the entry and its user.
     WalkResult result = m.walk([&](func::FuncOp funcOp) {
-      return failed(pushConstants(funcOp, &getContext()))
+      return failed(pushConstants(funcOp, &getContext(), throughBranches))
                  ? WalkResult::interrupt()
                  : WalkResult::advance();
     });

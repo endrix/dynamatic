@@ -541,7 +541,19 @@ def PushConstants : DynamaticPass<"push-constants"> {
     delete the original operation if it is not used within its defining block.
     Every func::FuncOp in the module is processed, including functions nested
     in other operations' regions.
+
+    With `through-branches`, a constant a block hands to one successor of a
+    branch with several (a `cf.cond_br` or `cf.switch` operand bound to the
+    successor's block argument) gets an edge block of its own, which defines
+    the constant and branches to the successor. The value then no longer
+    rides the branch: after the lowering to handshake it would be a data
+    `cond_br` on the constant, while the edge block's control token is the
+    control `cond_br` the branch has anyway.
   }];
+  let options =
+    [Option<"throughBranches", "through-branches", "bool", "false",
+            "Give a constant forwarded along one edge of a multi-successor "
+            "branch its own edge block, so the branch does not steer it.">];
 }
 
 def RemoveOperationNames : Pass<"remove-operation-names", "mlir::ModuleOp"> {
