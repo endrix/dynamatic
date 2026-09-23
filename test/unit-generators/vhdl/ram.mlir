@@ -23,7 +23,6 @@ module {
   }
 
   // CHECK-LABEL: architecture {{.*}} of handshake_ram_0
-  // CHECK: constant ram_init : ram_type := (0 => "00000000000000000000000000000000");
-  // CHECK: signal ram : ram_type := ram_init;
+  // CHECK: signal ram : ram_type := (0 => "00000000000000000000000000000000");
   hw.module.extern @handshake_ram_0(in %loadEn : i1, in %loadAddr : i32, in %storeEn : i1, in %storeAddr : i32, in %storeData : i32, in %clk : i1, in %rst : i1, out loadData : i32) attributes {hw.name = "handshake.ram", hw.parameters = {ADDR_WIDTH = 32 : ui32, DATA_WIDTH = 32 : ui32, INITIAL_VALUES = "0,", SIZE = 1 : ui32}}
 }
