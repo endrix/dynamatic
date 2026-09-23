@@ -29,7 +29,8 @@ def generate_ram(name, params):
     # inferring block RAM at all (measured with yosys synth_xilinx on a
     # 1024x32 ROM: one RAMB36E1 without it, some 32,800 flip-flops with
     # it). A cell library has no bitstream, so there the flow turns it on.
-    # See `_gen_write_body`.
+    # See `_gen_write_body`. The value is 0 or 1; the command line is read
+    # with ast.literal_eval, so `true` or `yes` is refused rather than read.
     reset_content = bool(params.get("reset_content", 0))
     code = _generate_ram(
         name,

@@ -2,6 +2,8 @@
 // RUN: FileCheck %s -input-file %t/handshake_ram_0.vhd
 // RUN: export RAM_RESET_CONTENT=0; %export-vhdl
 // RUN: FileCheck %s -input-file %t/handshake_ram_0.vhd --check-prefix=FPGA
+// RUN: unset RAM_RESET_CONTENT; %export-vhdl
+// RUN: FileCheck %s -input-file %t/handshake_ram_0.vhd --check-prefix=FPGA
 
 // A MEMORY RESETS TO WHAT IT DECLARES, WHEN THE TARGET ASKS. A declared
 // initial value is a simulator's and an FPGA bitstream's; a cell library has
@@ -10,7 +12,8 @@
 // constant, the declaration keeps it for the simulator, and the write
 // process resets to it. Without it the unit is what it always was, because
 // on an FPGA the bitstream loads the content and a reset would stop block
-// RAM being inferred.
+// RAM being inferred. Unset, it is off: the third pair of RUN lines is what
+// keeps that the default.
 
 // FPGA-NOT: ram_init
 // FPGA-NOT: rst = '1'
