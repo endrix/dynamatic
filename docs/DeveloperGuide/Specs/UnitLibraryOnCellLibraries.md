@@ -191,8 +191,9 @@ in them, and all seven operators map on ASAP7 through that path (`addf` 1,398
 cells and 65 flip-flops at 1,044 ps, `mulf` 9,076 and 1,561 at 846 ps, `divf`
 9,339 and 1,494 at 761 ps, `cmpf` 225 and 3 at 206 ps).
 
-However, the MLIR pass's own default is broken. The `impl` option of
-`handshake-set-unit-impl-attr` defaults to `"VIVADO"`
+However, the MLIR pass's own default was broken (fixed in endrix/dynamatic#60,
+which makes it `flopoco`). The `impl` option of
+`handshake-set-unit-impl-attr` defaulted to `"VIVADO"`
 (`include/dynamatic/Transforms/Passes.td:406`), but the enum's string forms
 are lowercase (`flopoco`, `vivado`) and the lookup is case-sensitive, so the
 default is not a value at all: run without `impl=`, the pass stops with
@@ -406,9 +407,10 @@ audit.
 
 ## What to fix first
 
-1. **The `VIVADO` default on `handshake-set-unit-impl-attr`.** It is one
-   token in a `.td` file and it is not a valid value, so the pass fails when
-   no `impl` is given. Making it `flopoco`, the interface's own fallback and
+1. **The `VIVADO` default on `handshake-set-unit-impl-attr`.** Done in
+   endrix/dynamatic#60, which makes it `flopoco`. It was one token in a
+   `.td` file and not a valid value, so the pass failed when no `impl` was
+   given. Making it `flopoco`, the interface's own fallback and
    the frontend's argument, is the one-token fix; making the choice follow
    `target` is the larger item the plan has.
 2. **The five delay registers in `sitofp`, `uitofp` and `fptosi`.** The
