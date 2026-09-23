@@ -10,6 +10,11 @@ write itself. A cell library has none of these. Thus a unit that relies on one
 of them either fails to build or is built into something nobody would have
 written on purpose.
 
+This page sizes the "adapting the backend to a cell library" track of the
+ASIC tuning plan kept in streamblocks-mlir
+(`docs/plans/2026-09-17-asic-tuning-todo.md`); "the plan" below means that
+file.
+
 This page answers one question per unit. If a design instantiates it and the
 target is a cell library, does it build, and is what it builds sane? Every
 number below was measured rather than estimated, and the section at the end
@@ -44,15 +49,18 @@ mapped netlists the sequential cells are 83,014 `DFFHQNx1` and 32
 
 | class | units | what it means |
 |---|---|---|
-| **fine** | 69 | behavioural VHDL, no vendor content, no FPGA-only assumption |
+| **fine** | 67 | behavioural VHDL, no vendor content, no FPGA-only assumption |
+| **broken** | 2 | does not build at all, for reasons that have nothing to do with the target |
 | **vendor** | 7 | instantiates IP the repository does not ship; cannot be built on cells at all |
 | **fpga-shaped** | 8 | builds, and the structure is one only a retiming FPGA tool exploits |
 | **memory** | 2 | storage whose mapping depends on the target |
 | **needs a look** | 2 | not settled by this audit |
 
-Thus the answer to "three more items or thirteen" is: seventeen units are not
-plainly fine, and of those only seven actually stop a build. The rest cost
-area and flip-flops rather than correctness. Separately, six units emit VHDL
+Thus the answer to "three more items or thirteen" is: twenty-one units are
+not plainly fine. Nine unit types cannot be built at all (the seven vendor
+ones, `ndwire` and `rigidifier`), and three more fail in one configuration
+(`SHIFT_REG_BREAK_DV` with data, `valid_merger` and `top_join` with extra
+signals). The rest cost area and flip-flops rather than correctness. Separately, six units emit VHDL
 that no tool can read, or cannot be generated at all, for reasons that have
 nothing to do with the target; they are listed in their own section because
 fixing them is cheap and independent.
@@ -108,9 +116,9 @@ implementation that the class is about.
 | `init` | 220 | 33 | 155.2 ps |  |
 | `bundle` | 0 | 0 | 0.0 ps |  |
 | `unbundle` | 0 | 0 | 0.0 ps |  |
-| `queue` | 640 | 137 | 202.3 ps | 4 slots; 32 slots is 5,193 / 1,045 |
-| `ndwire` | - | - | - | does not parse at any width |
-| `rigidifier` | - | - | - | no generator registered |
+| `queue` | 640 | 137 | 202.3 ps | 4 slots; 32 slots is 5,193 / 1,045; array storage, which an FPGA puts in distributed RAM and a cell library in flops, correctly |
+| `ndwire` | - | - | - | broken: does not parse at any width |
+| `rigidifier` | - | - | - | broken: no generator registered |
 | `buffer ONE_SLOT_BREAK_DV` | 144 | 33 | 137.7 ps |  |
 | `buffer ONE_SLOT_BREAK_R` | 222 | 33 | 147.8 ps |  |
 | `buffer ONE_SLOT_BREAK_DVR` | 149 | 34 | 135.1 ps |  |
@@ -183,12 +191,16 @@ in them, and all seven operators map on ASAP7 through that path (`addf` 1,398
 cells and 65 flip-flops at 1,044 ps, `mulf` 9,076 and 1,561 at 846 ps, `divf`
 9,339 and 1,494 at 761 ps, `cmpf` 225 and 3 at 206 ps).
 
-However, the MLIR pass disagrees with the frontend. The `impl` option of
+However, the MLIR pass's own default is broken. The `impl` option of
 `handshake-set-unit-impl-attr` defaults to `"VIVADO"`
-(`include/dynamatic/Transforms/Passes.td:406`), so anything driving
-`dynamatic-opt` directly, rather than through `compile.sh`, gets the vendor IP
-and finds out at synthesis. In addition, nothing ties the choice to the target
-at all, which is the open item this audit was supposed to size.
+(`include/dynamatic/Transforms/Passes.td:406`), but the enum's string forms
+are lowercase (`flopoco`, `vivado`) and the lookup is case-sensitive, so the
+default is not a value at all: run without `impl=`, the pass stops with
+`Invalid FPU implementation: 'VIVADO'`. Nothing in the repository's own flow
+reaches it, since `compile.sh` always passes `impl=$FPUNITS_GEN` and the
+frontend sets that to `flopoco`. The vendor IP is reached only by asking for
+it, `impl=vivado`. In addition, nothing ties the choice to the target at all,
+which is the open item this audit was supposed to size.
 
 A cell-library implementation is not needed here. FloPoCo already is one, and
 what has to be written is a default and a link to `target`, not a unit.
@@ -197,7 +209,7 @@ Moreover, the FloPoCo path has a sharp edge of its own worth recording. The
 wrapper instantiates `{core}_{bitwidth}_{internal_delay}`, and the shipped
 library holds a fixed, discrete set of (width, delay) pairs
 (`FloatingPointAdder_32_9_068000`, `FloatingPointMultiplier_32_2_034000`, and
-so on, 38 top-level cores in all). An `internal_delay` the library does not
+so on, 22 cores of the three kinds in all). An `internal_delay` the library does not
 hold does not elaborate; the number of `ce_` ports must equal `LATENCY`
 exactly; and the delay comes out of the timing model, which is
 re-characterised per PDK. A new PDK can therefore ask for a core that does not
@@ -210,7 +222,7 @@ an ASIC designer would have chosen.
 
 ### The pipelined multiplier
 
-`muli` at its default `impl=pipelined` is the archetype the plan names: the
+`muli` at its default `impl=pipelined` is the plan's archetype: the
 operands into a register, the whole array multiply in one combinational sweep,
 then three delay registers. An FPGA tool retimes that into the DSP pipeline.
 Nothing on a cell library does, so the full multiplier sits between two
@@ -253,8 +265,8 @@ by default when no target is given.
 In addition, one wart follows from this and is cheap to close. The RTL entries
 for the four dividers carry `"dependencies": ["vitis_hls_cores"]`
 unconditionally, so the file is copied into every export whatever
-implementation was chosen. The picorv32 export at `export_rtl__Rtl__0`
-contains `vitis_hls_cores.vhd` although its only division is a sequential
+implementation was chosen. The picorv32 exports of the run
+`/mnt/data/claude-scratch/rerun/b9/out/cells-1` (seven of them) contain `vitis_hls_cores.vhd` although its only division is a sequential
 `divui` and nothing instantiates the core. It is analysed on every synthesis
 for nothing.
 
@@ -284,7 +296,7 @@ wanted. It is the same change the multiplier needs, and about the same size
 
 | unit | evidence |
 |---|---|
-| `ram` | 1024 words of 32 bits maps to 163,728 cells and 32,800 flip-flops. Above `sram_threshold` and with no declared initial content the generator also writes a synthesis view under `sram/`, the same entity wrapping a macro: FakeRAM2.0 for ASAP7 (one read-write port, a macro generated from the name pattern) or OpenRAM's 1rw1r for sky130 (fixed sizes, padded). With `values` non-empty the view is not written and the array stays flops. |
+| `ram` | 1024 words of 32 bits maps to 163,728 cells and 32,800 flip-flops. Above `sram_threshold` and with no declared initial content the generator also writes a synthesis view under `sram/`, the same entity wrapping a macro: FakeRAM2.0 for ASAP7 (one read-write port, a macro generated from the name pattern) or OpenRAM's 1rw1r for sky130 (fixed sizes, padded). The view is written when the memory has at least `sram_threshold` words and its declared content is all zeros (`_is_sram`); any other content keeps the array as flops. This audit did not measure a macro: its `sram_interface=openram` run had no `sram_macros` and fell back to flops. |
 | `mem_to_bram` | pure combinational wiring to a dual-port block-RAM interface (`ce0`/`we0`/`address0`/`dout0` and the same again for port 1); 0 cells. It is the adapter required by the FPGA top level, and has no meaning against a macro (there is no second port to drive). |
 
 As a result, `mem_controller` is not in this class. It is the arbiter rather
@@ -297,7 +309,7 @@ mapping one.
 | unit | why it is not settled |
 |---|---|
 | `ii_monitor` | it maps to 0 cells because it is a simulation monitor that prints, and whether a unit that synthesizes to nothing should be in a tape-out flow at all is a decision rather than a measurement. |
-| `sharing_wrapper` | it maps standalone (1,064 cells, 154 flip-flops, 244 ps) and it needs `sharing_support.vhd`, which is portable. What this audit did not do is exercise it inside a design, and the helper-sharing work found that a shared instance across two operations deadlocks. The protocol question is open, and it is not a cell-library question. |
+| `sharing_wrapper` | it maps standalone (1,064 cells, 154 flip-flops, 244 ps) and it needs `sharing_support.vhd`, which is portable. What this audit did not do is exercise it inside a design, and there is no evidence either way about its protocol here; the deadlock the streamblocks helper-sharing experiment found was in that lowering's own shared instances, not in this unit. The protocol question is open, and it is not a cell-library question. |
 
 ## Defects that have nothing to do with the target
 
@@ -343,9 +355,12 @@ speculation and a cell library cannot be combined today.
 
 Finally, one further finding, taken from the mapped netlists rather than from
 the sources. The library's reset is synchronous everywhere except in one
-place: the `speculator_predictor` process inside `speculator` is sensitive to
-`rst`, and it is the only source of the 32 `DFFASRHQNx1` cells in the whole
-audit. A mixed reset style needs its own reset tree and a synchronizer (a
+place among the per-unit netlists: the `speculator_predictor` process inside
+`speculator` is sensitive to `rst`, and it accounts for all 32 `DFFASRHQNx1`
+cells there. The LSQ is the other: its generator writes `if reset = '1' ...
+elsif rising_edge` processes and its netlist has 41 `DFFASRHQNx1`. The
+`ndwire` generator is asynchronous as well, though it never reaches a netlist
+because its output does not parse. A mixed reset style needs its own reset tree and a synchronizer (a
 reset is not a data signal), so it is worth closing whether or not
 speculation is used.
 
@@ -385,24 +400,29 @@ carries `vitis_hls_cores.vhd` that nothing instantiates, for the reason given
 above.
 
 No float unit, no speculation unit, no `ndwire`, no `sharing_wrapper`, no LSQ.
-So none of the seventeen units that are not plainly fine blocks the picorv32
+So none of the twenty-one units that are not plainly fine blocks the picorv32
 work, and the two that used to (`divui`, `muli`) were closed before this
 audit.
 
 ## What to fix first
 
 1. **The `VIVADO` default on `handshake-set-unit-impl-attr`.** It is one
-   token in a `.td` file, it contradicts both the interface's fallback and the
-   frontend's argument, and it is the only way an ordinary compile reaches
-   unbuildable IP. Making it follow `target` is the item the plan already
-   has; making it not default to the vendor is smaller and should not wait.
-2. **The five delay registers in `sitofp`, `uitofp` and `fptosi`.** 480
-   flip-flops across the three at 32 bits, behind combinational converters
-   that close at 1 ns without them. The change is shaped like the
+   token in a `.td` file and it is not a valid value, so the pass fails when
+   no `impl` is given. Making it `flopoco`, the interface's own fallback and
+   the frontend's argument, is the one-token fix; making the choice follow
+   `target` is the larger item the plan has.
+2. **The five delay registers in `sitofp`, `uitofp` and `fptosi`.** The
+   three carry 480 flip-flops at 32 bits, of which 15 are the valid pipeline
+   and the rest five 32-bit data stages, behind combinational converters that
+   close at 1 ns without them. A one-cycle unit keeps one stage, so the saving
+   is about four fifths of the data flip-flops. They share the multiplier's
+   defect too: `LATENCY` sizes only the valid pipeline while the data depth is
+   fixed at five, so the unit is wrong at any other latency. The change is shaped like the
    sequential multiplier's and is about the same size; unlike the multiplier,
    no retiming story has to be preserved here, only a copied Vitis latency.
-3. **`ndwire` and `SHIFT_REG_BREAK_DV`.** Two generators that produce
-   something no tool can read, at every parameter. Both are a few lines, and
+3. **`ndwire` and `SHIFT_REG_BREAK_DV`.** `ndwire` produces VHDL no tool
+   can read at every width; `SHIFT_REG_BREAK_DV` cannot be generated with
+   data, nor dataless with extra signals, and is fine only dataless without. Both are a few lines, and
    they are ranked here on cost rather than on importance: a library in which a
    sixth of the buffer implementations cannot be generated is a library
    nobody has run over.
@@ -418,6 +438,8 @@ third implementation, and the units above are not covered by anything.
 ## Reproducing
 
 ```bash
+SYNTH=/path/to/synthesis        # where install_synthesis_tools.sh put yosys, ghdl, opensta, asap7
+mkdir -p out/muli
 export PATH=$SYNTH/yosys/bin:$SYNTH/ghdl/bin:$SYNTH/opensta/bin:$PATH
 export GHDL_PREFIX=$SYNTH/ghdl/lib/ghdl ASAP7_DIR=$SYNTH/asap7 STA=$SYNTH/opensta/bin/sta
 
