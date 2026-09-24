@@ -236,6 +236,11 @@ GHZ=$(awk -v c="$CRITICAL" 'BEGIN { if (c > 0) printf "%.2f", 1000 / c; else pri
 # macro, counted with the liberty's area.
 NUM='[0-9.Ee+-]+'
 CELLS=$(grep -E "^\s+[0-9]+ +$NUM cells$" "$SYNTH_LOG" | tail -1 | awk '{print $1}')
+# The total counts yosys' `$scopeinfo` too: a record of the hierarchy that
+# flattening leaves behind, no logic and no area, and never written to the
+# mapped netlist (9,412 of the picorv32 Cpu's 33,256). They are not cells.
+SCOPE=$(awk -v n="$NUM" '$0 ~ "^ +[0-9]+ +" n " cells$" {s = 0} $0 ~ "^ +[0-9]+ +" n " +[$]scopeinfo$" {s += $1} END {print s + 0}' "$SYNTH_LOG")
+CELLS=$((CELLS - SCOPE))
 AREA=$(grep -E "^\s+[0-9]+ +$NUM cells$" "$SYNTH_LOG" | tail -1 | awk '{printf "%.1f", $2}')
 FLOPS=$(awk -v n="$NUM" -v re="$FLOP_RE" '$0 ~ "^ +[0-9]+ +" n " cells$" {s = 0} $0 ~ "^ +[0-9]+ +" n " +" re {s += $1} END {print s + 0}' "$SYNTH_LOG")
 BUFS=$(awk -v n="$NUM" -v re="$BUF_RE" '$0 ~ "^ +[0-9]+ +" n " cells$" {s = 0} $0 ~ "^ +[0-9]+ +" n " +" re {s += $1} END {print s + 0}' "$SYNTH_LOG")
