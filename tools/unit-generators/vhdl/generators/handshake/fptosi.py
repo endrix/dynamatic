@@ -20,7 +20,11 @@ def generate_fptosi(name, params):
 
     body = f"""
   float_value <= to_float(ins);
-  converted <= std_logic_vector(to_signed(float_value, 32));
+  -- Toward zero, as C, MLIR's arith.fptosi and RISC-V's fcvt.w.s convert:
+  -- float_pkg's default rounds to nearest (11.75 gave 12, not 11). Out of
+  -- range saturates, as float_pkg does either way.
+  converted <= std_logic_vector(
+    to_signed(float_value, 32, round_style => ieee.fixed_float_types.round_zero));
 
 {delay_body}
     """
