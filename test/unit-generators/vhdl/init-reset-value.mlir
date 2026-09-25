@@ -1,4 +1,4 @@
-// RUN: rm -rf %t && mkdir %t && cd %t && for p in 1:0 1:1 1:-1 2:0 2:1 2:2 2:3 2:-1 8:0 8:1 8:2 8:255 8:-1 8:-128 32:0 32:1 32:2 32:4294967295 32:-1; do \
+// RUN: rm -rf %t && mkdir %t && cd %t && for p in 1:0 1:1 1:-1 2:0 2:1 2:2 2:3 2:-1 8:0 8:1 8:2 8:255 8:-1 8:-128 32:0 32:1 32:2 32:4294967295 32:-1 100:1180591620717411303424 100:-1; do \
 // RUN:   w=${p%%:*}; v=${p#*:}; \
 // RUN:   python3 %dynamatic_src_root/tools/unit-generators/vhdl/vhdl-unit-generator.py -n init -o init.vhd -t init -p bitwidth=$w 'extra_signals={}' initial_value=$v || exit 1; \
 // RUN:   echo "width $w value $v"; grep 'dataReg <= "' init.vhd; done | FileCheck %s
@@ -53,6 +53,10 @@
 // CHECK-NEXT: dataReg <= "11111111111111111111111111111111";
 // CHECK:      width 32 value -1
 // CHECK-NEXT: dataReg <= "11111111111111111111111111111111";
+// CHECK:      width 100 value 1180591620717411303424
+// CHECK-NEXT: dataReg <= "0000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000";
+// CHECK:      width 100 value -1
+// CHECK-NEXT: dataReg <= "1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111";
 
 // With extra signals, which the signal manager concatenates above the data,
 // the value is the data's and the extra bits reset to zero.
