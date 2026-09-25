@@ -291,15 +291,36 @@ def QueueOp : Handshake_Op<"queue", [
     The signals are optional. A queue nobody queries is a FIFO, and carries no
     occupancy wires.
 
+    **A queue may hold tokens at reset** (`initialTokens`): a channel of a
+    dataflow network that starts with tokens on it, an SDF delay, which is
+    what lets a feedback loop fire at all. The first element is the first
+    token out. They are the queue's own contents, counted like any other:
+    `size` is their number and `space` the slots left from reset, and there
+    may be at most `numSlots` of them. Each is an integer or float attribute
+    of the channel's data type exactly; the RTL resets the FIFO's memory to
+    them.
+
     ```mlir
     %out = handshake.queue %in {numSlots = 4 : i64}
       : <i32, [space: i3 (U)]> to <i32, [size: i3]>
+    %fb = handshake.queue %nx {numSlots = 2 : i64,
+                               initialTokens = [-3 : i16, 7 : i16]}
+      : <i16> to <i16, [size: i2]>
     ```
   }];
 
   let arguments = (ins ChannelType:$ins,
-                       ConfinedAttr<I64Attr, [IntMinValue<1>]>:$numSlots);
+                       ConfinedAttr<I64Attr, [IntMinValue<1>]>:$numSlots,
+                       OptionalAttr<ArrayAttr>:$initialTokens);
   let results = (outs ChannelType:$outs);
+
+  // A queue that starts empty, as before `initialTokens` existed.
+  let builders = [
+    OpBuilder<(ins "::mlir::Type":$outs, "::mlir::Value":$ins,
+                   "uint64_t":$numSlots), [{
+      build($_builder, $_state, outs, ins, numSlots, ::mlir::ArrayAttr());
+    }]>
+  ];
 
   let assemblyFormat = [{
     $ins attr-dict `:` qualified(type($ins)) `to` qualified(type($outs))

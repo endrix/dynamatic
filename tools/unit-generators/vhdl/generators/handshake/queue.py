@@ -14,11 +14,21 @@ def generate_queue(name, params):
     registering the count is what keeps a consumer that steers on `space` from
     closing a combinational loop, its decision driving the `valid` that the
     `ready` behind `space` is answering.
+
+    `initial_tokens` is what the queue holds at reset, first out first: each
+    token's bits at the data width, joined by commas ("none", or nothing, for
+    none). The reset writes them to the first slots of the memory and starts
+    the count at their number and the tail past them, so from reset the output
+    is valid on the first of them, `size` counts them and `space` is the slots
+    left -- the queue a dataflow network's channel is when it starts with
+    tokens on it. A queue that starts empty is generated as it was.
     """
     num_slots = params["num_slots"]
     bitwidth = params["bitwidth"]
     size_width = params.get("size_width", 0)
     space_width = params.get("space_width", 0)
+    initial = _initial_tokens(name, params.get("initial_tokens", ""),
+                              num_slots, bitwidth)
 
     ports = []
     if bitwidth > 0:
@@ -44,7 +54,29 @@ def generate_queue(name, params):
                 f"std_logic_vector({bitwidth} - 1 downto 0);\n"
                 f"  signal Memory : FIFO_Memory;\n") if bitwidth > 0 else ""
 
-    write_proc = f"""
+    if initial:
+        # The tokens held at reset are written by the reset, into the slots
+        # the head reads first; the other slots are written before they are
+        # read, as in a queue that starts empty.
+        preload = "\n".join(f'        Memory({i}) <= "{bits}";'
+                            for i, bits in enumerate(initial))
+        write_proc = f"""
+  -- write to the tail slot; the reset writes the tokens held at reset
+  FifoWrite_proc : process (clk)
+  begin
+    if rising_edge(clk) then
+      if rst = '1' then
+{preload}
+      elsif WriteEn = '1' then
+        Memory(Tail) <= ins;
+      end if;
+    end if;
+  end process;
+
+  outs <= Memory(Head);
+""" if bitwidth > 0 else ""
+    else:
+        write_proc = f"""
   -- write to the tail slot
   FifoWrite_proc : process (clk)
   begin
@@ -57,6 +89,9 @@ def generate_queue(name, params):
 
   outs <= Memory(Head);
 """ if bitwidth > 0 else ""
+    # The count and the tail start past the tokens held at reset.
+    count_reset = len(initial)
+    tail_reset = len(initial) % num_slots
 
     publish = []
     if size_width > 0:
@@ -120,7 +155,7 @@ begin
   begin
     if rising_edge(clk) then
       if rst = '1' then
-        Count <= 0;
+        Count <= {count_reset};
       elsif WriteEn = '1' and ReadEn = '0' then
         Count <= Count + 1;
       elsif ReadEn = '1' and WriteEn = '0' then
@@ -133,7 +168,7 @@ begin
   begin
     if rising_edge(clk) then
       if rst = '1' then
-        Tail <= 0;
+        Tail <= {tail_reset};
       elsif WriteEn = '1' then
         Tail <= (Tail + 1) mod {num_slots};
       end if;
@@ -154,3 +189,25 @@ begin
 {publish_block}
 end architecture;
 """
+
+
+def _initial_tokens(name, text, num_slots, bitwidth):
+    """The tokens a queue holds at reset, as VHDL bit strings of `bitwidth`
+    bits, from the comma-separated bit strings HandshakeToHW hands over.
+    Refuses what the RTL could not hold: more tokens than slots, a token on a
+    dataless channel, a token of another width or not in binary."""
+    text = str(text).strip()
+    if not text or text == "none":
+        return []
+    tokens = [t.strip() for t in text.split(",")]
+    if len(tokens) > num_slots:
+        raise ValueError(
+            f"queue {name}: {len(tokens)} initial tokens but {num_slots} slots")
+    if bitwidth == 0:
+        raise ValueError(
+            f"queue {name}: initial tokens on a dataless channel")
+    for t in tokens:
+        if len(t) != bitwidth or any(ch not in "01" for ch in t):
+            raise ValueError(
+                f"queue {name}: initial token '{t}' is not {bitwidth} bits")
+    return tokens
