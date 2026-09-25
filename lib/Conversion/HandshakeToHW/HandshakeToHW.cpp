@@ -43,6 +43,7 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/TypeSwitch.h"
@@ -919,19 +920,45 @@ ModuleDiscriminator::ModuleDiscriminator(Operation *op) {
       .Case<handshake::InitOp>([&](handshake::InitOp initOp) {
         // The token the unit holds at reset: `INIT_VALUE`, an integer, when
         // the op says one (an actor's state variable starting at 4); else
-        // the boolean `INIT_TOKEN`, 0 or 1, as before.
+        // the boolean `INIT_TOKEN`, 0 or 1, as before. The generator is given
+        // the value's bits at the channel's width, a negative value in two's
+        // complement, as a 64-bit unsigned: a 32-bit one cut a wider
+        // channel's value. A value the width cannot hold is refused.
         auto paramsAttr =
             initOp->getAttrOfType<mlir::DictionaryAttr>("hw.parameters");
-        unsigned initialValue = 0;
+        uint64_t initialValue = 0;
         if (paramsAttr) {
           if (auto valueAttr = dyn_cast_or_null<mlir::IntegerAttr>(
-                  paramsAttr.get("INIT_VALUE")))
-            initialValue = valueAttr.getValue().getZExtValue();
-          else if (auto initTokenAttr = dyn_cast_or_null<mlir::BoolAttr>(
-                       paramsAttr.get("INIT_TOKEN")))
+                  paramsAttr.get("INIT_VALUE"))) {
+            unsigned width = 0;
+            if (auto channelType =
+                    dyn_cast<handshake::ChannelType>(initOp.getType()))
+              width = channelType.getDataBitWidth();
+            APInt value = valueAttr.getValue();
+            if (value.getBitWidth() < width)
+              value = valueAttr.getType().isUnsignedInteger()
+                          ? value.zext(width)
+                          : value.sext(width);
+            if (width > 64 || (width > 0 && !value.isIntN(width) &&
+                               !value.isSignedIntN(width))) {
+              initOp.emitError()
+                  << "INIT_VALUE "
+                  << llvm::toString(valueAttr.getValue(), 10,
+                                    !valueAttr.getType().isUnsignedInteger())
+                  << " does not fit the channel's " << width << " bits";
+              unsupported = true;
+              return;
+            }
+            if (width > 0)
+              initialValue = value.trunc(width).getZExtValue();
+          } else if (auto initTokenAttr = dyn_cast_or_null<mlir::BoolAttr>(
+                         paramsAttr.get("INIT_TOKEN")))
             initialValue = initTokenAttr.getValue() ? 1 : 0;
         }
-        addUnsigned("INITIAL_VALUE", initialValue);
+        addParam(
+            "INITIAL_VALUE",
+            IntegerAttr::get(IntegerType::get(ctx, 64, IntegerType::Unsigned),
+                             APInt(64, initialValue)));
       })
       // arith on raw wires -- the logic a function holds between an unbundle
       // and a bundle. The unit carries the wires and nothing else, so its

@@ -63,24 +63,38 @@ end architecture;
     return entity + architecture
 
 
-def _generate_init(name, bitwidth, initial_value):
+def _reset_bits(name, bitwidth, initial_value, value_bitwidth):
+    """The register's reset value as a VHDL bit string of `bitwidth` bits: the
+    integer `initial_value` at the channel's data width `value_bitwidth`, a
+    negative one in two's complement, and the bits above it (the extra
+    signals the signal manager concatenates over the data) zero.
+
+    The value is the integer, whatever it is: 1 on an 8-bit channel is
+    "00000001". (Until 2026-09 a 0 or a 1 was replicated over the width,
+    `(others => '1')`, so a state variable wider than one bit that starts at
+    1 came out of reset as -1.)"""
+    initial_value = int(initial_value)
+    if value_bitwidth == 0:
+        # dataless, its extra signals alone in the register: no value to hold
+        return f'"{0:0{bitwidth}b}"'
+    if not -(1 << (value_bitwidth - 1)) <= initial_value < (1 << value_bitwidth):
+        raise ValueError(
+            f"init {name}: initial value {initial_value} does not fit {value_bitwidth} bits")
+    bits = initial_value & ((1 << value_bitwidth) - 1)
+    return f'"{bits:0{bitwidth}b}"'
+
+
+def _generate_init(name, bitwidth, initial_value, value_bitwidth=None):
     init_dataless_name = f"{name}_dataless"
 
     dependencies = _generate_init_dataless(
         init_dataless_name)
 
-    # The register's reset value. 0 and 1 replicate the bit over the width as
-    # they always did (a `'1'` token on a one-bit channel); any other value is
-    # the integer itself, written out as a bit string of the channel's width
-    # (an actor's state variable that starts at 4).
-    initial_value = int(initial_value)
-    if initial_value in (0, 1):
-        dataReg_reset = f"(others => '{initial_value}')"
-    else:
-        if initial_value < 0 or initial_value >= (1 << bitwidth):
-            raise ValueError(
-                f"init {name}: initial value {initial_value} does not fit {bitwidth} bits")
-        dataReg_reset = f'"{initial_value:0{bitwidth}b}"'
+    # The register's reset value: the integer at the data's width (an actor's
+    # state variable that starts at 4, a one-bit token that starts at 1).
+    dataReg_reset = _reset_bits(
+        name, bitwidth, initial_value,
+        bitwidth if value_bitwidth is None else value_bitwidth)
 
     entity = f"""
 library ieee;
@@ -164,4 +178,5 @@ def _generate_init_signal_manager(name, bitwidth, extra_signals, initial_value):
             "extra_signals": extra_signals
         }],
         extra_signals,
-        lambda name: _generate_init(name, bitwidth + extra_signals_bitwidth, initial_value))
+        lambda name: _generate_init(name, bitwidth + extra_signals_bitwidth, initial_value,
+                                    bitwidth))
