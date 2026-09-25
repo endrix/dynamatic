@@ -1282,6 +1282,15 @@ protected:
                                       ConversionPatternRewriter &rewriter) {
     ModuleDiscriminator discriminator(op);
     StringRef name = getUniqueName(op);
+    // A guard that should never fire: the pass names every operation before
+    // converting, and the only operations made after that are the constants
+    // the conversion's folding materializes, which ConvertRawToHWInstance
+    // names. An instance with no name would export as signals named after its
+    // ports alone (`_outs`), which no HDL accepts; stop here, by name, instead.
+    if (name.empty()) {
+      op->emitError() << "operation has no name to give its hardware instance";
+      return nullptr;
+    }
     Location loc = op->getLoc();
     return createInstance(discriminator, name, loc, rewriter);
   }
@@ -2065,10 +2074,19 @@ namespace {
 
 /// An arith operation on raw wires becomes an instance the way a handshake
 /// operation does; only the port names come from elsewhere.
+///
+/// The operation may have been created after the pass named every operation:
+/// the conversion driver folds an illegal operation before it tries a pattern,
+/// and the arith dialect materializes a folded result as a fresh
+/// `arith.constant` (an `arith.xori %true, %true` becomes a `false`). Such an
+/// operation carries no name, and an instance without one exports as a signal
+/// named `_outs`, which no HDL accepts; it is named here instead.
 template <typename T>
 class ConvertRawToHWInstance : public OpConversionPattern<T> {
 public:
-  using OpConversionPattern<T>::OpConversionPattern;
+  ConvertRawToHWInstance(ChannelTypeConverter &typeConverter, MLIRContext *ctx,
+                         NameAnalysis &namer)
+      : OpConversionPattern<T>(typeConverter, ctx), namer(namer) {}
   using OpAdaptor = typename T::Adaptor;
 
   LogicalResult
@@ -2080,6 +2098,8 @@ public:
     if (inputs.size() != adaptor.getOperands().size() ||
         outputs.size() != op->getNumResults())
       return rewriter.notifyMatchFailure(op, "no unit on raw wires for it");
+    if (getUniqueName(op).empty())
+      rewriter.modifyOpInPlace(op, [&] { namer.setName(op); });
 
     for (auto [name, oprd] : llvm::zip(inputs, adaptor.getOperands()))
       converter.addInput(name, oprd);
@@ -2090,6 +2110,9 @@ public:
     hw::InstanceOp instOp = converter.convertToInstance(op, rewriter);
     return instOp ? success() : failure();
   }
+
+private:
+  NameAnalysis &namer;
 };
 
 /// Converts a Handshake-level instance operation to an equivalent HW-level one.
@@ -2952,8 +2975,13 @@ public:
         ConvertToHWInstance<handshake::SpecSaveCommitOp>,
         ConvertToHWInstance<handshake::SpeculatorOp>,
         ConvertToHWInstance<handshake::SpeculatingBranchOp>,
-        ConvertToHWInstance<handshake::NonSpecOp>,
-        // arith on raw wires
+        ConvertToHWInstance<handshake::NonSpecOp>
+        // clang-format on
+        >(typeConverter, funcOp->getContext());
+    // arith on raw wires, named on the way when the conversion's folding
+    // created them after the pass named everything
+    patterns.insert<
+        // clang-format off
         ConvertRawToHWInstance<arith::AndIOp>,
         ConvertRawToHWInstance<arith::OrIOp>,
         ConvertRawToHWInstance<arith::XOrIOp>,
@@ -2970,7 +2998,7 @@ public:
         ConvertRawToHWInstance<arith::ExtSIOp>,
         ConvertRawToHWInstance<arith::ConstantOp>
         // clang-format on
-        >(typeConverter, funcOp->getContext());
+        >(typeConverter, funcOp->getContext(), namer);
 
     // Everything must be converted to operations in the hw dialect
     ConversionTarget target(*ctx);
