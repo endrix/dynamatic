@@ -832,9 +832,13 @@
       {
         "name": "SPACE_WIDTH",
         "type": "unsigned"
+      },
+      {
+        "name": "INITIAL_TOKENS",
+        "type": "string"
       }
     ],
-    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t queue -p num_slots=$NUM_SLOTS bitwidth=$BITWIDTH size_width=$SIZE_WIDTH space_width=$SPACE_WIDTH"
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t queue -p num_slots=$NUM_SLOTS bitwidth=$BITWIDTH size_width=$SIZE_WIDTH space_width=$SPACE_WIDTH initial_tokens=\"'$INITIAL_TOKENS'\""
   },
   {
     "name": "arith.andi",

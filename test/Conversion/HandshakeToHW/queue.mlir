@@ -44,3 +44,25 @@ handshake.func @sizeOnly(%src: !handshake.channel<i32>, ...)
     : !handshake.channel<i32> to !handshake.channel<i32, [size: i2]>
   end %out : <i32, [size: i2]>
 }
+
+// -----
+
+// A queue holding tokens at reset: the generator is told their bits at the
+// channel's width, first out first -- -3 and 7 on 16 bits, a float as its
+// IEEE bits -- and a queue that starts empty is told "none" (the RTL matcher
+// refuses an empty parameter).
+// CHECK-LABEL: hw.module @initial(
+// CHECK-DAG: hw.module.extern @handshake_queue_0({{.*}}INITIAL_TOKENS = "1111111111111101,0000000000000111", NUM_SLOTS = 2 : ui32, SIZE_WIDTH = 2 : ui32, SPACE_WIDTH = 0 : ui32
+// CHECK-DAG: hw.module.extern @handshake_queue_1({{.*}}INITIAL_TOKENS = "00111111110000000000000000000000", NUM_SLOTS = 1 : ui32
+// CHECK-DAG: hw.module.extern @handshake_queue_2({{.*}}INITIAL_TOKENS = "none", NUM_SLOTS = 1 : ui32
+handshake.func @initial(%a: !handshake.channel<i16>, %b: !handshake.channel<f32>, %c: !handshake.channel<i16>, ...)
+    -> (!handshake.channel<i16, [size: i2]>, !handshake.channel<f32>, !handshake.channel<i16>)
+    attributes {argNames = ["a", "b", "c"], resNames = ["out0", "out1", "out2"]} {
+  %qa = handshake.queue %a {numSlots = 2 : i64, initialTokens = [-3 : i16, 7 : i16]}
+    : !handshake.channel<i16> to !handshake.channel<i16, [size: i2]>
+  %qb = handshake.queue %b {numSlots = 1 : i64, initialTokens = [1.5 : f32]}
+    : !handshake.channel<f32> to !handshake.channel<f32>
+  %qc = handshake.queue %c {numSlots = 1 : i64}
+    : !handshake.channel<i16> to !handshake.channel<i16>
+  end %qa, %qb, %qc : <i16, [size: i2]>, <f32>, <i16>
+}

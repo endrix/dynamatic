@@ -872,6 +872,28 @@ ModuleDiscriminator::ModuleDiscriminator(Operation *op) {
         unsigned width = queueOp.getOccupancyWidth();
         addUnsigned("SIZE_WIDTH", queueOp.getSizeSignal() ? width : 0);
         addUnsigned("SPACE_WIDTH", queueOp.getSpaceSignal() ? width : 0);
+        // The tokens the queue holds at reset, first out first, each as its
+        // bits at the channel's data width (a float's IEEE bits), joined by
+        // commas; "none" for a queue that starts empty (the RTL matcher
+        // refuses an empty parameter). The verifier has made each one an
+        // attribute of the data type exactly.
+        std::string tokens;
+        if (ArrayAttr initial = queueOp.getInitialTokensAttr()) {
+          for (auto [idx, token] : llvm::enumerate(initial)) {
+            APInt bits;
+            if (auto intAttr = dyn_cast<IntegerAttr>(token))
+              bits = intAttr.getValue();
+            else
+              bits = cast<FloatAttr>(token).getValue().bitcastToAPInt();
+            std::string bitString =
+                llvm::toString(bits, /*Radix=*/2, /*Signed=*/false);
+            bitString.insert(0, bits.getBitWidth() - bitString.size(), '0');
+            if (idx)
+              tokens += ",";
+            tokens += bitString;
+          }
+        }
+        addString("INITIAL_TOKENS", tokens.empty() ? "none" : tokens);
       })
       .Case<handshake::UnbundleOp, handshake::BundleOp>([&](auto op) {
         // Both ops come in two forms -- one that splits/joins a channel into a

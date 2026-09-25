@@ -488,6 +488,27 @@ LogicalResult QueueOp::verify() {
                        "the input channel; they are published in opposite "
                        "directions");
 
+  // The tokens held at reset are the queue's contents like any other: no more
+  // than it has slots, and each of the type it carries, exactly. A literal of
+  // another width or kind is refused rather than converted here: the producer
+  // of the IR knows how its source language converts, this op does not.
+  if (ArrayAttr tokens = getInitialTokensAttr()) {
+    if (tokens.size() > getNumSlots())
+      return emitOpError() << "holds " << tokens.size()
+                           << " initial tokens but has " << getNumSlots()
+                           << " slots";
+    Type dataType = insType.getDataType();
+    for (auto [idx, token] : llvm::enumerate(tokens)) {
+      auto typed = dyn_cast<TypedAttr>(token);
+      if (!typed || !isa<IntegerAttr, FloatAttr>(token) ||
+          typed.getType() != dataType)
+        return emitOpError() << "initial token #" << idx << " (" << token
+                             << ") is not an integer or float attribute of "
+                                "the channel's data type "
+                             << dataType;
+    }
+  }
+
   return success();
 }
 
