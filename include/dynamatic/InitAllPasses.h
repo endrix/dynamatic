@@ -19,6 +19,8 @@
 
 namespace dynamatic {
 
+/// The C frontend's passes (dynamatic/Frontend/Passes.h) are not included:
+/// they link libclang, and a tool that runs them registers them itself.
 inline void registerAllPasses() {
   // Passes defined in Dynamatic
   registerConversionPasses();
