@@ -43,9 +43,6 @@ List of options:
                                          (the directory must contain lib/cmake/llvm,
                                          lib/cmake/mlir and lib/cmake/clang)
   --enable-cbc                         : enable the CBC milp solver
-  --disable-libclang                   : do not link libclang (only --func-set-arg-names
-                                         needs it; tools then have no libclang.so
-                                         runtime dependency)
   --enable-abc                         : enable the ABC logic synthesis tool
   --build-legacy-lsq                   : build the legacy chisel-based lsq
   --check | -c                         : run tests during build
@@ -162,7 +159,6 @@ BUILD_CHIESEL_LSQ=0
 ENABLE_CBC=0
 CMAKE_DYNAMATIC_ENABLE_CBC=""
 CMAKE_DYNAMATIC_ENABLE_ABC=""
-CMAKE_DYNAMATIC_ENABLE_LIBCLANG=""
 CMAKE_DYNAMATIC_ENABLE_POLLY=""
 CMAKE_LLVM_ENABLE_ASSERTIONS=""
 LLVM_DIR="$PWD/build/llvm-project"
@@ -252,9 +248,6 @@ do
               ;;
           "--enable-abc")
               CMAKE_DYNAMATIC_ENABLE_ABC="-DDYNAMATIC_ENABLE_ABC=ON"
-              ;;
-          "--disable-libclang")
-              CMAKE_DYNAMATIC_ENABLE_LIBCLANG="-DDYNAMATIC_ENABLE_LIBCLANG=OFF"
               ;;
           "--build-legacy-lsq")
               BUILD_CHIESEL_LSQ=1
@@ -421,7 +414,6 @@ if should_run_cmake ; then
             $CMAKE_DYNAMATIC_ENABLE_XLS \
             $CMAKE_DYNAMATIC_ENABLE_CBC \
             $CMAKE_DYNAMATIC_ENABLE_ABC \
-            $CMAKE_DYNAMATIC_ENABLE_LIBCLANG \
             $CMAKE_LLVM_ENABLE_ASSERTIONS \
             $CMAKE_DYNAMATIC_ENABLE_LEQ_BINARIES
   else
@@ -439,7 +431,6 @@ if should_run_cmake ; then
         $CMAKE_DYNAMATIC_ENABLE_XLS \
         $CMAKE_DYNAMATIC_ENABLE_CBC \
         $CMAKE_DYNAMATIC_ENABLE_ABC \
-        $CMAKE_DYNAMATIC_ENABLE_LIBCLANG \
         $CMAKE_DYNAMATIC_ENABLE_LEQ_BINARIES
   fi
   exit_on_fail "Failed to cmake dynamatic"

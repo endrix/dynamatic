@@ -13,6 +13,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "dynamatic/Frontend/Passes.h"
 #include "dynamatic/InitAllDialects.h"
 #include "dynamatic/InitAllPasses.h"
 #include "experimental/InitAllPasses.h"
@@ -65,6 +66,8 @@ int main(int argc, char **argv) {
   // Register specific dialects and passes we want
   dynamatic::registerAllDialects(registry);
   dynamatic::registerAllPasses();
+  // The C frontend's libclang passes, which registerAllPasses() leaves out.
+  dynamatic::registerFrontendPasses();
   dynamatic::tutorials::registerAllPasses();
   dynamatic::experimental::registerAllPasses();
   registerTestPasses();

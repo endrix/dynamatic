@@ -30,6 +30,7 @@ target_link_libraries(dynamatic-opt
   DynamaticBlifImporter
   DynamaticTestTransforms
   DynamaticTransforms
+  DynamaticFrontend
   DynamaticTutorialsCreatingPasses
   DynamaticExperimentalConversion 
   DynamaticExperimentalTestTransforms

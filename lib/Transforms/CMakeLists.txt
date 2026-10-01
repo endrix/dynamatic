@@ -1,16 +1,9 @@
-# See DYNAMATIC_ENABLE_LIBCLANG in the top-level CMakeLists.
-set(DYNAMATIC_TRANSFORMS_LIBCLANG)
-if (DYNAMATIC_ENABLE_LIBCLANG)
-  set(DYNAMATIC_TRANSFORMS_LIBCLANG libclang)
-endif()
-
 add_dynamatic_library(DynamaticTransforms
   ArithReduceStrength.cpp
   BackAnnotate.cpp
   FlattenMemRefRowMajor.cpp
   ForceMemoryInterface.cpp
   FuncMaximizeSSA.cpp
-  FuncSetArgNames.cpp
   ConsumeProducerOutputAttrMarker.cpp
   HandshakeCanonicalize.cpp
   HandshakeDeactivateMemDependencies.cpp
@@ -43,7 +36,6 @@ add_dynamatic_library(DynamaticTransforms
   MLIRTransformUtils
   DynamaticSupport
   DynamaticAnalysis
-  ${DYNAMATIC_TRANSFORMS_LIBCLANG}
 )
 
 add_subdirectory(BufferPlacement)
