@@ -14,11 +14,13 @@ def generate_ram(name, params):
     # any size from the name pattern `sram_name`, a format with {size},
     # {width} and {addr}) or `openram` (OpenRAM's 1rw1r macros, one
     # read-write and one read port, fixed sizes). `sram_macros` lists the
-    # macros on hand as (name, words, width) triples; the smallest one that
+    # macros on hand as (name, words, width[, area]); the smallest one that
     # holds the memory is taken, padded with zeros where it is deeper or
-    # wider. FakeRAM generates a macro of the memory's own size from the
-    # name pattern and reads no list: its view is never padded. See
-    # _generate_ram_sram and _generate_ram_openram.
+    # wider, and a memory no macro holds is tiled: rows x columns of one
+    # macro, the kind of least total area (_pick_tiling). FakeRAM generates
+    # a macro of the memory's own size from the name pattern and reads no
+    # list: its view is one macro, never padded. See _generate_ram_sram,
+    # _generate_ram_openram and _generate_ram_openram_tiled.
     sram_threshold = params.get("sram_threshold", 0)
     sram_name = params.get("sram_name", "fakeram7_{size}x{width}")
     sram_interface = params.get("sram_interface", "fakeram")
@@ -46,14 +48,18 @@ def generate_ram(name, params):
         raise ValueError(f"sram_interface {sram_interface!r} is not fakeram or openram")
     if sram_interface == "fakeram":
         macro = (sram_name.format(size=size, width=data_width, addr=addr_width), size, data_width)
-    else:
-        macro = _pick_macro(sram_macros, size, data_width)
-    if macro is None:
-        sys.stderr.write(f"{name}: no macro in sram_macros holds {size} x {data_width}; "
-                         "the memory stays flops\n")
+        view = _generate_ram_sram(name, data_width, addr_width, size, macro)
+        return code, {f"sram/{name}.vhd": view}
+    macro = _pick_macro(sram_macros, size, data_width)
+    if macro is not None:
+        view = _generate_ram_openram(name, data_width, addr_width, size, macro)
+        return code, {f"sram/{name}.vhd": view}
+    tiling = _pick_tiling(sram_macros, size, data_width)
+    if tiling is None:
+        sys.stderr.write(f"{name}: no macro in sram_macros holds {size} x {data_width} "
+                         "and none tiles it; the memory stays flops\n")
         return code
-    view = (_generate_ram_openram if sram_interface == "openram" else _generate_ram_sram)(
-        name, data_width, addr_width, size, macro)
+    view = _generate_ram_openram_tiled(name, data_width, addr_width, size, *tiling)
     return code, {f"sram/{name}.vhd": view}
 
 
@@ -65,6 +71,39 @@ def _pick_macro(macros, size: int, width: int):
     if not fits:
         return None
     return min(fits, key=lambda m: (int(m[1]), int(m[2])))
+
+
+def _pick_tiling(macros, size: int, width: int):
+    """A memory no single macro holds, as `rows` x `cols` copies of one macro
+    of `macros`: rows = ceil(size / words) tiles in depth, cols = ceil(width /
+    macro width) in width. Returns (macro, rows, cols), or None when no macro
+    tiles it (the list is empty, or no macro has a power-of-two depth: the
+    tile is the address's top bits, so a tile's depth must be a power of
+    two).
+
+    The kind taken is the one of least TOTAL MACRO AREA, rows x cols x the
+    macro's area, then the fewest macros: a macro is 0.1 to 0.7 mm^2 on
+    sky130, the decode around it a few hundred cells, so area is what a
+    tiling costs and the count is the tie-break. The area is a triple's
+    optional fourth element (the liberty's `area`); without it, its
+    capacity, words x width -- the bits it spends, padding included. The
+    proxy ignores a macro's periphery, which makes a small macro cost more
+    per bit than a large one: on OpenRAM's sky130 macros it agrees with the
+    liberties' areas on MPEG-4 texture's 832 x 13 (13 x 44x64, 36,608 bits
+    and 1.37 mm^2, before 4 x 64x256, 65,536 bits and 1.68 mm^2) but not on
+    1,024 x 200 (it takes 80 x 44x64, 8.5 mm^2, where 8 x 128x256 is 5.8
+    mm^2). A table meant for large memories carries the areas."""
+    best = None
+    for m in macros:
+        words, mwidth = int(m[1]), int(m[2])
+        if words < 1 or mwidth < 1 or words & (words - 1):
+            continue
+        rows, cols = -(-int(size) // words), -(-int(width) // mwidth)
+        area = float(m[3]) if len(m) > 3 else words * mwidth
+        key = (rows * cols * area, rows * cols, words, mwidth)
+        if best is None or key < best[0]:
+            best = (key, (tuple(m[:3]), rows, cols))
+    return None if best is None else best[1]
 
 
 def _generate_ram(
@@ -206,8 +245,7 @@ begin
       clk     => clk,
       ce_in   => ce
     );
-end architecture;
-"""
+end architecture;\n"""
 
 
 def _generate_ram_openram(
@@ -309,8 +347,179 @@ begin
       addr1  => addr1,
       dout1  => dout1
     );
-end architecture;
-"""
+end architecture;\n"""
+
+
+def _generate_ram_openram_tiled(
+    name: str,
+    data_width: int,
+    addr_width: int,
+    size: int,
+    macro: tuple,
+    rows: int,
+    cols: int,
+):
+    """The OpenRAM view of a memory no single macro holds: `rows` x `cols`
+    copies of the 1rw1r macro `macro`, from _pick_tiling. Each macro keeps
+    _generate_ram_openram's port map -- the store on the read-write port 0,
+    the load on the read port 1 -- so a load and a store in one cycle are
+    both served here too, wherever they fall.
+
+    DEPTH. A tile holds `words` (a power of two, 2^k) consecutive words: the
+    address's low k bits are the macro's address, its top bits the tile. A
+    store selects one row: only that row's port-0 chip select goes low
+    (every macro sees the same address, data and write enable, and a macro
+    not selected ignores them). A load selects one row's port 1 the same
+    way. The read data is launched by the falling edge of the cycle that
+    sampled the load's address, and the reader samples it at the next
+    rising edge (see _generate_ram_openram), so the row it comes from is the
+    one that load selected: a register, `rd_row`, takes the one-hot row
+    select at the load's rising edge, and loadData is the AND-OR of each
+    row's dout1 with its bit. The register changes only on a load, so the
+    select stays put through the half cycle in which dout1 settles; one-hot
+    keeps the path from dout1 to loadData one AND and an OR tree, no
+    decoder, inside the half cycle the falling edge leaves. A row index past
+    the last tile (a memory of 832 words on 13 tiles of 64 has 16 row codes)
+    selects no row: no address of the memory reaches it.
+
+    WIDTH. A memory wider than the macro is `cols` macros side by side in
+    each row, column c holding bits c*width .. (c+1)*width - 1, the last
+    column padded with zeros; they share every control.
+
+    The flop model's behaviour is kept where the memory controller reads it:
+    loadData the cycle after the load (its read arbiter samples read data
+    only then, sel_prev in read_data_signals, and holds it itself). In the
+    cycles between loads the flop model holds the last word and the macros'
+    model drives X; nothing samples it. A load and a store at the same
+    address in one cycle read undefined data, as on one macro."""
+    mname, words, mwidth = macro[0], int(macro[1]), int(macro[2])
+    k = (words - 1).bit_length()
+    maddr = max(1, k)
+    masks = -(-mwidth // 8)
+    rowbits = addr_width - k
+    total = cols * mwidth
+
+    def row_of(addr):
+        if rows == 1:
+            return None
+        return f"unsigned({addr}({addr_width} - 1 downto {k}))"
+
+    if rows == 1:
+        csb0 = "  csb0(0) <= not storeEn;\n"
+        csb1 = "  csb1(0) <= not loadEn;\n"
+        addr0 = f"  addr0  <= std_logic_vector(resize(unsigned(storeAddr), {maddr}));\n"
+        addr1 = f"  addr1  <= std_logic_vector(resize(unsigned(loadAddr), {maddr}));\n"
+        select = f"  loadData <= dout1(0)({data_width} - 1 downto 0);\n"
+        rd_decl = ""
+    else:
+        csb0 = (f"  st_row <= {row_of('storeAddr')};\n"
+                f"  ld_row <= {row_of('loadAddr')};\n"
+                f"  rows_sel : for r in 0 to {rows} - 1 generate\n"
+                f"    csb0(r) <= '0' when storeEn = '1' and st_row = r else '1';\n"
+                f"    csb1(r) <= '0' when loadEn = '1' and ld_row = r else '1';\n"
+                f"  end generate;\n")
+        csb1 = ""
+        addr0 = f"  addr0  <= storeAddr({k} - 1 downto 0);\n"
+        addr1 = f"  addr1  <= loadAddr({k} - 1 downto 0);\n"
+        select = f"""  -- the row the load selected, one-hot, held until the next load
+  rd_row_reg : process(clk)
+  begin
+    if rising_edge(clk) then
+      if loadEn = '1' then
+        rd_row <= not csb1;
+      end if;
+    end if;
+  end process;
+
+  -- loadData: the AND-OR of each row's read data with its select bit
+  read_mux : process(rd_row, dout1)
+    variable acc : std_logic_vector({total} - 1 downto 0);
+  begin
+    acc := (others => '0');
+    for r in 0 to {rows} - 1 loop
+      if rd_row(r) = '1' then
+        acc := acc or dout1(r);
+      end if;
+    end loop;
+    loadData <= acc({data_width} - 1 downto 0);
+  end process;\n"""
+        rd_decl = (f"  signal st_row, ld_row     : unsigned({rowbits} - 1 downto 0);\n"
+                   f"  signal rd_row             : std_logic_vector({rows} - 1 downto 0);\n")
+    return f"""
+-- Synthesis view of {name}: the same entity as ../{name}.vhd, its body
+-- {rows} x {cols} OpenRAM 1rw1r macros {mname} ({words} x {mwidth} each,
+-- {rows * words} x {total} in all, holding {size} x {data_width}): {rows} row(s) in
+-- depth, {cols} column(s) in width. Every macro takes the store on port 0
+-- and the load on port 1; a row's chip selects are its address's.
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
+entity {name} is
+  port (
+    clk       : in std_logic;
+    rst       : in std_logic;
+    -- from circuit (mem_controller / LSQ)
+    loadEn    : in std_logic;
+    loadAddr  : in std_logic_vector({addr_width} - 1 downto 0);
+    storeEn   : in std_logic;
+    storeAddr : in std_logic_vector({addr_width} - 1 downto 0);
+    storeData : in std_logic_vector({data_width} - 1 downto 0);
+    -- to circuit (mem_controller / LSQ)
+    loadData  : out std_logic_vector({data_width} - 1 downto 0)
+  );
+end entity;
+
+architecture arch of {name} is
+  component {mname}
+    port (
+      clk0   : in  std_logic;
+      csb0   : in  std_logic;
+      web0   : in  std_logic;
+      wmask0 : in  std_logic_vector({masks} - 1 downto 0);
+      addr0  : in  std_logic_vector({maddr} - 1 downto 0);
+      din0   : in  std_logic_vector({mwidth} - 1 downto 0);
+      dout0  : out std_logic_vector({mwidth} - 1 downto 0);
+      clk1   : in  std_logic;
+      csb1   : in  std_logic;
+      addr1  : in  std_logic_vector({maddr} - 1 downto 0);
+      dout1  : out std_logic_vector({mwidth} - 1 downto 0)
+    );
+  end component;
+  type row_data is array (0 to {rows} - 1) of std_logic_vector({total} - 1 downto 0);
+  signal csb0, csb1         : std_logic_vector({rows} - 1 downto 0);
+  signal web0               : std_logic;
+  signal wmask0             : std_logic_vector({masks} - 1 downto 0);
+  signal addr0, addr1       : std_logic_vector({maddr} - 1 downto 0);
+  signal din0               : std_logic_vector({total} - 1 downto 0);
+  signal dout0, dout1       : row_data;
+{rd_decl}begin
+  -- chip select and write enable are active low; every byte lane is written;
+  -- only the row the address names is selected
+  web0   <= not storeEn;
+  wmask0 <= (others => '1');
+{csb0}{csb1}  -- the address within a tile; the data padded with zeros to the columns
+{addr0}{addr1}  din0   <= std_logic_vector(resize(unsigned(storeData), {total}));
+{select}
+  tiles : for r in 0 to {rows} - 1 generate
+    columns : for c in 0 to {cols} - 1 generate
+      macro : {mname}
+        port map (
+          clk0   => clk,
+          csb0   => csb0(r),
+          web0   => web0,
+          wmask0 => wmask0,
+          addr0  => addr0,
+          din0   => din0((c + 1) * {mwidth} - 1 downto c * {mwidth}),
+          dout0  => dout0(r)((c + 1) * {mwidth} - 1 downto c * {mwidth}),
+          clk1   => clk,
+          csb1   => csb1(r),
+          addr1  => addr1,
+          dout1  => dout1(r)((c + 1) * {mwidth} - 1 downto c * {mwidth})
+        );
+    end generate;
+  end generate;
+end architecture;\n"""
 
 
 """
