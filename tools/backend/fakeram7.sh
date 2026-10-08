@@ -3,35 +3,47 @@
 # views instantiate, generated with FakeRAM2.0, one per size.
 #
 # A handshake.ram above the generator's sram_threshold gets a synthesis view
-# under <hdl-dir>/sram/ that wraps a macro named after its own size
-# (rtl-config's sram_name, fakeram7_<words>x<bits>). ASAP7 ships no memory
-# compiler, so the macros are FakeRAM2.0's: a liberty, a LEF and a Verilog
-# model per macro, the area from the ASAP7 bitcell and track pitches. Every
-# macro a view names is generated once into <out-dir>/<name>/ (reused when
-# it is there), and the two lines printed are what report-timing.sh reads,
-# for the caller to eval:
+# under <hdl-dir>/sram/ that wraps a macro named after its own size:
+# fakeram7_dp_<words>x<bits>, a dual-port RAM (rtl-config's default,
+# sram_interface fakeram_dp: the store on one port, the load on the other),
+# or fakeram7_<words>x<bits>, a one-port RAM (sram_interface fakeram).
+# ASAP7 ships no memory compiler, so the macros are FakeRAM2.0's: a liberty,
+# a LEF and a Verilog model per macro, the area from the ASAP7 bitcell and
+# track pitches. Every macro a view names is generated once into
+# <out-dir>/<name>/ (reused when it is there), and the two lines printed are
+# what report-timing.sh reads, for the caller to eval:
 #
 #   eval "$(tools/backend/fakeram7.sh <hdl-dir> <out-dir>)"
 #   HDL_SRAM=1 PDK=asap7 tools/backend/report-timing.sh <hdl-dir> <top> ...
 #
 # A report then counts each macro as one cell at its liberty's area, and
-# names them on its "macros:" line. FakeRAM2.0's area depends on the size;
-# its timing and power do not (every macro has the same 218 ps access time
-# and the same 129 uW leakage, constants in its class_memory.py), so the
-# area is the only figure of a macro this measures.
+# names them on its "macros:" line. FakeRAM2.0's area depends on the size
+# and not on the ports: a dual-port macro has the one-port macro's area,
+# where a real two-port bitcell is larger, so a dual-port area is a lower
+# bound. Its timing and power do not depend on the size either (every macro
+# has the same access time and leakage, constants in its model), so the area
+# is the only figure of a macro this measures.
 #
-# The Verilog model FakeRAM2.0 writes beside each macro ORs a store into the
-# word already there (`mem[addr_in] <= (wd_in) | (mem[addr_in])`: its write
-# mask was taken out and the masking expression left behind, upstream as of
-# b6b1c83), so a simulation of it reads wrong data after the first store to
-# an address. The model is rewritten here to overwrite the word, the way the
-# liberty's one read-write port and the flop model behave; the liberty and
-# the LEF are untouched. A model that does not have the line is an error,
-# not a silent pass: a FakeRAM2.0 that changed it needs this read again.
+# The Verilog models are corrected for simulation, the liberty and the LEF
+# left as they are:
+#   - the dual-port model registers the address and then reads the
+#     registered address (`addr_a_reg <= addr_a; dout_a <= mem[addr_a_reg]`),
+#     a read two cycles after its address where the liberty has one clock to
+#     dout arc and the flop model reads in one: it is rewritten to read the
+#     address it samples (`dout_a <= mem[addr_a]`), on both ports. Both ports
+#     are clocked by clk_a in the model; the views tie clk_a and clk_b to
+#     the one design clock, so that is the same thing.
+#   - the one-port model of FakeRAM2.0 before it moved into OpenROAD's flow
+#     scripts ORs a store into the word already there
+#     (`mem[addr_in] <= (wd_in) | (mem[addr_in])`, a write mask's expression
+#     left behind); a model that has it is rewritten to overwrite.
+# A model that has neither the line to correct nor the corrected one is an
+# error, not a silent pass: a FakeRAM2.0 that changed it needs reading again.
 #
-# FAKERAM_DIR is a FakeRAM2.0 checkout (install_synthesis_tools.sh puts one
-# in the synthesis prefix); PYTHON runs it (python3 by default; it needs
-# nothing outside the standard library).
+# FAKERAM_DIR is a FakeRAM2.0 checkout: OpenROAD-flow-scripts'
+# tools/FakeRAM2.0, which install_synthesis_tools.sh copies into the
+# synthesis prefix (the standalone repository has no dual-port RAM); PYTHON
+# runs it (python3 by default; it needs nothing outside the standard library).
 #
 # Exit status: 0 with the two lines (empty values when the export has no
 # SRAM view); 1 when FakeRAM2.0 failed; 2 when it is not installed.
@@ -45,31 +57,34 @@ HDL_DIR="$1"
 OUT_DIR="$(mkdir -p "${2:-$HDL_DIR/sram/macros}" && cd "${2:-$HDL_DIR/sram/macros}" && pwd)"
 PYTHON="${PYTHON:-python3}"
 
-# The macros the views declare, "<name> <words> <bits>" each, once.
-mapfile -t MACROS < <(grep -ho "component fakeram7_[0-9]*x[0-9]*" "$HDL_DIR"/sram/*.vhd 2>/dev/null \
-  | awk '{print $2}' | sort -u | sed 's/^fakeram7_\([0-9]*\)x\([0-9]*\)$/fakeram7_\1x\2 \1 \2/')
+# The macros the views declare, "<name> <words> <bits> <SP|DP>" each, once.
+mapfile -t MACROS < <(grep -hoE "component fakeram7_(dp_)?[0-9]+x[0-9]+" "$HDL_DIR"/sram/*.vhd 2>/dev/null \
+  | awk '{print $2}' | sort -u \
+  | sed -E 's/^(fakeram7_dp_([0-9]+)x([0-9]+))$/\1 \2 \3 DP/; s/^(fakeram7_([0-9]+)x([0-9]+))$/\1 \2 \3 SP/')
 if [[ ${#MACROS[@]} -eq 0 ]]; then
   echo "MACRO_LIBS=''"
   echo "MACRO_LEFS=''"
   exit 0
 fi
 
-# The ones not generated yet, in one configuration: ASAP7's pitches (M4 pins,
-# 48 nm tracks, 54 nm poly, 27 nm fins), as FakeRAM2.0's own example sets
-# them, one bank, no column mux.
-TODO=()
-for m in "${MACROS[@]}"; do
-  read -r name words bits <<<"$m"
-  [[ -s "$OUT_DIR/$name/$name.lib" && -s "$OUT_DIR/$name/$name.lef" ]] || TODO+=("$name $words $bits")
-done
-if [[ ${#TODO[@]} -gt 0 ]]; then
+# The ones not generated yet, one configuration per port count: ASAP7's
+# pitches (M4 pins, 48 nm tracks, 54 nm poly, 27 nm fins), as FakeRAM2.0's
+# own example sets them, one bank, no column mux.
+for ports in SP DP; do
+  TODO=()
+  for m in "${MACROS[@]}"; do
+    read -r name words bits kind <<<"$m"
+    [[ "$kind" == "$ports" ]] || continue
+    [[ -s "$OUT_DIR/$name/$name.lib" && -s "$OUT_DIR/$name/$name.lef" ]] || TODO+=("$name $words $bits")
+  done
+  [[ ${#TODO[@]} -gt 0 ]] || continue
   if [[ -z "${FAKERAM_DIR:-}" || ! -f "$FAKERAM_DIR/run.py" ]]; then
     echo "fakeram7: no FakeRAM2.0 (set FAKERAM_DIR to a checkout); no macros generated" >&2
     exit 2
   fi
-  CFG="$OUT_DIR/fakeram7.cfg"
+  CFG="$OUT_DIR/fakeram7-$ports.cfg"
   {
-    cat <<'EOF'
+    cat <<EOF
 {
   "tech_nm": 7,
   "voltage": 0.7,
@@ -84,6 +99,8 @@ if [[ ${#TODO[@]} -gt 0 ]]; then
   "fin_pitch_nm": 27,
   "snap_width_nm": 190,
   "snap_height_nm": 1400,
+  "memory_type": "RAM",
+  "port_configuration": "$ports",
   "srams": [
 EOF
     sep=""
@@ -95,22 +112,31 @@ EOF
     printf '\n  ]\n}\n'
   } > "$CFG"
   # run.py imports its utils/ relative to itself, from any directory.
-  if ! "$PYTHON" "$FAKERAM_DIR/run.py" "$CFG" --output_dir "$OUT_DIR" > "$OUT_DIR/fakeram7.log" 2>&1; then
-    echo "fakeram7: FakeRAM2.0 failed (see $OUT_DIR/fakeram7.log)" >&2
-    tail -5 "$OUT_DIR/fakeram7.log" >&2
+  if ! "$PYTHON" "$FAKERAM_DIR/run.py" "$CFG" --output_dir "$OUT_DIR" > "$OUT_DIR/fakeram7-$ports.log" 2>&1; then
+    echo "fakeram7: FakeRAM2.0 failed (see $OUT_DIR/fakeram7-$ports.log)" >&2
+    tail -5 "$OUT_DIR/fakeram7-$ports.log" >&2
     exit 1
   fi
-fi
+done
 
-# The store: overwrite, not OR (above), in every model, a reused one too
-# (one generated before this correction existed); a corrected one is left.
+# The models, corrected (above), every one, a reused one too; a corrected
+# one is left as it is.
 for m in "${MACROS[@]}"; do
-  read -r name _ <<<"$m"
+  read -r name _ _ kind <<<"$m"
   v="$OUT_DIR/$name/$name.v"
-  sed -i 's/mem\[addr_in\] <= (wd_in) | (mem\[addr_in\]);/mem[addr_in] <= wd_in;/' "$v" 2>/dev/null
-  if ! grep -q 'mem\[addr_in\] <= wd_in;' "$v" 2>/dev/null; then
-    echo "fakeram7: $v has neither FakeRAM2.0's OR-ing store nor the corrected one; not corrected" >&2
-    exit 1
+  if [[ "$kind" == DP ]]; then
+    sed -i -E '/^\s*addr_[ab]_reg <= addr_[ab];\s*$/d; /^\s*reg .* addr_[ab]_reg;\s*$/d; s/(dout_([ab]) <= mem\[)addr_[ab]_reg\]/\1addr_\2]/' "$v" 2>/dev/null
+    if grep -q 'mem\[addr_[ab]_reg\]' "$v" 2>/dev/null \
+       || [[ "$(grep -cE 'dout_([ab]) <= mem\[addr_\1\];' "$v" 2>/dev/null)" != 2 ]]; then
+      echo "fakeram7: $v reads neither through addr_a_reg/addr_b_reg nor the address it samples; not corrected" >&2
+      exit 1
+    fi
+  else
+    sed -i 's/mem\[addr_in\] <= (wd_in) | (mem\[addr_in\]);/mem[addr_in] <= wd_in;/' "$v" 2>/dev/null
+    if ! grep -q 'mem\[addr_in\] <= wd_in;' "$v" 2>/dev/null; then
+      echo "fakeram7: $v has neither the OR-ing store nor the overwriting one; not corrected" >&2
+      exit 1
+    fi
   fi
 done
 
@@ -118,7 +144,7 @@ LIBS="" LEFS=""
 for m in "${MACROS[@]}"; do
   read -r name _ <<<"$m"
   if [[ ! -s "$OUT_DIR/$name/$name.lib" ]]; then
-    echo "fakeram7: FakeRAM2.0 wrote no $name.lib (see $OUT_DIR/fakeram7.log)" >&2
+    echo "fakeram7: FakeRAM2.0 wrote no $name.lib (see $OUT_DIR/fakeram7-*.log)" >&2
     exit 1
   fi
   LIBS="$LIBS${LIBS:+ }$OUT_DIR/$name/$name.lib"

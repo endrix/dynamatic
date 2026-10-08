@@ -1,18 +1,14 @@
-// RUN: export SRAM_INTERFACE=fakeram; %export-vhdl
+// RUN: %export-vhdl
 // RUN: FileCheck %s -input-file %t/handshake_ram_0.vhd --check-prefix=FLOPS
 // RUN: FileCheck %s -input-file %t/sram/handshake_ram_0.vhd --check-prefix=SRAM
 // RUN: ls %t/sram | FileCheck %s --check-prefix=ONLY
 
-// SRAM macros, on FakeRAM2.0's one-port RAM (SRAM_INTERFACE=fakeram; the
-// default is the dual-port one, ram-sram-dp.mlir). The RTL config's ram
-// generator carries `sram_threshold=64`, and the macro is named
-// fakeram7_{size}x{width}: a memory of at least 64 words
-// with no initial content keeps its flop model (the simulation reads the
-// export's directory as before) and ALSO gets, under sram/, the same entity
-// wrapping the 1RW macro the name pattern gives -- a component instantiation
-// a synthesis binds to the macro's liberty. An 8-word memory stays flops
-// only, and so does a 64-word one with an initial value: a macro powers up
-// empty.
+// SRAM macros on FakeRAM2.0's dual-port RAM, the RTL config's default
+// (sram_interface fakeram_dp, the macro fakeram7_dp_{size}x{width}): the
+// store on port a, the load on port b, so a load and a store in one cycle
+// are both served, as the flop model serves them. Which memories get a view
+// is decided as for the one-port RAM (ram-sram.mlir): at least 64 words, no
+// initial content.
 module {
   hw.module @test(in %clk : i1, in %rst : i1, in %loadEn : i1, in %loadAddr : i6,
                   in %storeEn : i1, in %storeAddr : i6, in %storeData : i32,
@@ -32,18 +28,23 @@ module {
   // FLOPS: write_proc : process(clk)
   // FLOPS-NOT: component
 
-  // The synthesis view: the same entity, the macro as a component, one port
-  // shared -- the store's address when it stores, the chip enabled by either.
+  // The synthesis view: the same entity, the dual-port macro as a
+  // component, the store on port a and the load on port b, nothing shared.
   // SRAM-LABEL: entity handshake_ram_0 is
   // SRAM: loadData  : out std_logic_vector(32 - 1 downto 0)
   // SRAM: architecture arch of handshake_ram_0
-  // SRAM-NEXT: component fakeram7_64x32
-  // SRAM: addr <= storeAddr when storeEn = '1' else loadAddr;
-  // SRAM-NEXT: ce   <= loadEn or storeEn;
-  // SRAM: macro : fakeram7_64x32
-  // SRAM: rd_out  => loadData,
-  // SRAM: we_in   => storeEn,
-  // SRAM: ce_in   => ce
+  // SRAM-NEXT: component fakeram7_dp_64x32
+  // SRAM: macro : fakeram7_dp_64x32
+  // SRAM: we_a   => storeEn,
+  // SRAM-NEXT: addr_a => storeAddr,
+  // SRAM-NEXT: din_a  => storeData,
+  // SRAM-NEXT: dout_a => open,
+  // SRAM-NEXT: clk_a  => clk,
+  // SRAM-NEXT: we_b   => '0',
+  // SRAM-NEXT: addr_b => loadAddr,
+  // SRAM: dout_b => loadData,
+  // SRAM-NEXT: clk_b  => clk
+  // SRAM-NOT: ce_in
   // SRAM-NOT: read_proc
 
   // Only the 64-word, zero-initialised memory has a view under sram/.
