@@ -20,6 +20,15 @@
 # and the same 129 uW leakage, constants in its class_memory.py), so the
 # area is the only figure of a macro this measures.
 #
+# The Verilog model FakeRAM2.0 writes beside each macro ORs a store into the
+# word already there (`mem[addr_in] <= (wd_in) | (mem[addr_in])`: its write
+# mask was taken out and the masking expression left behind, upstream as of
+# b6b1c83), so a simulation of it reads wrong data after the first store to
+# an address. The model is rewritten here to overwrite the word, the way the
+# liberty's one read-write port and the flop model behave; the liberty and
+# the LEF are untouched. A model that does not have the line is an error,
+# not a silent pass: a FakeRAM2.0 that changed it needs this read again.
+#
 # FAKERAM_DIR is a FakeRAM2.0 checkout (install_synthesis_tools.sh puts one
 # in the synthesis prefix); PYTHON runs it (python3 by default; it needs
 # nothing outside the standard library).
@@ -92,6 +101,18 @@ EOF
     exit 1
   fi
 fi
+
+# The store: overwrite, not OR (above), in every model, a reused one too
+# (one generated before this correction existed); a corrected one is left.
+for m in "${MACROS[@]}"; do
+  read -r name _ <<<"$m"
+  v="$OUT_DIR/$name/$name.v"
+  sed -i 's/mem\[addr_in\] <= (wd_in) | (mem\[addr_in\]);/mem[addr_in] <= wd_in;/' "$v" 2>/dev/null
+  if ! grep -q 'mem\[addr_in\] <= wd_in;' "$v" 2>/dev/null; then
+    echo "fakeram7: $v has neither FakeRAM2.0's OR-ing store nor the corrected one; not corrected" >&2
+    exit 1
+  fi
+done
 
 LIBS="" LEFS=""
 for m in "${MACROS[@]}"; do
