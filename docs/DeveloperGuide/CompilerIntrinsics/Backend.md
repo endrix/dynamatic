@@ -354,6 +354,8 @@ Every macro of a tiling keeps the single macro's port map, the store on port 0 a
 
 What the FakeRAM 1RW macro cannot do is a load and a store in one cycle: the flop model serves both, the load reading the old word; in the view the store takes the port and the load is lost. The lowering's per-memory access chain never issues the two together (measured on the transposer's two 64-word buffers: zero such cycles over three firings, with and without backpressure); a design that does needs a 1R1W macro and a view with two ports, not this one.
 
+The FakeRAM macros themselves come from `tools/backend/fakeram7.sh <hdl-dir> [out-dir]`: it collects the `fakeram7_<words>x<bits>` names the export's `sram/` views declare, generates each once with [FakeRAM2.0](https://github.com/ABKGroup/FakeRAM2.0) (`FAKERAM_DIR`, a checkout; ASAP7's pitches, one bank) and prints `MACRO_LIBS` and `MACRO_LEFS` for the caller to `eval` before `HDL_SRAM=1 report-timing.sh`, whose `macros:` line then carries each macro's area and whose cell area includes them. On MPEG-4 texture's export: 64x13 is 34.9 um^2, 64x32 86.0, 208x6 52.4 and 832x13 454.2; the transposer's actor is 697.7 um^2 of cells and two 64x32 macros, 869.6 um^2 in all, with the same critical path. FakeRAM2.0's area follows the size; its timing and power do not (a 218 ps access and 129 uW of leakage for every macro, constants in its model), so the area is the one figure of a macro this measures.
+
 ### Arithmetic Units with IP cores
 
 For arithmetic units which have IP cores, the beta backend does not handle the IP cores themselves: these are generated offline, and imported into the synthesis or simulation library unconditonally.
