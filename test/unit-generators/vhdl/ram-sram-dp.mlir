@@ -3,8 +3,8 @@
 // RUN: FileCheck %s -input-file %t/sram/handshake_ram_0.vhd --check-prefix=SRAM
 // RUN: ls %t/sram | FileCheck %s --check-prefix=ONLY
 
-// SRAM macros on FakeRAM2.0's dual-port RAM, the RTL config's default
-// (sram_interface fakeram_dp, the macro fakeram7_dp_{size}x{width}): the
+// SRAM macros on FakeRAM2.0's dual-port RAM, what a memory gets unless it
+// says it needs one port (no PORTS here; the macro fakeram7_dp_{size}x{width}): the
 // store on port a, the load on port b, so a load and a store in one cycle
 // are both served, as the flop model serves them. Which memories get a view
 // is decided as for the one-port RAM (ram-sram.mlir): at least 64 words, no
@@ -42,8 +42,10 @@ module {
   // SRAM-NEXT: clk_a  => clk,
   // SRAM-NEXT: we_b   => '0',
   // SRAM-NEXT: addr_b => loadAddr,
-  // SRAM: dout_b => loadData,
+  // SRAM: dout_b => raw,
   // SRAM-NEXT: clk_b  => clk
+  // SRAM: written_proc : process(clk)
+  // SRAM: loadData <= raw when word_written = '1' else (others => '0');
   // SRAM-NOT: ce_in
   // SRAM-NOT: read_proc
 

@@ -4,9 +4,9 @@
 #
 # A handshake.ram above the generator's sram_threshold gets a synthesis view
 # under <hdl-dir>/sram/ that wraps a macro named after its own size:
-# fakeram7_dp_<words>x<bits>, a dual-port RAM (rtl-config's default,
-# sram_interface fakeram_dp: the store on one port, the load on the other),
-# or fakeram7_<words>x<bits>, a one-port RAM (sram_interface fakeram).
+# fakeram7_dp_<words>x<bits>, a dual-port RAM (the store on one port, the
+# load on the other), or fakeram7_<words>x<bits>, a one-port RAM where the
+# memory needs one port (its PORTS parameter, from the front end).
 # ASAP7 ships no memory compiler, so the macros are FakeRAM2.0's: a liberty,
 # a LEF and a Verilog model per macro, the area from the ASAP7 bitcell and
 # track pitches. Every macro a view names is generated once into

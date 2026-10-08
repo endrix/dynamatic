@@ -40,7 +40,7 @@ module {
   // DEPTH-NEXT: rd_row <= not csb1;
   // DEPTH: if rd_row(r) = '1' then
   // DEPTH-NEXT: acc := acc or dout1(r);
-  // DEPTH: loadData <= acc(13 - 1 downto 0);
+  // DEPTH: raw <= acc(13 - 1 downto 0);
   // DEPTH: tiles : for r in 0 to 13 - 1 generate
   // DEPTH-NEXT: columns : for c in 0 to 1 - 1 generate
   // DEPTH-NEXT: macro : sky130_sram_1rw1r_44x64_8
@@ -54,7 +54,7 @@ module {
   // WIDTH: csb0(0) <= not storeEn;
   // WIDTH-NEXT: csb1(0) <= not loadEn;
   // WIDTH: din0   <= std_logic_vector(resize(unsigned(storeData), 220));
-  // WIDTH-NEXT: loadData <= dout1(0)(200 - 1 downto 0);
+  // WIDTH-NEXT: raw <= dout1(0)(200 - 1 downto 0);
   // WIDTH: columns : for c in 0 to 5 - 1 generate
   // WIDTH: din0   => din0((c + 1) * 44 - 1 downto c * 44),
 
