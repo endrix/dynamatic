@@ -1184,8 +1184,7 @@ ModuleDiscriminator::ModuleDiscriminator(handshake::RAMOp *op,
   // end knows (streamblocks' esa-annotate-ram-ports): 1 where a load and a
   // store never reach it in one cycle, 2 otherwise. Absent, the generator
   // takes 2, which is always safe.
-  if (auto ramPorts =
-          (*op)->getAttrOfType<IntegerAttr>("handshake.ram_ports"))
+  if (auto ramPorts = (*op)->getAttrOfType<IntegerAttr>("handshake.ram_ports"))
     addUnsigned("PORTS", ramPorts.getValue().getZExtValue());
 
   if (auto initialValueAttr =
