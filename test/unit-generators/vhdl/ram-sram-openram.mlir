@@ -36,9 +36,13 @@ module {
   // SRAM: csb1   <= not loadEn;
   // SRAM: addr0  <= std_logic_vector(resize(unsigned(storeAddr), 6));
   // SRAM-NEXT: din0   <= std_logic_vector(resize(unsigned(storeData), 44));
-  // SRAM: loadData <= dout1(32 - 1 downto 0);
+  // SRAM: raw <= dout1(32 - 1 downto 0);
   // SRAM: macro : sky130_sram_1rw1r_44x64_8
   // SRAM: dout1  => dout1
+  // A word never stored since reset reads as zero, as in the FakeRAM views
+  // (ram-sram.mlir): OpenRAM's macros power up with garbage too.
+  // SRAM: written_proc : process(clk)
+  // SRAM: loadData <= raw when word_written = '1' else (others => '0');
   // SRAM-NOT: read_proc
   // ONLY: handshake_ram_0.vhd
   // ONLY-NOT: handshake_ram_1.vhd

@@ -447,6 +447,14 @@ LogicalResult RTLMatch::registerBitwidthParameter(hw::HWModuleExternOp &modOp,
     // Output 0: loadData
     serializedParams["ADDR_WIDTH"] = getBitwidthString(modType.getInputType(1));
     serializedParams["DATA_WIDTH"] = getBitwidthString(modType.getInputType(4));
+    // The ports an SRAM macro behind it needs (HandshakeToHW's PORTS, from
+    // the front end's handshake.ram_ports); 2, always safe, when not said.
+    serializedParams["PORTS"] = "2";
+    if (auto params =
+            modOp->getAttrOfType<DictionaryAttr>(RTL_PARAMETERS_ATTR_NAME))
+      if (auto ports = params.getAs<IntegerAttr>("PORTS"))
+        serializedParams["PORTS"] =
+            std::to_string(ports.getValue().getZExtValue());
   } else {
     modOp->emitError("Failed to get bitwidth of operation");
     return failure();

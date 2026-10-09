@@ -10,20 +10,36 @@ def generate_ram(name, params):
     # SRAM macros: a memory of at least `sram_threshold` words (0: none)
     # with no initial content also gets a synthesis view under sram/, the
     # same entity wrapping a macro. `sram_interface` says which macro family
-    # and port map: `fakeram` (FakeRAM2.0, one read-write port, a macro of
-    # any size from the name pattern `sram_name`, a format with {size},
-    # {width} and {addr}) or `openram` (OpenRAM's 1rw1r macros, one
-    # read-write and one read port, fixed sizes). `sram_macros` lists the
+    # and port map: `fakeram` (FakeRAM2.0, the default: a macro of any size
+    # from the name pattern `sram_name`, a format with {size}, {width} and
+    # {addr}) or `openram` (OpenRAM's 1rw1r macros, one read-write and one
+    # read port, fixed sizes). `sram_ports` is how many ports the memory
+    # needs (the RAM's PORTS parameter, from the front end's
+    # `handshake.ram_ports`; 2 when it is not given): under `fakeram`, 1 is
+    # the one-port RAM (fakeram7_{size}x{width} by default) and 2 the
+    # dual-port one (fakeram7_dp_{size}x{width}), the store on one port and
+    # the load on the other. Two ports serve a load and a store in one
+    # cycle, which the flop model does and the memory controller issues
+    # where nothing orders them (twice on one of MPEG-4 texture's RAMs, its
+    # output wrong with a one-port view); one is enough where something
+    # does. OpenRAM's macros have the two ports whatever the number.
+    # `sram_macros` lists the
     # macros on hand as (name, words, width[, area]); the smallest one that
     # holds the memory is taken, padded with zeros where it is deeper or
     # wider, and a memory no macro holds is tiled: rows x columns of one
     # macro, the kind of least total area (_pick_tiling). FakeRAM generates
     # a macro of the memory's own size from the name pattern and reads no
-    # list: its view is one macro, never padded. See _generate_ram_sram,
+    # list: its view is one macro, never padded. Every view reads a word
+    # never stored since reset as zero, its declared content
+    # (_with_written_bits). See _generate_ram_sram, _generate_ram_sram_dp,
     # _generate_ram_openram and _generate_ram_openram_tiled.
     sram_threshold = params.get("sram_threshold", 0)
-    sram_name = params.get("sram_name", "fakeram7_{size}x{width}")
     sram_interface = params.get("sram_interface", "fakeram")
+    sram_ports = int(params.get("sram_ports") or 2)
+    if sram_ports not in (1, 2):
+        raise ValueError(f"sram_ports {sram_ports} is not 1 or 2")
+    sram_name = params.get("sram_name") or (
+        "fakeram7_{size}x{width}" if sram_ports == 1 else "fakeram7_dp_{size}x{width}")
     sram_macros = params.get("sram_macros", [])
     # RESET TO THE DECLARED CONTENT, for a target that has no other way to
     # load it. Off by default: on an FPGA the bitstream already loads the
@@ -48,19 +64,70 @@ def generate_ram(name, params):
         raise ValueError(f"sram_interface {sram_interface!r} is not fakeram or openram")
     if sram_interface == "fakeram":
         macro = (sram_name.format(size=size, width=data_width, addr=addr_width), size, data_width)
-        view = _generate_ram_sram(name, data_width, addr_width, size, macro)
-        return code, {f"sram/{name}.vhd": view}
-    macro = _pick_macro(sram_macros, size, data_width)
-    if macro is not None:
+        gen = _generate_ram_sram if sram_ports == 1 else _generate_ram_sram_dp
+        view = gen(name, data_width, addr_width, size, macro)
+    elif (macro := _pick_macro(sram_macros, size, data_width)) is not None:
         view = _generate_ram_openram(name, data_width, addr_width, size, macro)
-        return code, {f"sram/{name}.vhd": view}
-    tiling = _pick_tiling(sram_macros, size, data_width)
-    if tiling is None:
-        sys.stderr.write(f"{name}: no macro in sram_macros holds {size} x {data_width} "
-                         "and none tiles it; the memory stays flops\n")
-        return code
-    view = _generate_ram_openram_tiled(name, data_width, addr_width, size, *tiling)
-    return code, {f"sram/{name}.vhd": view}
+    else:
+        tiling = _pick_tiling(sram_macros, size, data_width)
+        if tiling is None:
+            sys.stderr.write(f"{name}: no macro in sram_macros holds {size} x {data_width} "
+                             "and none tiles it; the memory stays flops\n")
+            return code
+        view = _generate_ram_openram_tiled(name, data_width, addr_width, size, *tiling)
+    return code, {f"sram/{name}.vhd": _with_written_bits(view, size, data_width)}
+
+
+def _with_written_bits(view: str, size: int, data_width: int) -> str:
+    """A view that reads a word never stored since reset as zero.
+
+    A view is written only for a memory whose declared content is all
+    zeros (_is_sram), and a program may load a word before it stores one,
+    relying on that zero: MPEG-4 texture's 832 x 13 RAM in the inverse AC
+    prediction loads seven words before any store reaches them. The flop
+    model has the zero from its reset (reset_content); a macro powers up
+    with whatever its bitcells hold, and with the macros' contents random
+    the texture's output was wrong (119 to 128 values in three seeds).
+
+    So the view keeps one bit a word beside the macro, in flip-flops: all
+    cleared by the reset, set by a store to the word. A load registers its
+    word's bit at the edge that samples its address, as the macro registers
+    the word, and loadData is the macro's word when the bit was set and
+    zero when it was not. A load and a store to one word in one cycle read
+    the bit from before the store, as they read the old word. `size`
+    flip-flops and a `size`-way mux, no cycle: the bit is ready when the
+    word is."""
+    arch = view.index("architecture arch of")
+    head, body = view[:arch], view[arch:]
+    # the view's own drive of loadData goes to `raw`, masked below
+    body = body.replace("loadData", "raw")
+    decl = (f"  signal raw     : std_logic_vector({data_width} - 1 downto 0);\n"
+            f"  signal written : std_logic_vector({size} - 1 downto 0);\n"
+            "  signal word_written : std_logic;\n")
+    logic = f"""
+  -- a word never stored since reset reads as zero, its declared content
+  written_proc : process(clk)
+  begin
+    if rising_edge(clk) then
+      if (rst = '1') then
+        written      <= (others => '0');
+        word_written <= '0';
+      else
+        if (loadEn = '1') then
+          word_written <= written(to_integer(unsigned(loadAddr)));
+        end if;
+        if (storeEn = '1') then
+          written(to_integer(unsigned(storeAddr))) <= '1';
+        end if;
+      end if;
+    end if;
+  end process;
+  loadData <= raw when word_written = '1' else (others => '0');
+"""
+    at = body.index("\nbegin\n")
+    body = body[:at] + "\n" + decl.rstrip("\n") + body[at:]
+    end = body.rindex("end architecture;")
+    return head + body[:end] + logic.lstrip("\n") + body[end:]
 
 
 def _pick_macro(macros, size: int, width: int):
@@ -193,7 +260,9 @@ def _generate_ram_sram(
     serves both (the load reads the old word); here the store takes the port
     and the load is lost. The lowering's per-memory access chain never issues
     the two together (measured on the transposer's two 64-word buffers, zero
-    such cycles); a design that does needs a 1R1W macro: the OpenRAM view."""
+    such cycles), but MPEG-4 texture's does, twice on one RAM, and its output
+    is wrong with this view: a design that does needs two ports, the
+    dual-port view (_generate_ram_sram_dp) or the OpenRAM one."""
     macro = macro[0]
     return f"""
 -- Synthesis view of {name}: the same entity as ../{name}.vhd, its body the
@@ -244,6 +313,83 @@ begin
       wd_in   => storeData,
       clk     => clk,
       ce_in   => ce
+    );
+end architecture;\n"""
+
+
+def _generate_ram_sram_dp(
+    name: str,
+    data_width: int,
+    addr_width: int,
+    size: int,
+    macro: tuple,
+):
+    """The synthesis view on a FakeRAM2.0 dual-port RAM (two read-write
+    ports, `a` and `b`: we, addr, din, dout and clk each): the entity of
+    _generate_ram, its body a component instantiation with the store on port
+    a and the load on port b, both clocked by the design's clock. A load and
+    a store in ONE cycle are both served, as the flop model serves them; at
+    the same address the load reads the old word, as in the flop model.
+
+    The macro has no enable: port b reads loadAddr at every rising edge and
+    its registered dout is the flop model's loadData in the cycle after a
+    load, which is when the memory controller's read arbiter samples it
+    (sel_prev in read_data_signals); between loads the flop model holds its
+    last word and the macro reads whatever loadAddr is, a word the arbiter
+    does not sample. Port b never writes (we_b low, din_b zero) and port a's
+    dout is left open."""
+    macro = macro[0]
+    return f"""
+-- Synthesis view of {name}: the same entity as ../{name}.vhd, its body the
+-- dual-port SRAM macro {macro} ({size} x {data_width}): the store on port
+-- a, the load on port b.
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
+entity {name} is
+  port (
+    clk       : in std_logic;
+    rst       : in std_logic;
+    -- from circuit (mem_controller / LSQ)
+    loadEn    : in std_logic;
+    loadAddr  : in std_logic_vector({addr_width} - 1 downto 0);
+    storeEn   : in std_logic;
+    storeAddr : in std_logic_vector({addr_width} - 1 downto 0);
+    storeData : in std_logic_vector({data_width} - 1 downto 0);
+    -- to circuit (mem_controller / LSQ)
+    loadData  : out std_logic_vector({data_width} - 1 downto 0)
+  );
+end entity;
+
+architecture arch of {name} is
+  component {macro}
+    port (
+      we_a   : in  std_logic;
+      addr_a : in  std_logic_vector({addr_width} - 1 downto 0);
+      din_a  : in  std_logic_vector({data_width} - 1 downto 0);
+      dout_a : out std_logic_vector({data_width} - 1 downto 0);
+      clk_a  : in  std_logic;
+      we_b   : in  std_logic;
+      addr_b : in  std_logic_vector({addr_width} - 1 downto 0);
+      din_b  : in  std_logic_vector({data_width} - 1 downto 0);
+      dout_b : out std_logic_vector({data_width} - 1 downto 0);
+      clk_b  : in  std_logic
+    );
+  end component;
+begin
+  macro : {macro}
+    port map (
+      we_a   => storeEn,
+      addr_a => storeAddr,
+      din_a  => storeData,
+      dout_a => open,
+      clk_a  => clk,
+      we_b   => '0',
+      addr_b => loadAddr,
+      din_b  => (others => '0'),
+      dout_b => loadData,
+      clk_b  => clk
     );
 end architecture;\n"""
 

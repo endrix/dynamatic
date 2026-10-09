@@ -1180,6 +1180,12 @@ ModuleDiscriminator::ModuleDiscriminator(handshake::RAMOp *op,
   addUnsigned("DATA_WIDTH", ports.dataWidth);
   addUnsigned("ADDR_WIDTH", ports.addrWidth);
   addUnsigned("SIZE", resType.getNumElements());
+  // How many ports an SRAM macro behind the memory needs, when the front
+  // end knows (streamblocks' esa-annotate-ram-ports): 1 where a load and a
+  // store never reach it in one cycle, 2 otherwise. Absent, the generator
+  // takes 2, which is always safe.
+  if (auto ramPorts = (*op)->getAttrOfType<IntegerAttr>("handshake.ram_ports"))
+    addUnsigned("PORTS", ramPorts.getValue().getZExtValue());
 
   if (auto initialValueAttr =
           dyn_cast<DenseElementsAttr>(op->getInitialValueAttr())) {
