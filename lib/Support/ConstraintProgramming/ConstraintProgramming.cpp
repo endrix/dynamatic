@@ -58,6 +58,13 @@ mlir::LogicalResult CbcSoluParser::parseSolverOutput(StringRef soluFileName) {
       status = CPSolver::Status::INFEASIBLE;
     } else if (line.starts_with("Unbounded")) {
       status = CPSolver::Status::UNBOUNDED;
+    } else if (line.starts_with("Stopped on") &&
+               line.contains("(no integer solution")) {
+      // Example:
+      // "Stopped on time (no integer solution - continuous used) - ..."
+      // The values that follow are the continuous relaxation's, not a
+      // solution.
+      status = CPSolver::Status::NOSOLUTION;
     } else if (line.starts_with("Stopped on time")) {
       status = CPSolver::Status::NONOPTIMAL;
     } else {
@@ -526,7 +533,8 @@ void GurobiSolver::optimize() {
     break;
   case GRB_SUBOPTIMAL:
   case GRB_TIME_LIMIT:
-    status = NONOPTIMAL;
+    // Stopped on its time limit, Gurobi has a solution only if it found one.
+    status = model->get(GRB_IntAttr_SolCount) > 0 ? NONOPTIMAL : NOSOLUTION;
     break;
   case GRB_UNBOUNDED:
   case GRB_INF_OR_UNBD:
