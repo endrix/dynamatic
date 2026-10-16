@@ -425,35 +425,34 @@ floor the unit puts under the clock -- against the cycles that many
 iterations take, which is what `getInternalCombinationalDelay` and
 `getLatency` read.
 
-One iteration, measured (`components-asap7.stages.json` at 1.0 ns and
+One iteration, measured (`components-asap7.stages.json`, SLVT at 1.0 ns, and
 `components-sky130.stages.json` at 10.0 ns, in nanoseconds), beside the
 pipelined multiplier's own stage:
 
 | unit | 8 | 16 | 32 | 64 |
 | --- | --- | --- | --- | --- |
-| ASAP7 `divui.sequential` | 0.342 | 0.494 | 0.870 | 1.526 |
-| ASAP7 `muli.sequential.4` | 0.468 | 0.670 | 1.049 | 1.634 |
-| ASAP7 `muli.sequential.8` | 0.431 | 0.672 | 1.041 | 1.166 |
-| ASAP7 `muli` (pipelined) | 0.438 | 0.704 | 1.062 | 1.699 |
-| sky130 `divui.sequential` | 2.139 | 3.747 | 6.323 | 9.030 |
-| sky130 `muli.sequential.4` | 2.802 | 4.117 | 6.111 | 10.557 |
-| sky130 `muli.sequential.8` | 2.852 | 5.222 | 7.263 | 9.762 |
-| sky130 `muli` (pipelined) | 2.732 | 4.648 | 7.308 | 10.199 |
+| ASAP7 `divui.sequential` | 0.184 | 0.244 | 0.277 | 0.342 |
+| ASAP7 `muli.sequential.4` | 0.300 | 0.360 | 0.443 | 0.458 |
+| ASAP7 `muli.sequential.8` | 0.286 | 0.376 | 0.450 | 0.524 |
+| ASAP7 `muli` (pipelined) | 0.305 | 0.432 | 0.577 | 0.758 |
+| sky130 `divui.sequential` | 1.939 | 2.639 | 3.386 | 6.323 |
+| sky130 `muli.sequential.4` | 2.488 | 3.008 | 4.778 | 9.116 |
+| sky130 `muli.sequential.8` | 2.765 | 3.651 | 4.992 | 9.660 |
+| sky130 `muli` (pipelined) | 3.022 | 4.140 | 5.516 | 7.333 |
 
-The divider is also characterized at 1, 2 and 4 bits (ASAP7: 0.168, 0.230,
-0.251). Read the multiplier rows with the accumulator in mind: the step is a
-partial product and a full-width add, and at 32 bits the add is most of it,
-which is why the step at 4 and the step at 8 are within 2% of each other
-there and of the whole product. The step separates from the product at 64
-bits, where the sequential unit at step 8 is 1.166 ns against the pipelined
-unit's 1.699.
+The divider is also characterized at 1, 2 and 4 bits (ASAP7: 0.113, 0.154,
+0.168). Read the multiplier rows with the accumulator in mind: a step is a
+partial product and a full-width add, one carry-save tree with one prefix
+adder at its end (see "The adders"), so it grows slowly with the width: at
+64 bits the sequential unit's step is 0.458 ns (four bits a step) against
+the pipelined unit's whole product at 0.758.
 
 The ready path is where the two implementations differ port to port. On
-ASAP7 the sequential multiplier's is 0.048 ns and the pipelined one's
-0.180 ns; on sky130 they are 0.389 ns (step 8; 0.407 at step 4) and
+ASAP7 the sequential multiplier's is 0.033 ns and the pipelined one's
+0.124 ns; on sky130 they are 0.406 ns (step 8; 0.405 at step 4) and
 6.854 ns. `handshake.divui`'s
 delays are carried from the reference model and are all zero, so the
-sequential divider's 0.051 ns (ASAP7) and 0.407 ns (sky130) are the first
+sequential divider's 0.034 ns (ASAP7) and 0.407 ns (sky130) are the first
 measured numbers that unit has.
 
 Only the placers that model the ready and valid paths read those numbers
