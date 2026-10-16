@@ -109,16 +109,21 @@ def characterize_generated(unit_name, entries, dirs, dynamatic_dir,
         latency_table (dict): the unit's latency in the reference model.
 
     Returns:
-        List[UnitCharacterization]: one per point.
+        dict: model key -> List[UnitCharacterization]. A unit with a SIZE
+            attribute has an entry per size (generated_units.SIZES), and its
+            base entry is the base size's; any other unit has its base entry.
     """
     os.system(f"rm -rf {dirs['hdl']}/*")
     os.system(f"rm -rf {dirs['tcl']}/*")
     # The entity, named the way export-rtl names it (`handshake_buffer_0`):
     # the unit name's last part alone can be a VHDL keyword (`buffer`).
     module_name = unit_name.replace(".", "_")
-    chars, scripts = [], []
+    sized = any(param["name"] == "SIZE"
+                for entry in entries for param in entry.get("parameters", []))
+    keyed, scripts = {}, []
     for i, (entry, variables, width) in enumerate(generated_units.points(
-            entries, parameters_ranges["DATA_TYPE"], latency_table)):
+            entries, parameters_ranges["DATA_TYPE"], latency_table,
+            generated_units.SIZES if sized else None)):
         point_dir = f"{dirs['hdl']}/{i}"
         os.makedirs(point_dir, exist_ok=True)
         top_def_file = get_hdl_files(
@@ -130,10 +135,17 @@ def characterize_generated(unit_name, entries, dirs, dynamatic_dir,
             dirs["rpt"], dirs["log"], clock_period, module_name,
             baked_params=dict(variables, DATA_TYPE=width), id_offset=i,
             defer=True)
-        chars.extend(point_chars)
+        keys = [unit_name]
+        if sized:
+            size = int(variables["SIZE"])
+            keys = [generated_units.size_key(unit_name, size)]
+            if size in generated_units.ATTRIBUTE_VALUES["SIZE"]:
+                keys.append(unit_name)
+        for key in keys:
+            keyed.setdefault(key, []).extend(point_chars)
         scripts.extend(point_scripts)
     run_synthesis(scripts, synth_tool, f"{dirs['log']}/synth_{unit_name}_log.txt")
-    return chars
+    return keyed
 
 
 def run_characterization(json_input, json_output, dynamatic_dir, synth_tool, clock_period, reference_json):
@@ -205,11 +217,12 @@ def run_characterization(json_input, json_output, dynamatic_dir, synth_tool, clo
             generated_done.add(unit_name)
             print(f"Processing unit: {unit_name}")
             entries = [u for u in dataflow_units if u.get("name") == unit_name]
-            map_unit_to_list_unit_chars.setdefault(unit_name, []).extend(
-                characterize_generated(unit_name, entries, dirs, dynamatic_dir,
-                                       all_dependencies_dict, synth_tool,
-                                       clock_period,
-                                       reference_latencies.get(unit_name)))
+            keyed = characterize_generated(unit_name, entries, dirs, dynamatic_dir,
+                                           all_dependencies_dict, synth_tool,
+                                           clock_period,
+                                           reference_latencies.get(unit_name))
+            for key, chars in keyed.items():
+                map_unit_to_list_unit_chars.setdefault(key, []).extend(chars)
             continue
         # We assume that units with no unit_name are just for dependencies
         if unit_name == None:

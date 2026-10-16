@@ -33,8 +33,9 @@ NO_EXTRA_SIGNALS = "'{}'"
 # values with the maximum, as over the six hand-written buffers: the model
 # never says a path is shorter than some instance makes it.
 #
-#   SIZE       the model has no size dimension: the size the hand-written
-#              characterization used (parameters_ranges).
+#   SIZE       the base entry's size, the one the hand-written
+#              characterization used (parameters_ranges); the other sizes
+#              are entries of their own (SIZES below).
 #   PREDICATE  every integer comparison: an equality is a tree of XORs, an
 #              order is a carry chain, and both are `handshake.cmpi`.
 #   TEHB       a mux or merge with and without its output buffer.
@@ -51,6 +52,29 @@ ATTRIBUTE_VALUES = {
     "IMPL": ["pipelined"],
     "STEP": [1],
 }
+
+# The sizes a unit with a SIZE attribute is characterized at, each an entry
+# `<name>.size.<N>` of its own: a fork's ready is an AND over its outputs and
+# a mux's data a select over its inputs, so the delays grow with the
+# size, and a design's forks reach two hundred outputs. TimingDatabase's
+# getModel times an op by the smallest size at or above its own. Past the
+# base size, a unit is written at the widths SIZED_WIDTHS only: a width is
+# also looked up at the smallest one at or above it, and every size times
+# the sweep's widths would be most of the run.
+SIZES = [2, 3, 4, 8, 16, 32, 64, 128, 256]
+SIZED_WIDTHS = [1, 8, 32, 64]
+
+
+def size_key(unit_name, size):
+    """The model key of a unit's entry at one size."""
+    return f"{unit_name}.size.{size}"
+
+
+def base_unit(key):
+    """The unit a model key is an entry of: `handshake.fork.size.8` is
+    `handshake.fork`'s."""
+    return re.sub(r"\.size\.\d+$", "", key)
+
 
 # A buffer's type decides its slots and its data-to-valid latency, which the
 # buffer operation's verifier holds to (HandshakeOps.cpp, BufferOp::verify),
@@ -165,7 +189,7 @@ def entry_matches(entry, attributes):
     return True
 
 
-def points(entries, widths, latency_table=None):
+def points(entries, widths, latency_table=None, sizes=None):
     """
     Every instance of a unit the sweep characterizes.
 
@@ -175,6 +199,9 @@ def points(entries, widths, latency_table=None):
         widths (list): the data widths to write it at.
         latency_table (dict): the unit's latency in the reference model, for
             a unit with a LATENCY attribute.
+        sizes (list): the sizes to write a unit with a SIZE attribute at;
+            the base size alone when None. Past the base size, the widths
+            are SIZED_WIDTHS.
 
     Returns:
         list: (entry, variables, width) per instance; `variables` fills the
@@ -197,6 +224,8 @@ def points(entries, widths, latency_table=None):
             continue
         if name == "LATENCY":
             values = [reference_latency(latency_table)]
+        elif name == "SIZE" and sizes:
+            values = sizes
         else:
             assert name in ATTRIBUTE_VALUES, \
                 f"{unit_name}: no values to sweep its attribute {name} over"
@@ -209,7 +238,9 @@ def points(entries, widths, latency_table=None):
         entry = next((e for e in entries if entry_matches(e, attributes)), None)
         if entry is None:
             continue
-        for width in widths:
+        size = int(attributes.get("SIZE", ATTRIBUTE_VALUES["SIZE"][0]))
+        point_widths = widths if size in ATTRIBUTE_VALUES["SIZE"] else SIZED_WIDTHS
+        for width in point_widths:
             variables = dict(attributes)
             variables.update(type_variables(
                 unit_name, width, int(attributes.get("SIZE", 1))))

@@ -106,8 +106,64 @@ const TimingModel *TimingDatabase::getModel(StringRef timingModelKey) const {
   return &it->second;
 }
 
+/// The number of channels a unit joins or splits, as its RTL's SIZE parameter
+/// counts them (HandshakeToHW sets it the same way), for the units whose
+/// handshake grows with it: a fork's ready is an AND over its outputs, a
+/// mux's data a select tree over its inputs. 0 for every other unit.
+static unsigned getUnitSize(Operation *op) {
+  return llvm::TypeSwitch<Operation *, unsigned>(op)
+      .Case<handshake::ForkOp, handshake::LazyForkOp>(
+          [](auto forkOp) { return forkOp->getNumResults(); })
+      .Case<handshake::MuxOp>(
+          [](handshake::MuxOp muxOp) { return muxOp.getDataOperands().size(); })
+      .Case<handshake::ControlMergeOp>([](handshake::ControlMergeOp cmergeOp) {
+        return cmergeOp.getDataOperands().size();
+      })
+      .Case<handshake::MergeOp, handshake::FirstOp, handshake::JoinOp,
+            handshake::BlockerOp>(
+          [](auto joinOp) { return joinOp->getNumOperands(); })
+      .Default([](Operation *) { return 0u; });
+}
+
 const TimingModel *TimingDatabase::getModel(Operation *op) const {
   StringRef baseName = op->getName().getStringRef();
+
+  // A unit whose delays grow with its size is characterised at several sizes,
+  // each an entry `<name>.size.<N>` beside the base entry, for the same reason
+  // a multiplier's step is in its key: an entry nests by retiming path,
+  // bitwidth and clock period, and a size is none of those. The op is timed
+  // by the smallest size at or above its own, a bound from above, as a width
+  // is; past the largest, by the largest, with a remark. A model with no
+  // sized entries for the unit times it by its base entry.
+  if (unsigned size = getUnitSize(op)) {
+    std::string prefix = (baseName + ".size.").str();
+    std::optional<uint64_t> nearest, largest;
+    for (const auto &entry : models) {
+      StringRef key = entry.getKey();
+      if (!key.starts_with(prefix))
+        continue;
+      uint64_t candidate;
+      if (key.drop_front(prefix.size()).getAsInteger(10, candidate))
+        continue;
+      if (candidate >= size && (!nearest || candidate < *nearest))
+        nearest = candidate;
+      if (!largest || candidate > *largest)
+        largest = candidate;
+    }
+    if (nearest)
+      return getModel(StringRef(prefix + std::to_string(*nearest)));
+    if (largest) {
+      std::string wanted = prefix + std::to_string(size);
+      std::string largestKey = prefix + std::to_string(*largest);
+      if (reportedMissingImpls.insert(wanted).second)
+        op->emitRemark() << "TimingDatabase::getModel: no timing model for \""
+                         << wanted << "\"; the entry for \"" << largestKey
+                         << "\", the largest size characterised, is used "
+                            "instead";
+      return getModel(StringRef(largestKey));
+    }
+  }
+
   // if the operation is a floating point operation with multiple
   // possible implementations
   if (auto fpuImplInterface =

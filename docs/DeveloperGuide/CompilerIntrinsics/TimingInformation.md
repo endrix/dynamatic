@@ -144,7 +144,7 @@ buffers. The sweep:
 | attribute | values |
 | --- | --- |
 | the data width | 1 to 64 bits (`parameters_ranges["DATA_TYPE"]`); an address is `ADDR_TYPE` |
-| `SIZE` | 2: the model has no size dimension |
+| `SIZE` | 2 for the base entry; 2 to 256 for the size entries (see "The units keyed by size") |
 | `PREDICATE` (`cmpi`) | all ten: an equality is a tree of XORs, an order a carry chain |
 | `TEHB` (`mux`, `merge`) | with and without the output buffer |
 | `BUFFER_TYPE` | the six types the hand-written files covered, each with the slots and data-to-valid latency the buffer's verifier requires (one slot, or two for a FIFO or a shift register) |
@@ -541,6 +541,84 @@ before the model's table (`esa-unit-impl` writes it). So on the esa flow an
 latency table is read only for an op that names the implementation and
 carries no `latency`.
 
+### The units keyed by size
+
+Some units join or split a number of channels, and their handshake grows
+with it. A fork's ready is an AND over its outputs, and a mux's data a
+select over its inputs. A design's forks are not all two-way: the
+Gemmini actors exported by StreamBlocks have 3,744 forks, 1,171 of them
+wider than two, 83 with 32 outputs or more, and the widest with 208. An
+entry measured at two outputs times every one of them as a two-way fork.
+
+So a PDK characterization also writes these units at several sizes, each an
+entry of its own, `<name>.size.<N>` (`generated_units.SIZES`: 2, 3, 4, 8,
+16, 32, 64, 128 and 256). The units are fork, lazy_fork, mux, merge,
+control_merge and first. The size is in the key for the reason the
+multiplier's step is: an entry nests by retiming path, bitwidth and clock
+period, and a size is none of those. The base entry, `<name>`, is the size-2
+one, as before. A sized entry is measured at 1, 8, 32 and 64 bits only,
+since a width is also looked up at the smallest one at or above it.
+
+`TimingDatabase::getModel(op)` reads the op's size as `HandshakeToHW` writes
+the RTL's `SIZE`:
+
+- fork and lazy_fork: their results;
+- mux and control_merge: their data operands;
+- merge, first, join and blocker: their operands.
+
+It then returns the entry for the smallest size at or above it, a bound from
+above, as for a width. Past the largest size, it returns the largest, with a
+remark once per size:
+
+```
+remark: TimingDatabase::getModel: no timing model for "handshake.fork.size.300";
+the entry for "handshake.fork.size.256", the largest size characterised, is
+used instead
+```
+
+A model with no sized entries for a unit, `components.json` for one, times
+it by its base entry, as before. The placers and `esa-cut-to-period` all go
+through `getModel(op)`, so every one of them reads the sized entries.
+
+A bound from above holds only if no larger size has a shorter path, and a
+measurement can have one: ABC maps each size afresh, and a merge at 256
+inputs came out faster than at 128. So the characterization writes each
+sized entry's delays as the largest at its size or any smaller one
+(`report_parser.bound_sizes`). On the four models this raises 16 to 18 of
+the 54 sized entries, by at most 0.23 ns on ASAP7 and 1.5 ns on sky130.
+
+What the sizes measured, the longest of an entry's delays (any port to any
+port, any of its widths), in ns, before that bound:
+
+| unit | model | 2 | 8 | 32 | 64 | 128 | 256 |
+|---|---|---|---|---|---|---|---|
+| mux | ASAP7 SLVT | 0.090 | 0.221 | 0.411 | 0.677 | 1.124 | 2.547 |
+| | sky130 | 1.447 | 1.766 | 3.536 | 5.663 | 10.140 | 17.482 |
+| first | ASAP7 SLVT | 0.165 | 0.271 | 0.551 | 0.980 | 1.850 | 3.682 |
+| | sky130 | 1.877 | 3.555 | 6.623 | 9.848 | 17.700 | 35.768 |
+| control_merge | ASAP7 SLVT | 0.131 | 0.161 | 0.343 | 0.600 | 0.983 | 1.811 |
+| | sky130 | 1.140 | 2.464 | 5.534 | 7.361 | 12.296 | 22.463 |
+| merge | ASAP7 SLVT | 0.129 | 0.173 | 0.405 | 0.884 | 0.931 | 0.744 |
+| | sky130 | 1.121 | 2.499 | 6.406 | 10.022 | 9.875 | 8.963 |
+| lazy_fork | ASAP7 SLVT | 0.010 | 0.048 | 0.115 | 0.186 | 0.230 | 0.536 |
+| | sky130 | 0.114 | 0.291 | 1.070 | 1.785 | 3.128 | 7.406 |
+| fork | ASAP7 SLVT | 0.017 | 0.079 | 0.096 | 0.081 | 0.136 | 0.091 |
+| | sky130 | 0.180 | 0.450 | 0.970 | 1.147 | 1.247 | 1.079 |
+
+Of the sized entries longer than 0.1 ns on SLVT, LVT is 1.09 to 1.25 times
+them and RVT 1.41 to 1.63 times.
+
+A fork's ready stays shallow: 256 outputs cost little more than eight. The
+mux, first and control_merge grow in proportion to their inputs, not to
+the logarithm of them: their generators write the selection as a loop of
+`if`s over the inputs, and synthesis keeps the loop a chain. In the mux
+(`generators/handshake/mux.py`) the index matches one input at most, which
+synthesis cannot tell; in first and control_merge the loop is a priority
+among the valid inputs, which a prefix structure would make logarithmic
+and a loop does not. A unit's own delay is not one a placer can cut, so on
+ASAP7 SLVT a mux of more than about a hundred inputs does not fit a 1 ns
+period whatever the buffers.
+
 ### What the model does not contain
 
 The characterization script skips some units and carries their entries from
@@ -684,7 +762,7 @@ The TimingDatabase provides several core methods:
 
 2. **[TimingModel* getModel(OperationName opName)](https://github.com/EPFL-LAP/dynamatic/blob/main/lib/Support/TimingModels.cpp#L183)**: returns the TimingModel of operation with name `opName`.
 
-3. **[TimingModel* getModel(Operation* op)](https://github.com/EPFL-LAP/dynamatic/blob/main/lib/Support/TimingModels.cpp#L183)**: returns the TimingModel of operation `op`.
+3. **[TimingModel* getModel(Operation* op)](https://github.com/EPFL-LAP/dynamatic/blob/main/lib/Support/TimingModels.cpp#L183)**: returns the TimingModel of operation `op`: the entry for its implementation (`<name>.<IMPL>.<STEP>`, `<name>.<IMPL>`), or for its size (`<name>.size.<N>`, the smallest size at or above the op's), or its name's.
 
 4.  **[LogicalResult getLatency(Operation *op, SignalType signalType, double &latency)](https://github.com/EPFL-LAP/dynamatic/blob/main/lib/Support/TimingModels.cpp#L114)**: queries the latency of a certain operation `op` for output port of type `signalType` and it saves the latency as unsigned cycle count in the `latency` variable.
 
