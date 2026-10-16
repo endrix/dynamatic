@@ -37,8 +37,12 @@ def copy_dependency_rtl_files(dependencies, dependency_dict, hdl_out_dir, dynama
             remaining_dependencies.extend(dependency_info["dependencies"])
 
     extra_dependencies = ["types", "logic", "oehb", "oehb_dataless", "br_dataless"]
-    # Add extra dependencies that are not in the dependency list
+    # Add extra dependencies that are not in the dependency list. A generator
+    # config has only `types` of them: its units write their own buffers and
+    # gates.
     for extra_dependency in extra_dependencies:
+        if extra_dependency not in dependency_dict:
+            continue
         extra_rtl = dependency_dict[extra_dependency]["RTL"]
         extra_rtl = extra_rtl.replace("$DYNAMATIC", dynamatic_dir)
         rtl_filename = extra_rtl.split("/")[-1]

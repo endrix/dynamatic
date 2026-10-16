@@ -2,10 +2,12 @@
 import argparse
 import json
 import os
-from report_parser import extract_rpt_data
+import generated_units
+from report_parser import extract_rpt_data, read_reference_latencies
 from hdl_manager import get_hdl_files
 from pdk_backend import is_pdk
-from utils import VhdlInterfaceInfo, parameters_ranges, skipping_units, skipping_units_vivado, impl_variants
+from run_synthesis import run_synthesis
+from utils import VhdlInterfaceInfo, parameters_ranges, skipping_units, skipping_units_vivado, skipping_units_generated, impl_variants
 from unit_characterization import run_unit_characterization
 
 
@@ -88,6 +90,52 @@ def get_dependency_dict(dataflow_units):
     return dependency_dict
 
 
+def characterize_generated(unit_name, entries, dirs, dynamatic_dir,
+                           dependency_dict, synth_tool, clock_period,
+                           latency_table):
+    """
+    Characterize a unit a generator writes at its port types
+    (generated_units): every point of its sweep generated into a directory of
+    its own, then all of them synthesized in one parallel batch.
+
+    Args:
+        unit_name (str): the operation, `handshake.fork`.
+        entries (list): the config's entries under that name, in order.
+        dirs (dict): the "hdl", "tcl", "rpt" and "log" directories.
+        dynamatic_dir (str): the Dynamatic root the commands name.
+        dependency_dict (dict): get_dependency_dict of the config.
+        synth_tool (str): the --synth-tool.
+        clock_period (float): the period to map toward, in ns.
+        latency_table (dict): the unit's latency in the reference model.
+
+    Returns:
+        List[UnitCharacterization]: one per point.
+    """
+    os.system(f"rm -rf {dirs['hdl']}/*")
+    os.system(f"rm -rf {dirs['tcl']}/*")
+    # The entity, named the way export-rtl names it (`handshake_buffer_0`):
+    # the unit name's last part alone can be a VHDL keyword (`buffer`).
+    module_name = unit_name.replace(".", "_")
+    chars, scripts = [], []
+    for i, (entry, variables, width) in enumerate(generated_units.points(
+            entries, parameters_ranges["DATA_TYPE"], latency_table)):
+        point_dir = f"{dirs['hdl']}/{i}"
+        os.makedirs(point_dir, exist_ok=True)
+        top_def_file = get_hdl_files(
+            unit_name, None, generated_units.substitute(entry["generator"], variables),
+            entry.get("dependencies", []), point_dir, dynamatic_dir,
+            dependency_dict, module_name)
+        point_chars, point_scripts = run_unit_characterization(
+            unit_name, [], point_dir, synth_tool, top_def_file, dirs["tcl"],
+            dirs["rpt"], dirs["log"], clock_period, module_name,
+            baked_params=dict(variables, DATA_TYPE=width), id_offset=i,
+            defer=True)
+        chars.extend(point_chars)
+        scripts.extend(point_scripts)
+    run_synthesis(scripts, synth_tool, f"{dirs['log']}/synth_{unit_name}_log.txt")
+    return chars
+
+
 def run_characterization(json_input, json_output, dynamatic_dir, synth_tool, clock_period, reference_json):
     """
     Run characterization of dataflow units based on the provided JSON input.
@@ -126,6 +174,9 @@ def run_characterization(json_input, json_output, dynamatic_dir, synth_tool, clo
         os.makedirs(log_dir)
 
     all_dependencies_dict = get_dependency_dict(dataflow_units)
+    reference_latencies = read_reference_latencies(reference_json)
+    dirs = {"hdl": hdl_dir, "tcl": tcl_dir, "rpt": rpt_dir, "log": log_dir}
+    generated_done = set()
 
     map_unit_to_list_unit_chars = {}
 
@@ -140,6 +191,25 @@ def run_characterization(json_input, json_output, dynamatic_dir, synth_tool, clo
             continue
         if unit_name in skipping_units or (unit_name in skipping_units_vivado and not is_pdk(synth_tool)):
             print(f"Skipping unit {unit_name} as it is in the skipping list.")
+            continue
+        if unit_name in skipping_units_generated or not unit_name.startswith("handshake."):
+            print(f"Skipping unit {unit_name}: no model entry for it yet.")
+            continue
+        # A unit a generator writes at its port types: all the config's
+        # entries under its name at once, since export-rtl picks among them
+        # by the operation's attributes (the pipelined or the sequential
+        # divider).
+        if generated_units.bakes_types(unit_info):
+            if unit_name in generated_done:
+                continue
+            generated_done.add(unit_name)
+            print(f"Processing unit: {unit_name}")
+            entries = [u for u in dataflow_units if u.get("name") == unit_name]
+            map_unit_to_list_unit_chars.setdefault(unit_name, []).extend(
+                characterize_generated(unit_name, entries, dirs, dynamatic_dir,
+                                       all_dependencies_dict, synth_tool,
+                                       clock_period,
+                                       reference_latencies.get(unit_name)))
             continue
         # We assume that units with no unit_name are just for dependencies
         if unit_name == None:
@@ -201,7 +271,7 @@ if __name__ == "__main__":
         "--json-input",
         type=str,
         default=None,
-        help="Path to the JSON file containing the dataflow unit RTL information (if unspecified, $DYNAMATIC_DIR/data/rtl-config-vhdl-vivado.json)",
+        help="Path to the JSON file containing the dataflow unit RTL information (if unspecified: for a PDK, $DYNAMATIC_DIR/data/rtl-config-vhdl.json, the generators export-rtl writes a design with; for Vivado, $DYNAMATIC_DIR/data/rtl-config-vhdl-vivado.json)",
     )
     parser.add_argument(
         "--json-output",
@@ -241,7 +311,11 @@ if __name__ == "__main__":
     clock_period = args.clock_period
     reference_json = args.reference_json
     if not json_input:
-        json_input = f"{dynamatic_dir}/data/rtl-config-vhdl-vivado.json"
+        # A standard-cell model is for the designs export-rtl writes, so it is
+        # measured on the same generators' RTL; Vivado's keeps the files it
+        # was always measured on.
+        config = "rtl-config-vhdl.json" if is_pdk(synth_tool) else "rtl-config-vhdl-vivado.json"
+        json_input = f"{dynamatic_dir}/data/{config}"
     if not reference_json:
         reference_json = f"{dynamatic_dir}/data/components.json"
     run_characterization(json_input, json_output, dynamatic_dir, synth_tool, clock_period, reference_json)
