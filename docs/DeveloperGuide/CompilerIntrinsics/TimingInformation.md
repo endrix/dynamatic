@@ -317,11 +317,33 @@ order of magnitude slower than an ASAP7 one, so the period to map toward is
 in the nanoseconds, and `report-timing.sh` is asked for thousands of
 picoseconds.
 
+sky130 has flip-flops with an enable (`edfxtp`); ASAP7 has none. Mapped to
+one, a flip-flop's enable is a pin after ABC: the net that drives it is one
+output of the logic ABC maps, however many flip-flops it reaches, and ABC
+never buffers it. A pipelined divider's stall enable reaches 3,170 of them
+at 32 bits through one `clkbuf_1`. So `sky130-lib.sh` keeps them out of
+`dfflibmap` (`DFF_DONT_USE`, handed over as `DFF_ARGS`): the enable is a
+mux in front of a plain flip-flop, as on ASAP7, and ABC buffers it to
+`MAX_FANOUT` like any other net. Nine entries move: the three sequential
+units' latency tables by their new stage (their ready paths by 0.02 ns at
+most), and these, where the stall enable reaches every stage:
+
+| sky130, 10 ns | ready, enable flip-flops | kept out | 64-bit stage, enable flip-flops | kept out |
+| --- | --- | --- | --- | --- |
+| `divsi` (pipelined) | 351.3 ns | 1.37 ns | 335.6 ns | 4.49 ns |
+| `divui` (pipelined) | 349.5 ns | 1.23 ns | 333.8 ns | 4.14 ns |
+| `remsi`, `remui` | 292.9 ns | 1.09 ns | 279.8 ns | 4.65 ns |
+| `muli` (pipelined) | 9.59 ns | 0.80 ns | 10.06 ns | 7.12 ns |
+| `buffer` | 3.13 ns | 0.91 ns | 3.49 ns | 1.79 ns |
+
+Below 8 bits a stage grows a little instead (the divider's 1-bit stage
+from 0.56 to 0.86 ns): with a few loads, a mux and a plain flip-flop are
+slower than the flip-flop with the mux inside it.
+
 ### Placed and repaired: `PLACE=1`
 
-`report-timing.sh` stops at synthesis: no wires, no buffer trees. That
-overstates any high-fan-out net (a clock enable over a 32-stage divider reads
-as 86 ns on sky130) and understates every long wire. With `PLACE=1` and
+`report-timing.sh` stops at synthesis: no wires, and no buffer trees but
+ABC's. That understates every long wire. With `PLACE=1` and
 OpenROAD on the path (or `OPENROAD`), the script floorplans the mapped
 netlist (`UTILIZATION` percent, 50 by default), places it, estimates the
 wires' parasitics from the placement, buffers every net above `MAX_FANOUT`
@@ -334,8 +356,10 @@ placement needs (`PDK_TECH_LEF`, `PDK_CELL_LEFS`, `PDK_TRACKS`,
 from `MACRO_LEFS`. On the transposer, measured before the recipe kept the
 prefix adders (see "The adders"): sky130 10,817 ps at synthesis,
 14,409 ps placed and repaired (831 buffers in, 4,913 cells resized); ASAP7
-1,737 ps and 2,037 ps (no buffer needed, 9,334 resized). The divider's stage
-above is 6.2 ns once placed and repaired. The characterization's stage
+1,737 ps and 2,037 ps (no buffer needed, 9,334 resized). The 32-bit
+divider's stage was 86 ns at synthesis and 6.2 ns placed and repaired while
+sky130's enable flip-flops kept its enable away from ABC; with them kept out
+(see "Characterizing for sky130"), it is 3.7 ns at synthesis. The characterization's stage
 report stays post-synthesis: a placement per unit and width would take
 hours, and the whole-design report is where the placed number matters.
 
@@ -488,10 +512,10 @@ pipelined multiplier's own stage:
 | ASAP7 `muli.sequential.4` | 0.300 | 0.360 | 0.443 | 0.458 |
 | ASAP7 `muli.sequential.8` | 0.286 | 0.376 | 0.450 | 0.524 |
 | ASAP7 `muli` (pipelined) | 0.307 | 0.430 | 0.598 | 0.767 |
-| sky130 `divui.sequential` | 1.939 | 2.639 | 3.386 | 6.323 |
-| sky130 `muli.sequential.4` | 2.488 | 3.008 | 4.778 | 9.116 |
-| sky130 `muli.sequential.8` | 2.765 | 3.651 | 4.992 | 9.660 |
-| sky130 `muli` (pipelined) | 3.024 | 4.182 | 5.427 | 10.062 |
+| sky130 `divui.sequential` | 2.091 | 2.586 | 2.537 | 3.680 |
+| sky130 `muli.sequential.4` | 2.682 | 3.355 | 3.980 | 4.375 |
+| sky130 `muli.sequential.8` | 2.774 | 3.763 | 4.352 | 5.022 |
+| sky130 `muli` (pipelined) | 3.143 | 4.280 | 5.701 | 7.123 |
 
 The divider is also characterized at 1, 2 and 4 bits (ASAP7: 0.113, 0.154,
 0.168). Read the multiplier rows with the accumulator in mind: a step is a
@@ -502,11 +526,11 @@ the pipelined unit's whole product at 0.767.
 
 The ready path is where the two implementations differ port to port. On
 ASAP7 the sequential multiplier's is 0.033 ns and the pipelined one's
-0.124 ns; on sky130 they are 0.406 ns (step 8; 0.405 at step 4) and
-9.587 ns. The dividers differ the same way: the sequential divider's ready
-path is 0.034 ns (ASAP7) and 0.407 ns (sky130), and the pipelined one's
-0.160 ns and 349.5 ns. The pipelined divider's sky130 figure is the clock
-enable of every stage, a net synthesis leaves unbuffered (see `PLACE=1`).
+0.124 ns; on sky130 they are 0.404 ns (step 8; 0.391 at step 4) and
+0.799 ns. The dividers differ the same way: the sequential divider's ready
+path is 0.034 ns (ASAP7) and 0.414 ns (sky130), and the pipelined one's
+0.160 ns and 1.234 ns. A pipelined unit's ready path is its stall enable,
+which reaches every stage.
 
 Only the placers that model the ready and valid paths read those numbers
 (`fpl22`, `costaware`). `fpga20` models the data path alone, and for a unit

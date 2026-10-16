@@ -12,6 +12,8 @@
 #                 that holds the flip-flops (dfflibmap takes one file)
 #   LIB_ARGS      `-liberty` per file and `-dont_use` per excluded cell,
 #                 the way yosys' abc takes them
+#   DFF_ARGS      dfflibmap's `-dont_use` per flip-flop kept out of the
+#                 mapping (empty, or starting with a space)
 #   MAX_FANOUT    loads above which ABC buffers a net while it maps
 #   RESET_PORT    the quasi-static input that is a false path
 #   DRIVER_CELL   what drives every input during mapping, LOAD_FF the load
