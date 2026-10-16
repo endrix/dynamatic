@@ -59,4 +59,4 @@ unset _sky130_lib _sky130_pattern
 # The same ABC script as ASAP7's: yosys' constrained liberty flow with the
 # buffering covering primary inputs and stopping at MAX_FANOUT loads, and
 # sizing toward the clock; {D} is the clock, commas stand for spaces.
-ABC_SCRIPT="+strash;&get,-n;&fraig,-x;&put;scorr;dc2;dretime;strash;&get,-n;&dch,-f;&nf,{D};&put;buffer,-p,-N,$MAX_FANOUT;upsize,{D};dnsize,{D};stime,-p"
+ABC_SCRIPT="+strash;&get,-n;&fraig,-x;&put;scorr;strash;&get,-n;&dch,-f;&nf,{D};&put;buffer,-p,-N,$MAX_FANOUT;upsize,{D};dnsize,{D};stime,-p"

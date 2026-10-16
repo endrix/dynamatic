@@ -14,11 +14,11 @@
 # it out, with the cells OpenROAD's flow scripts keep out of ASAP7 designs.
 
 # WHICH THRESHOLD FLAVOUR. ASAP7 ships the same cells at three thresholds,
-# and the choice is worth as much as a prefix adder: on a 32-bit adder in a
-# top of its own, SLVT is 496 ps where RVT is 761, for the same 130 cells and
-# the same area. The cells differ only in leakage, which this flow does not
-# report, so SLVT is the default; ASAP7_VT=lvt or rvt picks another, and
-# LIBERTIES and SEQ_LIBERTY still override the lot.
+# and the choice is worth more than the choice of prefix adder: on a 32-bit
+# adder in a top of its own, SLVT is 181 ps where RVT is 270, for the same
+# 167 cells (Kogge-Stone: 143 and 213). The cells differ only in leakage,
+# which this flow does not report, so SLVT is the default; ASAP7_VT=lvt or
+# rvt picks another, and LIBERTIES and SEQ_LIBERTY still override the lot.
 #
 # A flavour is a suffix on every cell name (_L, _R, _SL) and a cell LEF of
 # its own, so the driver cell and the LEF follow the choice.
@@ -87,9 +87,11 @@ unset _asap7_lib _asap7_pattern _asap7_vt _asap7_sfx
 
 # Yosys' own constrained liberty script for ABC, with the buffering told to
 # cover primary inputs (register outputs, after dfflibmap) and to stop at
-# MAX_FANOUT loads, and with sizing toward the clock. Commas stand for spaces
-# in a +script; {D} is the clock.
-ABC_SCRIPT="+strash;&get,-n;&fraig,-x;&put;scorr;dc2;dretime;strash;&get,-n;&dch,-f;&nf,{D};&put;buffer,-p,-N,$MAX_FANOUT;upsize,{D};dnsize,{D};stime,-p"
+# MAX_FANOUT loads, and with sizing toward the clock; without its `dc2` and
+# `dretime`, whose rewriting folds a prefix adder back into a carry chain
+# (pdk-lib.sh's pdk_synth_commands). Commas stand for spaces in a +script;
+# {D} is the clock.
+ABC_SCRIPT="+strash;&get,-n;&fraig,-x;&put;scorr;strash;&get,-n;&dch,-f;&nf,{D};&put;buffer,-p,-N,$MAX_FANOUT;upsize,{D};dnsize,{D};stime,-p"
 
 # asap7_write_abc_constr <file>: pdk_write_abc_constr under its old name.
 asap7_write_abc_constr() {

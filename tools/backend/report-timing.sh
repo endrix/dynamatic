@@ -92,26 +92,11 @@ DIGITS=$([[ "$TIME_SCALE" == "1" ]] && echo 1 || echo 4)
 SYNTH_LOG="$LOG_DIR/$TOP.synth.log"
 STA_LOG="$LOG_DIR/$TOP.timing.rpt"
 
-# The adder. Yosys maps every carry chain to a Brent-Kung lookahead unit and
-# ABC then rebuilds it as a ripple-carry chain of majority gates, about 28 ps
-# a bit on ASAP7: a 64-bit accumulate was 1.9 ns, the Mul body's whole clock.
-# On an FPGA the carry chain is dedicated silicon and the question never
-# comes up; on a cell library the script has to ask for a parallel-prefix
-# adder. Which one wins depends on the design: on the Mul body Sklansky
-# measured best (1,930 to 1,434 ps for 3% more cells; Kogge-Stone 1,452 for
-# 10% more; Han-Carlson 1,488), on a bare 64-bit adder Kogge-Stone does
-# (1,155 against Sklansky's 1,533). ADDER=sklansky|kogge-stone|han-carlson
-# picks one, ADDER=yosys keeps yosys' own. The characterization
-# (pdk_backend.py) reads the same variable, so new timing models are of the
-# same adders as the reports; the checked-in components-asap7.json and
-# components-sky130.json were re-characterised with it on 2026-09-17.
-ADDER="$(echo "${ADDER:-}" | tr -d '[:space:]')"
-ADDER="${ADDER:-sklansky}"
-SYNTH_ADDER=""
-[[ "$ADDER" != "yosys" ]] && SYNTH_ADDER=" -extra-map +/choices/$ADDER.v"
-# Generic synthesis, then the flip-flops from the sequential liberty and the
-# logic from the others. `-noexpr` keeps the netlist a plain instance list for
-# OpenSTA to link; `-norename` keeps yosys' own names on the nets and cells
+# Generic synthesis (pdk-lib.sh's pdk_synth_commands, which also says how the
+# carry chains become prefix adders, ADDER picking which), then the
+# flip-flops from the sequential liberty and the logic from the others.
+# `-noexpr` keeps the netlist a plain instance list for OpenSTA to link;
+# `-norename` keeps yosys' own names on the nets and cells
 # it made, which carry the instance path the flattening prefixed them with,
 # so that a path in the report can be placed in the design. The whole yosys
 # log goes to the file: `stat` at the end is where the cell counts come from.
@@ -121,7 +106,7 @@ SYNTH_ADDER=""
 YS_SCRIPT="$LOG_DIR/$TOP.synth.ys"
 {
   printf '%s\n' "$READ" | sed 's/; */\n/g'
-  echo "synth -top $TOP -flatten$SYNTH_ADDER"
+  pdk_synth_commands "$TOP"
   echo "dfflibmap -liberty $SEQ_LIBERTY"
   echo "abc $LIB_ARGS -constr $CONSTR -D $PERIOD -script $ABC_SCRIPT"
   echo "opt_clean"
