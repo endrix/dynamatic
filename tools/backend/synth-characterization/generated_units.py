@@ -76,6 +76,22 @@ def base_unit(key):
     return re.sub(r"\.size\.\d+$", "", key)
 
 
+# A buffer's six types are one unit, `handshake.buffer`, whose base entry
+# reduces over them; each type has an entry of its own too,
+# `handshake.buffer.ONE_SLOT_BREAK_R`, since the types share no path: an
+# opaque slot registers its data and valid, a transparent one passes them
+# through a multiplexer its register selects.
+def type_key(unit_name, buffer_type):
+    """The model key of a buffer type's entry."""
+    return f"{unit_name}.{buffer_type}"
+
+
+def type_base(key):
+    """The unit a buffer type's entry is an entry of: `handshake.buffer.
+    ONE_SLOT_BREAK_R` is `handshake.buffer`'s."""
+    return re.sub(r"\.(ONE_SLOT|FIFO|SHIFT_REG)_[A-Z_]+$", "", key)
+
+
 # A buffer's type decides its slots and its data-to-valid latency, which the
 # buffer operation's verifier holds to (HandshakeOps.cpp, BufferOp::verify),
 # so the three are swept together: the six types the hand-written

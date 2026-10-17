@@ -90,9 +90,12 @@ follow all three:
   `handshake_fork`. `extract_rtl_info` returns it and it is passed down to
   `extract_generics_ports`.
 - Several entries can share a unit name. Six of them are `handshake.buffer`,
-  and three are `handshake.mem_controller`. The timing model has one entry per
-  unit name, so their characterizations accumulate under that name and the
-  JSON assembly reduces each delay class over them with the maximum.
+  and three are `handshake.mem_controller`. Their characterizations accumulate
+  under that name and the JSON assembly reduces each delay class over them with
+  the maximum. A buffer type also gets an entry of its own,
+  `handshake.buffer.<BUFFER_TYPE>` (`handshake.buffer.ONE_SLOT_BREAK_R`): the
+  types share no path, and `TimingDatabase::getModel` times a buffer by its
+  type's entry when the model has one.
 - A unit's dependencies are its own entry's list, passed to `get_hdl_files`.
   Looking them up by unit name finds the wrong entry when a name covers several
   implementations, and no entry at all when the one it wants was registered
@@ -137,6 +140,14 @@ follow all three:
     - Reading HDL and constraint files.
     - Synthesizing and implementing the design.
     - Generating timing reports for relevant port pairs.
+- **write_pdk_script**: (File `pdk_backend.py`)
+
+    The same for a standard-cell library (yosys and OpenSTA), plus the unit's
+    registers, the delay classes `UnitCharacterization.register_delay_types`
+    name: from every register to each class of output port (`launch_delay`:
+    the clock to output and the logic after it) and from each class of input
+    port into every register (`capture_delay`: the logic before it and the
+    register's setup). A unit with no register has neither report.
 - **write_sdc_constraints(sdc_file, period_ns)**: (File `run_synthesis.py`)
 
     Creates an SDC constraints file specifying the clock period.
@@ -165,6 +176,15 @@ follow all three:
 
     Extract data from the different reports and it saves it into the `json_output` file. 
     The data `map_unit_to_list_unit_chars` contains a mapping between unit and a list of UnitCharacterization objects.
+    A standard-cell backend's register reports become the entry's port models:
+    `outport` from the paths out of the registers (their arrival time, the
+    clock to output included), `inport` from the paths into them (the period
+    less each path's slack: its arrival and the register's setup). Every
+    signal is keyed by the unit's data width, valid and ready included,
+    since a register's enable or a slot's select fans out over the data; a
+    condition port (a select, an index) goes to the data delays. A unit with
+    no register keeps zero port models, as the Vivado backend writes for
+    every unit.
     Please look at the end of this doc to find an example of the structure of the expected report.
 
 ### High-Level Flow
