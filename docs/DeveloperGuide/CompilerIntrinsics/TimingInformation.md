@@ -143,7 +143,7 @@ buffers. The sweep:
 
 | attribute | values |
 | --- | --- |
-| the data width | 1 to 64 bits (`parameters_ranges["DATA_TYPE"]`); an address is `ADDR_TYPE` |
+| the data width | 1 to 64 bits (`parameters_ranges["DATA_TYPE"]`), and 128, 256 and 512 for most units (see "The widths past 64 bits"); an address is `ADDR_TYPE` |
 | `SIZE` | 2 for the base entry; 2 to 256 for the size entries (see "The units keyed by size") |
 | `PREDICATE` (`cmpi`) | all ten: an equality is a tree of XORs, an order a carry chain |
 | `TEHB` (`mux`, `merge`) | with and without the output buffer |
@@ -279,7 +279,8 @@ bitwidth, maps the generated top with yosys (VHDL read through the GHDL plugin)
 and then asks OpenSTA for the largest combinational delay between each
 (input port, output port) pair the Vivado backend would have asked Vivado
 about. `--clock-period` is what ABC maps toward and what OpenSTA's clock is set
-to; the whole set is a couple of minutes on a multi-core machine.
+to; the whole set, on the generator config with its sizes and wide widths, is
+43 to 48 minutes per model on ten cores (`NUM_CORES`).
 
 ### Characterizing for sky130
 
@@ -486,13 +487,14 @@ and the width swept in the wrapper. `latency` is the unit's latency in cycles
 at a width, the generator's own formula (`BITWIDTH + 1` for the divider,
 `ceil(BITWIDTH / STEP) + 1` for the multiplier); the reference model cannot
 supply it, since it does not list these units. The divider is characterized
-at every width the model holds and the multiplier at steps 4 and 8, from the
-step upwards. A step the model does not hold is timed by the nearest larger
-one it does: `esa-unit-impl` clamps the step to the width, so a 5-bit
-multiplier under step 8 asks for `handshake.muli.sequential.5` and is timed
-by the step-8 entry, the same unit at that width; a step above every
-characterized one falls to the base entry, with a remark. An op that names
-`pipelined` is timed by the base entry with no remark.
+at 1 to 64 bits and the multiplier at steps 4 and 8, from the step up to 512
+bits (see "The widths past 64 bits"). A step the model does not hold is
+timed by the nearest larger one it does: `esa-unit-impl` clamps the step to
+the width, so a 5-bit multiplier under step 8 asks for
+`handshake.muli.sequential.5` and is timed by the step-8 entry, the same
+unit at that width; a step above every characterized one falls to the base
+entry, with a remark. An op that names `pipelined` is timed by the base
+entry with no remark.
 
 An entry of theirs says what a sequential unit is. Its data and valid paths
 are registered, so they are 0.0 like a pipelined unit's; its ready path is
@@ -618,6 +620,116 @@ among the valid inputs, which a prefix structure would make logarithmic
 and a loop does not. A unit's own delay is not one a placer can cut, so on
 ASAP7 SLVT a mux of more than about a hundred inputs does not fit a 1 ns
 period whatever the buffers.
+
+### The widths past 64 bits
+
+A design's datapath is wider than 64 bits. In Gemmini's handshake IR, as
+streamblocks hands it to the buffer placer, adders reach 259 bits,
+subtractors 323, comparators 257 and the (sequential) multipliers 262, and
+shifts, ORs and buffers reach 1,091 to 1,152. A width is looked up at the
+smallest one at or above it; above the widest, each consumer does
+something else:
+
+- `TimingDatabase::getInternalDelay` and `getTotalDelay` find no data delay
+  and fail, and the buffer placers then time the unit's data path as zero
+  (the 0.001 ns floor of `addUnitTimingConstraints`). `getLatency` takes
+  the widest entry, with a remark: a latency is a stage count, which the
+  width does not change.
+- streamblocks' `esa-cut-to-period` takes the widest entry, for the data
+  delay and for a registered unit's stage, and lists the unit in its
+  report (`wider_than_model`); it used to grow a carry chain with log2 of
+  the width instead.
+
+So a PDK characterization also writes a unit at 128, 256 and 512 bits
+(`utils.WIDE_WIDTHS`), which bounds every adder, subtractor, comparator and
+multiplier of those designs from above; the sequential multipliers, steps
+4 and 8, go to 512 bits too. Some units stay at 1 to 64 bits
+(`utils.narrow_units`), where a wide entry would say nothing the widest one
+does not:
+
+- `fork`, `lazy_fork` and `cond_br`: their data is a wire, 0.0 measured up
+  to 512 bits;
+- `absf` (which clears the sign bit, a wire as well), `sitofp`, `uitofp`
+  and `fptosi`: a float is 32 or 64 bits;
+- the dividers, `divsi`, `divui`, `remsi` and `remui`, and the sequential
+  divider: no design divides more than 33 bits (Gemmini's dividers are 16
+  and 17 bits, picorv32's 32, the streamblocks lanes' 32 and 33);
+- the pipelined `muli`: streamblocks lowers a multiply to the sequential
+  unit for a cell library unless told otherwise, so no design built for
+  one has it (its wide ones, the streamblocks lanes' up to 256 bits, are
+  built for an FPGA and timed with `components.json`); its data path is
+  registered, 0.0 at every width.
+
+The entries keyed by size stay at 1, 8, 32 and 64 bits: a sized unit's
+data path is its select over the inputs, which the width only fans out,
+and Gemmini's wide sized units are forks (wires) and muxes of up to 16
+inputs at 128 bits.
+
+A wide point gives its unit the data delay at its width, its stage (the
+`.stages.json` report) and, for a sequential multiplier, its latency
+table's entry. It does not enter the delays the model holds once for every
+width (`valid`, `ready`, `VR`, `CV`, `CR`, `VC`, `VD`), which stay the
+maximum over 1 to 64 bits. Those are a unit's handshake, and at 512 bits it
+fans out over the data: on ASAP7 SLVT, a first's `VD` is 156 ps against 117
+up to 64 bits, a merge's 150 against 129, a mux's `VR` and `CR` 111 and 110
+against 89 and 87, a buffer's ready 74 against 61. The model has one number
+for each, and a maximum over every width would charge a wide unit's
+fan-out to every narrow one; a wide unit's handshake is understated by that
+much instead. With the wide points kept out of them, every entry the
+models had -- each width up to 64 bits, each of these delays, each stage --
+came out of the regeneration as it was.
+
+The carry chains and a shift, data delay in ns (`cmpi` is the slowest of
+its ten predicates):
+
+| unit | model | 64 | 128 | 256 | 512 |
+| --- | --- | --- | --- | --- | --- |
+| `addi` | ASAP7 SLVT | 0.217 | 0.250 | 0.306 | 0.334 |
+| | sky130 | 2.876 | 3.280 | 3.554 | 4.163 |
+| `subi` | ASAP7 SLVT | 0.241 | 0.265 | 0.315 | 0.342 |
+| | sky130 | 2.396 | 3.270 | 3.770 | 4.035 |
+| `cmpi` | ASAP7 SLVT | 0.183 | 0.206 | 0.210 | 0.254 |
+| | sky130 | 1.528 | 1.682 | 2.130 | 2.410 |
+| `shli` | ASAP7 SLVT | 0.211 | 0.234 | 0.271 | 0.282 |
+| | sky130 | 2.602 | 3.501 | 3.886 | 4.450 |
+| `andi` | ASAP7 SLVT | 0.010 | 0.010 | 0.010 | 0.010 |
+| | sky130 | 0.114 | 0.114 | 0.114 | 0.114 |
+
+From 64 to 512 bits, eight times the width, the prefix adders grow by 1.39
+(ASAP7's comparator) to 1.68 times (sky130's subtractor), around the 1.5
+that log2 of the width gives. On the arithmetic and the shifts, LVT is 1.17
+to 1.19 times SLVT and RVT 1.47 to 1.54 times, at every width. The bitwise
+units do not grow, and neither do `select`, `mux`, `merge`,
+`control_merge`, `buffer` and `load`, whose data path is a gate or two per
+bit: they are written wide all the same, since a placer's lookup above the
+widest finds nothing at all.
+
+The sequential multipliers' step (`.stages.json`, ns), the floor such a
+unit puts under the clock:
+
+| unit | model | 64 | 128 | 256 | 512 |
+| --- | --- | --- | --- | --- | --- |
+| `muli.sequential.4` | ASAP7 SLVT | 0.458 | 0.516 | 0.596 | 0.628 |
+| | ASAP7 RVT | 0.692 | 0.771 | 0.901 | 0.951 |
+| | sky130 | 4.375 | 4.896 | 5.683 | 6.452 |
+| `muli.sequential.8` | ASAP7 SLVT | 0.524 | 0.553 | 0.641 | 0.677 |
+| | ASAP7 RVT | 0.778 | 0.836 | 0.944 | 1.022 |
+| | sky130 | 5.022 | 6.253 | 6.405 | 7.735 |
+
+On RVT a 512-bit multiplier at eight bits a step no longer fits a 1 ns
+period (1.022 ns); Gemmini's 262-bit ones are timed by that entry.
+
+Two things did not grow with the width. sky130's `first` is 2.053 ns at
+128 bits and 2.001 at 256; it was already not monotone below 64 bits (1.749
+at 16, 1.470 at 32), and a width between 129 and 256 bits is timed 52 ps
+short of the 128-bit one. And the stages of the units that hold a slot or
+a flag (`buffer`, `mux`, `merge`, `control_merge`, `first`, `load`) rise
+and fall by up to 31 ps on ASAP7 SLVT (a merge's is 163 ps at 128 bits and
+132 at 256) and 400 ps on sky130 (`first`, 2.011 to 1.612 ns): the path is
+the flag's register through the fan-out tree ABC builds to every data bit,
+and ABC builds that tree afresh at each width: the merge's on SLVT came
+out a buffer shallower for 256 loads than for 128. The stages are a
+report; the placer does not read them.
 
 ### What the model does not contain
 

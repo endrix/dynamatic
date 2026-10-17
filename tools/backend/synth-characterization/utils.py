@@ -101,8 +101,9 @@ VHDL_UNIT_GENERATOR = (
 
 impl_variants = [
     {
-        # A quotient bit a cycle over one register set, at every width the
-        # model holds.
+        # A quotient bit a cycle over one register set, at the widths of
+        # parameters_ranges: no design divides more than 33 bits (see
+        # narrow_units).
         "name": "handshake.divui.sequential",
         "module-name": "divui_sequential",
         "generator": (f"{VHDL_UNIT_GENERATOR} -t divui"
@@ -114,23 +115,26 @@ impl_variants = [
         # Four multiplier bits a cycle, so four rows of adders in the step.
         # A width below the step is not a unit the generator writes (the pass
         # that names the implementation clamps the step to the width), so the
-        # sweep starts at the step.
+        # sweep starts at the step. It ends at WIDE_WIDTHS' widest: the
+        # multipliers of a design built for a cell library are these units,
+        # and Gemmini's reach 262 bits.
         "name": "handshake.muli.sequential.4",
         "module-name": "muli_sequential_4",
         "generator": (f"{VHDL_UNIT_GENERATOR} -t muli"
                       " -p bitwidth=$BITWIDTH latency=0 impl='\"sequential\"'"
                       " step=4"),
-        "bitwidths": [4, 8, 16, 32, 64],
+        "bitwidths": [4, 8, 16, 32, 64, 128, 256, 512],
         "latency": lambda width: -(-width // 4) + 1,
     },
     {
-        # Eight multiplier bits a cycle: the step the ledger's runs use.
+        # Eight multiplier bits a cycle: the step the ledger's runs use, and
+        # a cell library's default. The same widths as the step-4 unit.
         "name": "handshake.muli.sequential.8",
         "module-name": "muli_sequential_8",
         "generator": (f"{VHDL_UNIT_GENERATOR} -t muli"
                       " -p bitwidth=$BITWIDTH latency=0 impl='\"sequential\"'"
                       " step=8"),
-        "bitwidths": [8, 16, 32, 64],
+        "bitwidths": [8, 16, 32, 64, 128, 256, 512],
         "latency": lambda width: -(-width // 8) + 1,
     },
 ]
@@ -148,6 +152,61 @@ parameters_ranges = {
     "ADDR_TYPE": [64],
     "PREDICATE": ["ne"]
 }
+
+# The widths past parameters_ranges' that a unit of a generator config
+# (data/rtl-config-vhdl.json, a PDK's) is also characterized at. A design's
+# datapath is wider than 64 bits: Gemmini's handshake IR, as StreamBlocks
+# hands it to the buffer placer, adds at up to 259 bits, subtracts at 323,
+# compares at 257 and multiplies at 262, and shifts and ORs at up to 1,152.
+# TimingDatabase looks a width up at the smallest one at or above it and
+# finds no data delay at all above the widest, so against a model that stops
+# at 64 bits the buffer placer times a 128-bit adder as no delay.
+#
+# A point at one of these widths gives the unit its data delay there, its
+# stage (the .stages.json report) and, for a sequential unit, its latency
+# table's entry there. It does not enter the delays the model holds once
+# for every width (valid, ready, VR, CV, CR, VC, VD): those are a unit's
+# handshake, which fans out over the data at 512 bits (on ASAP7 SLVT a
+# first's VD is 39 ps longer than at 64, a merge's 21), and a maximum over
+# every width would charge that to every narrow unit too.
+WIDE_WIDTHS = [128, 256, 512]
+
+# The units of a generator config that stay at parameters_ranges' widths.
+narrow_units = [
+    # The data is a wire at every width, 0.0 measured up to 512 bits, so
+    # the widest entry is a wider unit's delay: an eager or lazy fork's
+    # outputs, and a branch's.
+    "handshake.fork",
+    "handshake.lazy_fork",
+    "handshake.cond_br",
+    # A float is 32 or 64 bits; absf, which clears the sign bit, is a wire
+    # as well.
+    "handshake.absf",
+    "handshake.sitofp",
+    "handshake.uitofp",
+    "handshake.fptosi",
+    # No design divides more than 33 bits (Gemmini's dividers are 16 and 17
+    # bits, picorv32's 32, streamblocks' lanes' 32 and 33), and the
+    # sequential divider, in impl_variants, stops at 64 too.
+    "handshake.divsi",
+    "handshake.divui",
+    "handshake.remsi",
+    "handshake.remui",
+    # The pipelined multiplier: streamblocks lowers a muli to the
+    # sequential one (impl_variants, which go wide) for a cell library unless
+    # told otherwise, so no design built for one has this unit; its data
+    # path is registered, 0.0 at every width.
+    "handshake.muli",
+]
+
+
+def unit_widths(unit_name):
+    """The data widths a unit of a generator config is characterized at."""
+    widths = parameters_ranges["DATA_TYPE"]
+    if unit_name in narrow_units:
+        return widths
+    return widths + WIDE_WIDTHS
+
 
 # Function to write the TCL file for synthesis
 

@@ -5,6 +5,7 @@ import json
 
 from generated_units import base_unit
 from pdk_backend import is_pdk, units_per_ns
+from utils import WIDE_WIDTHS
 
 # Constants for parsing the report that specify which line
 # contains the delay information.
@@ -168,6 +169,11 @@ def extract_rpt_data(map_unit_to_list_unit_chars, json_output,
         traversedUnitOnce = False
         for unit_char in list_unit_chars:
             traversedParamOnce = False
+            # A point at one of utils.WIDE_WIDTHS gives the data delay at its
+            # width and nothing else of the delays: the others are one number
+            # for every width, the maximum over the widths up to 64 bits (see
+            # WIDE_WIDTHS for why).
+            wide = int(unit_char.params.get("DATA_TYPE", 0)) in WIDE_WIDTHS
             stage_rpt = unit_char.get_stage_rpt()
             if stage_rpt and os.path.exists(stage_rpt):
                 bitwidth = str(unit_char.get_parameter_value("DATA_TYPE"))
@@ -182,6 +188,8 @@ def extract_rpt_data(map_unit_to_list_unit_chars, json_output,
                     continue
                 traversedParamOnce = True
                 traversedUnitOnce = True
+                if wide and delay_type != ("data", "data"):
+                    continue
                 # Extract delay from the report file
                 delay = extract_single_rpt(rpt_filename, synth_tool)
                 if delay_type == ("data", "data"):
