@@ -1021,10 +1021,10 @@ bool dynamatic::fromJSON(const ljson::Value &value,
   FW_FALSE(deserializeNested(DELAY_VALID, object, model.validDelay, path));
   FW_FALSE(deserializeNested(DELAY_READY, object, model.readyDelay, path));
   // and the same at every width the model has them at, "1" among them
-  FW_FALSE(deserializeNested(DELAY_VALID_WIDTHS, object, model.validDelays,
-                             path));
-  FW_FALSE(deserializeNested(DELAY_READY_WIDTHS, object, model.readyDelays,
-                             path));
+  FW_FALSE(
+      deserializeNested(DELAY_VALID_WIDTHS, object, model.validDelays, path));
+  FW_FALSE(
+      deserializeNested(DELAY_READY_WIDTHS, object, model.readyDelays, path));
   return true;
 }
 
