@@ -3,6 +3,7 @@ import os
 import re
 import json
 
+from generated_units import base_unit
 from pdk_backend import is_pdk, units_per_ns
 
 # Constants for parsing the report that specify which line
@@ -228,7 +229,10 @@ def extract_rpt_data(map_unit_to_list_unit_chars, json_output,
                 bitwidth: {f"{stages[unit_name][bitwidth]:.6f}": cycles}
                 for bitwidth, cycles in measured_latency[unit_name].items()}}
         else:
-            latency_table = latencies.get(unit_name, DEFAULT_LATENCY)
+            # An entry at one size of a unit (`handshake.fork.size.8`) has
+            # the unit's latency: a size adds channels, not stages.
+            latency_table = latencies.get(
+                unit_name, latencies.get(base_unit(unit_name), DEFAULT_LATENCY))
 
         output_data[unit_name] = {"latency": latency_table,
                                   "delay": {"data": dataDict,
@@ -241,6 +245,8 @@ def extract_rpt_data(map_unit_to_list_unit_chars, json_output,
                                             "VD": VDDelayFinal},
                                   "inport": ZERO_PORT_MODEL,
                                   "outport": ZERO_PORT_MODEL}
+
+    bound_sizes(output_data)
 
     # A unit this run did not characterize -- one on the skipping list (a
     # unit with no data path, one another script measures, the dividers
@@ -264,6 +270,40 @@ def extract_rpt_data(map_unit_to_list_unit_chars, json_output,
         json.dump(output_data, f, indent=2)
     if stages:
         write_stages(stages, json_output)
+
+
+def bound_sizes(output_data):
+    """
+    Make every delay of a unit's sized entries grow with the size.
+
+    TimingDatabase::getModel times an op by the entry at the smallest size at
+    or above its own, which bounds the op's delays only if no larger size has
+    a shorter path. A measurement can: ABC maps each size afresh, and a merge
+    at 256 inputs came out 0.19 ns faster than at 128 on ASAP7. Each entry
+    takes, per delay, the largest at its size or any smaller one.
+
+    Args:
+        output_data (dict): the model being written, key -> entry; changed in
+            place.
+    """
+    sized = {}
+    for key in output_data:
+        if key != base_unit(key):
+            sized.setdefault(base_unit(key), []).append(key)
+    for keys in sized.values():
+        keys.sort(key=lambda key: int(key.rsplit(".", 1)[1]))
+        bound = None
+        for key in keys:
+            delay = output_data[key]["delay"]
+            if bound is not None:
+                for width, d in delay["data"].items():
+                    delay["data"][width] = max(d, bound["data"].get(width, d))
+                for signal in ("valid", "ready"):
+                    delay[signal]["1"] = max(delay[signal]["1"],
+                                             bound[signal]["1"])
+                for name in ("VR", "CV", "CR", "VC", "VD"):
+                    delay[name] = max(delay[name], bound[name])
+            bound = delay
 
 
 def write_stages(stages, json_output):
