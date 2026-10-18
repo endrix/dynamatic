@@ -210,7 +210,7 @@ def write_pdk_script(synth_tool, top_entity_name, hdl_files, script_file,
         f"ghdl --std=08 -fsynopsys {ordered_files} -e tb; "
         f"hierarchy -top tb; "
         f"$SYNTH_CMDS; "
-        f"dfflibmap -liberty $SEQ_LIBERTY; "
+        f"dfflibmap -liberty $SEQ_LIBERTY$DFF_ARGS; "
         f"abc $LIB_ARGS -constr {work_dir}/abc.constr -D {period_ps}"
         f" -script $ABC_SCRIPT; "
         f"opt_clean; stat; "

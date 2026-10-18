@@ -44,6 +44,9 @@ esac
 LIBERTIES="${LIBERTIES:-$(ls "${ASAP7_DIR:-/nonexistent}"/asap7sc7p5t_*_${_asap7_vt}_TT_nldm_*.lib 2>/dev/null | tr '\n' ' ')}"
 SEQ_LIBERTY="${SEQ_LIBERTY:-$(ls "${ASAP7_DIR:-/nonexistent}"/asap7sc7p5t_SEQ_${_asap7_vt}_TT_nldm_*.lib 2>/dev/null | head -1)}"
 DONT_USE="${DONT_USE:-*x1p*_ASAP7* *xp*_ASAP7* SDF* ICG*}"
+# ASAP7 has no flip-flop with an enable: dfflibmap writes an enable as a mux
+# in front of a plain flip-flop, logic that ABC maps and buffers.
+DFF_ARGS=""
 # ABC buffers every net above this many loads while it maps, so that a report
 # is about paths rather than about fan-out.
 MAX_FANOUT="${MAX_FANOUT:-12}"
