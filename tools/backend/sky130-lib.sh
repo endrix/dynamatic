@@ -18,6 +18,15 @@ SEQ_LIBERTY="${SEQ_LIBERTY:-${LIBERTIES% }}"
 # OpenROAD's flow scripts' list for sky130hd: probe points and the
 # multi-power-domain cells.
 DONT_USE="${DONT_USE:-sky130_fd_sc_hd__probe_p_8 sky130_fd_sc_hd__probec_p_8 sky130_fd_sc_hd__lpflow_*}"
+# The flip-flops with an enable, kept out of dfflibmap's mapping. Mapped to
+# one, an enable is a pin of the flip-flop, after ABC: the net that drives it
+# is an output of the logic ABC maps, one load however many flip-flops it
+# reaches, and ABC never buffers it. A pipelined divider's stall enable
+# reaches 3,170 of them at 32 bits, through one clkbuf_1, and read as a
+# 90 ns ready path. Kept out, the enable is a mux in front of a plain
+# flip-flop, as on ASAP7 (which has no such flip-flop), and ABC buffers it
+# to MAX_FANOUT like any other net.
+DFF_DONT_USE="${DFF_DONT_USE:-sky130_fd_sc_hd__edf*}"
 MAX_FANOUT="${MAX_FANOUT:-12}"
 RESET_PORT="${RESET_PORT:-rst}"
 # The flow scripts' ABC driver and load for sky130hd.
@@ -53,6 +62,10 @@ for _sky130_lib in $LIBERTIES; do
 done
 for _sky130_pattern in $DONT_USE; do
   LIB_ARGS="$LIB_ARGS -dont_use $_sky130_pattern"
+done
+DFF_ARGS=""
+for _sky130_pattern in $DFF_DONT_USE; do
+  DFF_ARGS="$DFF_ARGS -dont_use $_sky130_pattern"
 done
 unset _sky130_lib _sky130_pattern
 

@@ -11,18 +11,19 @@
 # above MAX_FANOUT loads while it maps, register outputs included, and
 # sizes gates toward the clock (a net driving thousands of flip-flops is
 # otherwise one inverter with a 20 ns delay, which is what placement's
-# repair would fix), and the reset, a quasi-static input that reaches every
+# repair would fix) -- a flip-flop's enable included, since the recipe keeps
+# flip-flops with an enable out of the mapping (DFF_ARGS) and the enable is
+# logic ABC maps; and the reset, a quasi-static input that reaches every
 # flip-flop, is a false path.
 #
 # PLACE=1 goes one step further than synthesis: OpenROAD floorplans the
 # mapped netlist (UTILIZATION percent, 50 by default), places it, estimates
 # the wires' parasitics, buffers every net above MAX_FANOUT loads and every
 # slew or capacitance violation (its resizer's repair_design), and times the
-# result with the wires in. A post-synthesis report has no wires and no
-# buffer trees, so it overstates a high-fan-out net (a clock enable over a
-# 32-stage divider reads as 86 ns on sky130, 6 ns placed and repaired) and
-# understates every long wire; the placed report is the honest one, at the
-# price of a placement. The macros' LEFs come from MACRO_LEFS.
+# result with the wires in. A post-synthesis report has no wires, and no
+# buffer trees but ABC's, so it understates every long wire; the placed
+# report is the honest one, at the price of a placement. The macros' LEFs
+# come from MACRO_LEFS.
 #
 # ASAP7 (SLVT by default, typical corner) as streamblocks'
 # install_synthesis_tools.sh lays it out: ASAP7_DIR holds the TT liberty
@@ -115,7 +116,7 @@ YS_SCRIPT="$LOG_DIR/$TOP.synth.ys"
   # the dump's cells: what a timing loop names a failing path's ends by
   # (streamblocks' calpy_tools.timing_loop).
   [[ "${FF_PROVENANCE:-0}" == 1 ]] && echo "tee -q -o $LOG_DIR/$TOP.ffs.il dump t:\$_*DFF*"
-  echo "dfflibmap -liberty $SEQ_LIBERTY"
+  echo "dfflibmap -liberty $SEQ_LIBERTY$DFF_ARGS"
   echo "abc $LIB_ARGS -constr $CONSTR -D $PERIOD -script $ABC_SCRIPT"
   echo "opt_clean"
   # stat with every liberty, the macros' included (MACRO_LIBS): the cell

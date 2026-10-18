@@ -114,10 +114,63 @@ export ASAP7_VT=slvt                    # the flavour the output file is named f
 cd "$DYNAMATIC/tools/backend/synth-characterization"
 python3 main.py --synth-tool asap7 \
   --dynamatic-dir "$DYNAMATIC" \
-  --json-input "$DYNAMATIC/data/rtl-config-vhdl-vivado.json" \
+  --json-input "$DYNAMATIC/data/rtl-config-vhdl.json" \
   --json-output "$DYNAMATIC/data/components-asap7.json" \
   --clock-period 1.0
 ```
+
+### Which RTL is measured
+
+A standard-cell model is for the designs `export-rtl` writes, and
+`export-rtl` builds a design from the generators that `data/rtl-config-vhdl.json`
+names. A fork in an exported design is `vhdl-unit-generator.py -t fork`,
+written at its size and width, not `data/vhdl/handshake/fork.vhd`, the file
+`rtl-config-vhdl-vivado.json` lists. So the PDK backends read the generator
+config, and that is their default when `--json-input` is left out. Vivado
+keeps the hand-written files its model was always measured on.
+
+A generator entry has no generics. `export-rtl` fills its command's
+variables and the generator bakes them into the RTL. Some variables come
+from the operation's attributes, which are the entry's `parameters` (`SIZE`,
+`PREDICATE`, `BUFFER_TYPE`, ...). Others come from its port types:
+`BITWIDTH`, `DATA_BITWIDTH`, ..., and `EXTRA_SIGNALS`, which no entry
+declares. The characterization fills them the same way
+(`synth-characterization/generated_units.py`), so each point of a unit's
+sweep is generated and synthesized on its own, at the one width it was
+written at. A name has one entry in the model, so each delay class is
+reduced over the points with the maximum, as over the six hand-written
+buffers. The sweep:
+
+| attribute | values |
+| --- | --- |
+| the data width | 1 to 64 bits (`parameters_ranges["DATA_TYPE"]`); an address is `ADDR_TYPE` |
+| `SIZE` | 2: the model has no size dimension |
+| `PREDICATE` (`cmpi`) | all ten: an equality is a tree of XORs, an order a carry chain |
+| `TEHB` (`mux`, `merge`) | with and without the output buffer |
+| `BUFFER_TYPE` | the six types the hand-written files covered, each with the slots and data-to-valid latency the buffer's verifier requires (one slot, or two for a FIFO or a shift register) |
+| `LATENCY`, `IMPL` | the pipelined unit, at the reference model's latency, which is where the compiler takes the attribute from; the sequential units are entries of their own (below) |
+| `EXTRA_SIGNALS` | none |
+
+`export-rtl` takes the first entry under a name whose constrained
+parameters (`eq`) match, and so does the characterization. That is how
+`IMPL` picks the pipelined or the sequential divider. The units only the
+generator config has (`blocker`, `init`, `queue`, `bundle`, ...) and the
+`arith.` wires of a function body are skipped (`skipping_units_generated`).
+An entry for one of them is a change of its own.
+
+For most units the generators write the circuit the hand-written files did,
+and the model's numbers are the same to the picosecond (`addi`, `fork`,
+`buffer`, `select`, the shifts, ...). What moved, on ASAP7 SLVT:
+
+- `cmpi` is now every comparison, not only `ne`: 94, 132 and 183 ps at 8,
+  32 and 64 bits, where it was 41, 86 and 109.
+- `mux` and `merge` are written differently. Some of their paths are
+  shorter, others longer (`merge` valid to ready: 65 to 115 ps).
+- `control_merge`, `remsi`, `remui` and `uitofp` are measured. They carried
+  the FPGA model's numbers (about 1.1 ns on every path); `control_merge` is
+  now 77 ps on its valid path.
+- The pipelined dividers and the conversions are measured at every width,
+  not only at 32 bits (see "What the model does not contain").
 
 ### The adders
 
@@ -243,7 +296,7 @@ scripts ship them under `flow/platforms`:
 export SKY130_DIR=/path/to/sky130       # sky130hd/lib/*.lib, sky130ram/*/
 python3 main.py --synth-tool sky130 \
   --dynamatic-dir "$DYNAMATIC" \
-  --json-input "$DYNAMATIC/data/rtl-config-vhdl-vivado.json" \
+  --json-input "$DYNAMATIC/data/rtl-config-vhdl.json" \
   --json-output "$DYNAMATIC/data/components-sky130.json" \
   --clock-period 10.0
 ```
@@ -264,11 +317,33 @@ order of magnitude slower than an ASAP7 one, so the period to map toward is
 in the nanoseconds, and `report-timing.sh` is asked for thousands of
 picoseconds.
 
+sky130 has flip-flops with an enable (`edfxtp`); ASAP7 has none. Mapped to
+one, a flip-flop's enable is a pin after ABC: the net that drives it is one
+output of the logic ABC maps, however many flip-flops it reaches, and ABC
+never buffers it. A pipelined divider's stall enable reaches 3,170 of them
+at 32 bits through one `clkbuf_1`. So `sky130-lib.sh` keeps them out of
+`dfflibmap` (`DFF_DONT_USE`, handed over as `DFF_ARGS`): the enable is a
+mux in front of a plain flip-flop, as on ASAP7, and ABC buffers it to
+`MAX_FANOUT` like any other net. Nine entries move: the three sequential
+units' latency tables by their new stage (their ready paths by 0.02 ns at
+most), and these, where the stall enable reaches every stage:
+
+| sky130, 10 ns | ready, enable flip-flops | kept out | 64-bit stage, enable flip-flops | kept out |
+| --- | --- | --- | --- | --- |
+| `divsi` (pipelined) | 351.3 ns | 1.37 ns | 335.6 ns | 4.49 ns |
+| `divui` (pipelined) | 349.5 ns | 1.23 ns | 333.8 ns | 4.14 ns |
+| `remsi`, `remui` | 292.9 ns | 1.09 ns | 279.8 ns | 4.65 ns |
+| `muli` (pipelined) | 9.59 ns | 0.80 ns | 10.06 ns | 7.12 ns |
+| `buffer` | 3.13 ns | 0.91 ns | 3.49 ns | 1.79 ns |
+
+Below 8 bits a stage grows a little instead (the divider's 1-bit stage
+from 0.56 to 0.86 ns): with a few loads, a mux and a plain flip-flop are
+slower than the flip-flop with the mux inside it.
+
 ### Placed and repaired: `PLACE=1`
 
-`report-timing.sh` stops at synthesis: no wires, no buffer trees. That
-overstates any high-fan-out net (a clock enable over a 32-stage divider reads
-as 86 ns on sky130) and understates every long wire. With `PLACE=1` and
+`report-timing.sh` stops at synthesis: no wires, and no buffer trees but
+ABC's. That understates every long wire. With `PLACE=1` and
 OpenROAD on the path (or `OPENROAD`), the script floorplans the mapped
 netlist (`UTILIZATION` percent, 50 by default), places it, estimates the
 wires' parasitics from the placement, buffers every net above `MAX_FANOUT`
@@ -281,8 +356,10 @@ placement needs (`PDK_TECH_LEF`, `PDK_CELL_LEFS`, `PDK_TRACKS`,
 from `MACRO_LEFS`. On the transposer, measured before the recipe kept the
 prefix adders (see "The adders"): sky130 10,817 ps at synthesis,
 14,409 ps placed and repaired (831 buffers in, 4,913 cells resized); ASAP7
-1,737 ps and 2,037 ps (no buffer needed, 9,334 resized). The divider's stage
-above is 6.2 ns once placed and repaired. The characterization's stage
+1,737 ps and 2,037 ps (no buffer needed, 9,334 resized). The 32-bit
+divider's stage was 86 ns at synthesis and 6.2 ns placed and repaired while
+sky130's enable flip-flops kept its enable away from ABC; with them kept out
+(see "Characterizing for sky130"), it is 3.7 ns at synthesis. The characterization's stage
 report stays post-synthesis: a placement per unit and width would take
 hours, and the whole-design report is where the placed number matters.
 
@@ -330,9 +407,9 @@ the default's file, and every row would be about a third lower on SLVT.
 | --- | --- | --- |
 | `addi`, 32-bit, data | 0.270 | 0.754 before `pdk_synth_commands` kept the prefix adder (see "The adders") |
 | `addi`, 64-bit, data | 0.321 | 1.463 before |
-| `mux`, valid | 0.157 | a mux in a whole-design ASAP7 report: about 150 ps |
-| `mux`, 32-bit, data | 0.053 | |
-| `cmpi`, 32-bit, data | 0.140 | 0.178 before |
+| `mux`, valid | 0.105 | the generator's mux; the hand-written one was 0.157 |
+| `mux`, 32-bit, data | 0.057 | |
+| `cmpi`, 32-bit, data | 0.204 | the slowest of the ten comparisons, an order; `ne` alone was 0.140 (0.178 before the prefix adder) |
 | `andi`, any bitwidth, data | 0.015 | one two-input gate |
 | `fork`, ready | 0.042 | `outs_ready[1]` to `ins_ready`, the eager fork's AND tree |
 | `fork`, data | 0.000 | `outs(i) <= ins` is a wire, and OpenSTA reports the path at 0.000 |
@@ -434,26 +511,26 @@ pipelined multiplier's own stage:
 | ASAP7 `divui.sequential` | 0.184 | 0.244 | 0.277 | 0.342 |
 | ASAP7 `muli.sequential.4` | 0.300 | 0.360 | 0.443 | 0.458 |
 | ASAP7 `muli.sequential.8` | 0.286 | 0.376 | 0.450 | 0.524 |
-| ASAP7 `muli` (pipelined) | 0.305 | 0.432 | 0.577 | 0.758 |
-| sky130 `divui.sequential` | 1.939 | 2.639 | 3.386 | 6.323 |
-| sky130 `muli.sequential.4` | 2.488 | 3.008 | 4.778 | 9.116 |
-| sky130 `muli.sequential.8` | 2.765 | 3.651 | 4.992 | 9.660 |
-| sky130 `muli` (pipelined) | 3.022 | 4.140 | 5.516 | 7.333 |
+| ASAP7 `muli` (pipelined) | 0.307 | 0.430 | 0.598 | 0.767 |
+| sky130 `divui.sequential` | 2.091 | 2.586 | 2.537 | 3.680 |
+| sky130 `muli.sequential.4` | 2.682 | 3.355 | 3.980 | 4.375 |
+| sky130 `muli.sequential.8` | 2.774 | 3.763 | 4.352 | 5.022 |
+| sky130 `muli` (pipelined) | 3.143 | 4.280 | 5.701 | 7.123 |
 
 The divider is also characterized at 1, 2 and 4 bits (ASAP7: 0.113, 0.154,
 0.168). Read the multiplier rows with the accumulator in mind: a step is a
 partial product and a full-width add, one carry-save tree with one prefix
 adder at its end (see "The adders"), so it grows slowly with the width: at
 64 bits the sequential unit's step is 0.458 ns (four bits a step) against
-the pipelined unit's whole product at 0.758.
+the pipelined unit's whole product at 0.767.
 
 The ready path is where the two implementations differ port to port. On
 ASAP7 the sequential multiplier's is 0.033 ns and the pipelined one's
-0.124 ns; on sky130 they are 0.406 ns (step 8; 0.405 at step 4) and
-6.854 ns. `handshake.divui`'s
-delays are carried from the reference model and are all zero, so the
-sequential divider's 0.034 ns (ASAP7) and 0.407 ns (sky130) are the first
-measured numbers that unit has.
+0.124 ns; on sky130 they are 0.404 ns (step 8; 0.391 at step 4) and
+0.799 ns. The dividers differ the same way: the sequential divider's ready
+path is 0.034 ns (ASAP7) and 0.414 ns (sky130), and the pipelined one's
+0.160 ns and 1.234 ns. A pipelined unit's ready path is its stall enable,
+which reaches every stage.
 
 Only the placers that model the ready and valid paths read those numbers
 (`fpl22`, `costaware`). `fpga20` models the data path alone, and for a unit
@@ -466,17 +543,31 @@ carries no `latency`.
 
 ### What the model does not contain
 
-The characterization script skips some units (`utils.py`'s `skipping_units`:
-the floating-point units, `store`, `end`, `return`, `remsi`/`remui`, `join`,
-`blocker`, `mem_controller` and the LSQ; the dividers too, but on Vivado only)
-and carries their entries from the reference model so that the model stays
-complete for the buffer placer. Two more units drop out of an ASAP7 run for reasons in the RTL: the
-dataful `control_merge` asserts false in
-`data/vhdl/handshake/control_merge.vhd` ("implementation with data signal has
-a bug"), so it cannot be elaborated at all; and `sitofp`/`fptosi` elaborate
-only at a 32-bit data type, which is the format their RTL is written for.
-Buffer placement warns `no timing model for op` for each missing unit and
-treats it as zero-delay.
+The characterization script skips some units and carries their entries from
+the reference model, so that the model stays complete for the buffer placer:
+
+- `utils.py`'s `skipping_units`: the floating-point units, `store`, `end`,
+  `return`, `join`, `mem_controller` and the LSQ;
+- the dividers, but on Vivado only;
+- on the generator config, `skipping_units_generated` (see "Which RTL is
+  measured").
+
+On the hand-written files, more units dropped out of an ASAP7 run for
+reasons in the RTL:
+
+- the dataful `control_merge` asserts false in
+  `data/vhdl/handshake/control_merge.vhd` ("implementation with data signal
+  has a bug");
+- `sitofp` and `fptosi` elaborated only at a 32-bit data type;
+- the pipelined `divsi` also elaborated only at 32 bits, and `divui` not at
+  all.
+
+Their generators write all of them at every width, so the PDK models now
+measure `control_merge`, `remsi`, `remui` and `uitofp`, which used to carry
+the reference model's FPGA numbers (about 1.1 ns on every path), and the
+pipelined dividers and conversions at every width. Buffer placement warns
+`no timing model for op` for each unit still missing and treats it as
+zero-delay.
 
 `mem_controller` now resolves its dependency (`mem_controller.vhd` names
 `mem_controller_loadless`, which the dependency dictionary keyed under the unit
@@ -487,11 +578,11 @@ no rule for and asserts on, and its `NUM_LOADS`/`NUM_CONTROLS`/`NUM_STORES`
 have no entry in `parameters_ranges`. The BRAM side is not a handshake channel
 and has no place in the model's delay classes at all.
 
-`VC` is zero throughout, and for a reason that is not a bug: it is the delay
-from a `valid` input to a `condition` output, and the only unit in the RTL
-config with a `condition`-class *output* is `control_merge`'s `index` -- the
-one unit whose dataful VHDL refuses to elaborate. Nothing else can produce a
-number for it. `CV` and `CR` are measured (`select`, `mux` and `cond_br` have
+`VC` is the delay from a `valid` input to a `condition` output, and the only
+unit with a `condition`-class *output* is `control_merge`'s `index`. It was
+zero throughout while that unit's hand-written VHDL refused to elaborate;
+measured on the generator's, it is 92 ps on ASAP7 SLVT, and zero for every
+other unit. `CV` and `CR` are measured (`select`, `mux` and `cond_br` have
 them); until this change they were thrown away, because the delay classes are
 queried under the names `condition`/`valid`/`ready` and were matched under
 `control`/`valid`/`ready` when the JSON was assembled. That was true of a

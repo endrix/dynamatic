@@ -205,7 +205,18 @@ TempConstr operator==(const QuadExpr &lhs, const QuadExpr &rhs);
 /// constraints/objectives.
 class CPSolver {
 public:
-  enum Status { OPTIMAL, NONOPTIMAL, INFEASIBLE, UNBOUNDED, UNKNOWN, ERROR };
+  // NONOPTIMAL: the solver stopped early (e.g., on its time limit) with a
+  // solution it has not proved optimal. NOSOLUTION: it stopped early before
+  // finding any (integer) solution, so there are no values to read.
+  enum Status {
+    OPTIMAL,
+    NONOPTIMAL,
+    INFEASIBLE,
+    UNBOUNDED,
+    UNKNOWN,
+    ERROR,
+    NOSOLUTION
+  };
   Status status = UNKNOWN;
 
   // LLVM Implementation of rtti functions like dyn_cast<>, isa<> needs these
@@ -266,6 +277,8 @@ public:
       return "UNBOUNDED";
     if (status == UNKNOWN)
       return "UNKNOWN";
+    if (status == NOSOLUTION)
+      return "NOSOLUTION";
     return "ERROR";
   }
 };

@@ -155,7 +155,7 @@ dut: entity work.{entity_name}
     return wrapper_top, entity_name
 
 
-def run_unit_characterization(unit_name, list_params, hdl_out_dir, synth_tool, top_def_file, tcl_dir, rpt_dir, log_dir, clock_period, module_name=None, baked_params=None, id_offset=0, latency_cycles=None):
+def run_unit_characterization(unit_name, list_params, hdl_out_dir, synth_tool, top_def_file, tcl_dir, rpt_dir, log_dir, clock_period, module_name=None, baked_params=None, id_offset=0, latency_cycles=None, defer=False):
     """
     Run characterization for a single unit using the specified synthesis tool.
 
@@ -183,9 +183,13 @@ def run_unit_characterization(unit_name, list_params, hdl_out_dir, synth_tool, t
             unit (one per baked width) do not write over each other's reports.
         latency_cycles (int): The unit's latency in cycles, when the caller
             knows it and the reference model does not list the unit.
+        defer (bool): Write the scripts and leave running them to the caller,
+            which then synthesizes the points of a generated unit (each
+            written into a directory of its own) in one parallel batch.
 
     Returns:
-        List[UnitCharacterization]: List of UnitCharacterization objects for the unit.
+        List[UnitCharacterization]: List of UnitCharacterization objects for
+            the unit; with `defer`, a pair of that list and the scripts.
     """
     # Get list of hdl files needed for the unit already present in the hdl_out_dir
     hdl_files = [f"{hdl_out_dir}/{file}" for file in os.listdir(hdl_out_dir) if os.path.isfile(os.path.join(hdl_out_dir, file))]
@@ -241,6 +245,9 @@ def run_unit_characterization(unit_name, list_params, hdl_out_dir, synth_tool, t
         list_tcls.append(unit_char_obj.generate_tcl(tcl_dir, rpt_dir, sdc_file, synth_tool, clock_period))
         id += 1
         unit_characterization_list.append(unit_char_obj)
+
+    if defer:
+        return unit_characterization_list, list_tcls
 
     # Run the synthesis tool for each tcl file
     log_file = f"{log_dir}/synth_{unit_name}_{id_offset}_log.txt"

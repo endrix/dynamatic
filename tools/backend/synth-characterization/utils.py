@@ -41,6 +41,33 @@ skipping_units = [
     "handshake.subf",
     "handshake.not"]
 
+# Units only a generator config (data/rtl-config-vhdl.json) has, which the
+# timing models have no entry for yet; an entry for one is a change of its
+# own, measured and checked against the designs that use the unit. Names
+# outside `handshake.` (the `arith.` wires of a function body, the II
+# monitor, the BRAM adaptor) are skipped too: the placer times their
+# `handshake.` twins.
+skipping_units_generated = [
+    "handshake.absi",
+    "handshake.blocker",
+    "handshake.bundle",
+    "handshake.init",
+    "handshake.maxsi",
+    "handshake.maxui",
+    "handshake.minsi",
+    "handshake.minui",
+    "handshake.non_spec",
+    "handshake.noti",
+    "handshake.queue",
+    "handshake.ram",
+    "handshake.rigidifier",
+    "handshake.spec_commit",
+    "handshake.spec_save_commit",
+    "handshake.speculating_branch",
+    "handshake.speculator",
+    "handshake.unbundle",
+]
+
 # Units Vivado's characterization skips and a standard-cell one does not: the
 # dividers are pipelined (their port-to-port delays are zero and their
 # latency comes from the reference), but their VHDL is self-contained and
@@ -308,8 +335,13 @@ def add_2d_ports(ports, direction):
                 r'data_array\s*\((\w+)\s*-\s*1\s*downto\s*0\)', port)
             assert match, f"Could not find data_array port {port}."
             size_name = match.group(1)
-            # Get corresponding size # Assuming only one value in parameters allowed
-            size_value = parameters_ranges[size_name][0]
+            # The size: a number where a generator wrote the unit at its size
+            # (`data_array(3 - 1 downto 0)`), otherwise a generic, at the one
+            # value parameters_ranges gives it.
+            if size_name.isdigit():
+                size_value = int(size_name)
+            else:
+                size_value = parameters_ranges[size_name][0]
             for i in range(size_value):
                 result.append(f"{port.split(':')[0].strip()}[{i}]")
     return result
