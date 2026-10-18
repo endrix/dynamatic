@@ -108,6 +108,14 @@ YS_SCRIPT="$LOG_DIR/$TOP.synth.ys"
 {
   printf '%s\n' "$READ" | sed 's/; */\n/g'
   pdk_synth_commands "$TOP"
+  # FF_PROVENANCE=1: every flip-flop as generic synthesis leaves it, with
+  # the attributes the library mapping drops -- its hdlname, the instance
+  # path the flattening kept, says which unit's register it is, and its D
+  # and Q nets which register -- in <top>.ffs.il next to the netlist. The
+  # mapping keeps the cell names, so a report's start and end points are
+  # the dump's cells: what a timing loop names a failing path's ends by
+  # (streamblocks' calpy_tools.timing_loop).
+  [[ "${FF_PROVENANCE:-0}" == 1 ]] && echo "tee -q -o $LOG_DIR/$TOP.ffs.il dump t:\$_*DFF*"
   echo "dfflibmap -liberty $SEQ_LIBERTY$DFF_ARGS"
   echo "abc $LIB_ARGS -constr $CONSTR -D $PERIOD -script $ABC_SCRIPT"
   echo "opt_clean"
