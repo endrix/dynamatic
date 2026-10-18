@@ -7,7 +7,7 @@ from report_parser import extract_rpt_data, read_reference_latencies
 from hdl_manager import get_hdl_files
 from pdk_backend import is_pdk
 from run_synthesis import run_synthesis
-from utils import VhdlInterfaceInfo, parameters_ranges, skipping_units, skipping_units_vivado, skipping_units_generated, impl_variants
+from utils import VhdlInterfaceInfo, skipping_units, skipping_units_vivado, skipping_units_generated, impl_variants, unit_widths
 from unit_characterization import run_unit_characterization
 
 
@@ -95,8 +95,9 @@ def characterize_generated(unit_name, entries, dirs, dynamatic_dir,
                            latency_table):
     """
     Characterize a unit a generator writes at its port types
-    (generated_units): every point of its sweep generated into a directory of
-    its own, then all of them synthesized in one parallel batch.
+    (generated_units), at the widths utils.unit_widths gives it: every point
+    of its sweep generated into a directory of its own, then all of them
+    synthesized in one parallel batch.
 
     Args:
         unit_name (str): the operation, `handshake.fork`.
@@ -122,7 +123,7 @@ def characterize_generated(unit_name, entries, dirs, dynamatic_dir,
                 for entry in entries for param in entry.get("parameters", []))
     keyed, scripts = {}, []
     for i, (entry, variables, width) in enumerate(generated_units.points(
-            entries, parameters_ranges["DATA_TYPE"], latency_table,
+            entries, unit_widths(unit_name), latency_table,
             generated_units.SIZES if sized else None)):
         point_dir = f"{dirs['hdl']}/{i}"
         os.makedirs(point_dir, exist_ok=True)
