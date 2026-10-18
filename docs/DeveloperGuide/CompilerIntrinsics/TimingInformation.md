@@ -119,21 +119,82 @@ python3 main.py --synth-tool asap7 \
   --clock-period 1.0
 ```
 
+### The adders
+
+Yosys maps every carry chain (an add, a subtract, a compare: an `$alu`
+cell) to a lookahead unit, which ABC turns back into a ripple of majority
+gates, about 28 ps a bit on ASAP7. An FPGA has a dedicated carry chain; on a
+cell library the flow has to ask for a parallel-prefix adder. `ADDER` picks
+one of yosys' `techmap` choices, `sklansky` (the default), `kogge-stone` or
+`han-carlson`, and `ADDER=yosys` keeps yosys' own.
+
+Asking is not enough, because the adder also has to survive the mapping.
+`synth` ends with a generic `abc` over all of its gates, and that pass, like
+the `dc2` and `dretime` in yosys' constrained-liberty ABC script, rewrites a
+prefix tree back into a chain. Through `synth`, a 64-bit Sklansky add
+measured 964 ps on SLVT at a 1 ns target, and 955 ps at 0.2 ns. So
+`pdk-lib.sh`'s `pdk_synth_commands`, which both the characterization and
+`report-timing.sh` run, makes four changes:
+
+- it stops `synth` before its gate mapping;
+- it runs `maccmap` as a pass of its own (below);
+- it maps and cleans every other cell with `abc` and `opt`, as `synth` would;
+- it maps the `$alu` cells last.
+
+The ABC script also leaves out `dc2` and `dretime`. The same add is then
+217 ps at 1 ns, and 192 ps at 0.2 ns. Dropping the generic `abc` altogether
+is not the answer: the constant and equivalent registers that pass exposes
+then stay, and one actor went from 727 to 1,129 flip-flops.
+
+A sum of more than two terms needs the `maccmap` step. `alumacc` makes a
+multiply, or an add of several operands, a `$macc` cell. The techmap that
+maps it (through `maccmap`: a carry-save tree and one final adder) maps that
+final adder in the same pass, as yosys' own adder, and `abc` then folds it
+into a chain. Run first as a pass of its own, `maccmap` leaves the final
+adder an `$alu` like any other. The pipelined multiplier's stage, 64 bits:
+
+| `muli` stage | before | prefix adders alone | with `maccmap` |
+| --- | --- | --- | --- |
+| ASAP7 SLVT, 1 ns | 1,121 ps | 1,409 ps | 758 ps |
+| sky130, 10 ns | 10.2 ns | 17.7 ns | 7.3 ns |
+
+`synth -booth` is not used. A radix-4 Booth multiplier is smaller and a
+little faster on its own (688 ps in 8,126 cells, where `maccmap` gives
+758 ps in 12,769). But Booth takes the multiply out of the sum it belongs
+to, so a sequential multiplier's step (an accumulator plus a partial
+product) pays two adders in a row: 402 to 600 ps at 32 bits, four bits a
+step. On two whole designs, it also added about 500 fan-out buffers each
+and did not shorten the critical path.
+
+On whole designs (four actors exported by StreamBlocks, `report-timing.sh`
+on SLVT at 1 ns, post-synthesis):
+
+| design | critical path, before | after | cells, before | after |
+| --- | --- | --- | --- | --- |
+| a row of multiply-accumulates | 1,394 ps | 1,193 ps | 127,538 | 139,514 |
+| a convolution's input stage | 1,414 ps | 1,273 ps | 47,148 | 46,259 |
+| a row maximum and store | 1,617 ps | 1,561 ps | 78,235 | 77,010 |
+| a transposer | 800 ps | 732 ps | 4,965 | 4,981 |
+
+The flip-flop counts are the same before and after. The prefix adders cost
+cells where there are many of them: the row of multiply-accumulates is 9%
+more cells and 5% more area. What is left on those paths is handshake
+logic, which is the buffer placer's to cut.
+
 ### The threshold flavour
 
 ASAP7 ships every cell at three thresholds, and the choice costs nothing in
-area: the same netlist, the same 130 cells for a 32-bit adder, a different
-leakage this flow does not report. What it buys is speed. On that adder in a
-top of its own, mapped through `report-timing.sh`:
-
-Each column is one prefix adder (`ADDER`, `sklansky` by default), and the
-cell count is the same down a column as well as across:
+cells: a 32-bit adder's characterization top is 167 cells with Sklansky and
+282 with Kogge-Stone on every flavour, with a different leakage that this
+flow does not report. What the choice buys is speed. Here is that adder's
+data delay as the characterization measures it at a 1 ns target. Each
+column is one prefix adder (`ADDER`, `sklansky` by default):
 
 | flavour | Sklansky | Kogge-Stone |
 | --- | --- | --- |
-| RVT | 761 ps | 568 ps |
-| LVT | 594 ps | 439 ps |
-| SLVT | 496 ps | 369 ps |
+| RVT | 270 ps | 213 ps |
+| LVT | 213 ps | 168 ps |
+| SLVT | 181 ps | 143 ps |
 
 `ASAP7_VT` picks one, `slvt` by default, and every script that maps cells
 reads it: the timing reports, the characterization and `PLACE=1`'s
@@ -217,7 +278,8 @@ how many buffers went in and how many cells were resized, and gives the
 slack before placement, placed, and repaired. Each recipe names what the
 placement needs (`PDK_TECH_LEF`, `PDK_CELL_LEFS`, `PDK_TRACKS`,
 `PDK_SET_RC`, `PDK_SITE`, `PDK_PINS_H`, `PDK_PINS_V`); macros' LEFs come
-from `MACRO_LEFS`. On the transposer: sky130 10,817 ps at synthesis,
+from `MACRO_LEFS`. On the transposer, measured before the recipe kept the
+prefix adders (see "The adders"): sky130 10,817 ps at synthesis,
 14,409 ps placed and repaired (831 buffers in, 4,913 cells resized); ASAP7
 1,737 ps and 2,037 ps (no buffer needed, 9,334 resized). The divider's stage
 above is 6.2 ns once placed and repaired. The characterization's stage
@@ -231,7 +293,10 @@ The mapping recipe lives in `tools/backend/asap7-lib.sh` (sky130's in
 `tools/backend/report-timing.sh` uses to time a whole exported design: the five
 ASAP7 typical-corner liberty files of the chosen threshold flavour
 (`ASAP7_VT`), the cells OpenROAD's flow scripts keep out of ASAP7 designs,
-yosys' constrained-liberty ABC script with fan-out buffering and gate sizing,
+the generic synthesis of `pdk-lib.sh`'s `pdk_synth_commands`, which keeps
+the adders away from ABC until they are prefix adders (see "The adders"),
+yosys' constrained-liberty ABC script with fan-out buffering and gate sizing
+but without its `dc2` and `dretime`,
 a `BUFx2` of that flavour driving every input and a
 3.898 fF load on every output, and reset as a false path. A unit's delay and a
 design's critical path therefore come out of one flow and can be compared.
@@ -263,11 +328,11 @@ the default's file, and every row would be about a third lower on SLVT.
 
 | unit | ASAP7 (ns) | for comparison |
 | --- | --- | --- |
-| `addi`, 32-bit, data | 0.754 | `report-timing.sh` on the same 32-bit adder in a top of its own: 753.8 ps (777.1 ps with `ADDER=yosys`, the model's value before the Sklansky adder) |
-| `addi`, 64-bit, data | 1.463 | |
+| `addi`, 32-bit, data | 0.270 | 0.754 before `pdk_synth_commands` kept the prefix adder (see "The adders") |
+| `addi`, 64-bit, data | 0.321 | 1.463 before |
 | `mux`, valid | 0.157 | a mux in a whole-design ASAP7 report: about 150 ps |
 | `mux`, 32-bit, data | 0.053 | |
-| `cmpi`, 32-bit, data | 0.178 | |
+| `cmpi`, 32-bit, data | 0.140 | 0.178 before |
 | `andi`, any bitwidth, data | 0.015 | one two-input gate |
 | `fork`, ready | 0.042 | `outs_ready[1]` to `ins_ready`, the eager fork's AND tree |
 | `fork`, data | 0.000 | `outs(i) <= ins` is a wire, and OpenSTA reports the path at 0.000 |
@@ -360,35 +425,34 @@ floor the unit puts under the clock -- against the cycles that many
 iterations take, which is what `getInternalCombinationalDelay` and
 `getLatency` read.
 
-One iteration, measured (`components-asap7.stages.json` at 1.0 ns and
+One iteration, measured (`components-asap7.stages.json`, SLVT at 1.0 ns, and
 `components-sky130.stages.json` at 10.0 ns, in nanoseconds), beside the
 pipelined multiplier's own stage:
 
 | unit | 8 | 16 | 32 | 64 |
 | --- | --- | --- | --- | --- |
-| ASAP7 `divui.sequential` | 0.342 | 0.494 | 0.870 | 1.526 |
-| ASAP7 `muli.sequential.4` | 0.468 | 0.670 | 1.049 | 1.634 |
-| ASAP7 `muli.sequential.8` | 0.431 | 0.672 | 1.041 | 1.166 |
-| ASAP7 `muli` (pipelined) | 0.438 | 0.704 | 1.062 | 1.699 |
-| sky130 `divui.sequential` | 2.139 | 3.747 | 6.323 | 9.030 |
-| sky130 `muli.sequential.4` | 2.802 | 4.117 | 6.111 | 10.557 |
-| sky130 `muli.sequential.8` | 2.852 | 5.222 | 7.263 | 9.762 |
-| sky130 `muli` (pipelined) | 2.732 | 4.648 | 7.308 | 10.199 |
+| ASAP7 `divui.sequential` | 0.184 | 0.244 | 0.277 | 0.342 |
+| ASAP7 `muli.sequential.4` | 0.300 | 0.360 | 0.443 | 0.458 |
+| ASAP7 `muli.sequential.8` | 0.286 | 0.376 | 0.450 | 0.524 |
+| ASAP7 `muli` (pipelined) | 0.305 | 0.432 | 0.577 | 0.758 |
+| sky130 `divui.sequential` | 1.939 | 2.639 | 3.386 | 6.323 |
+| sky130 `muli.sequential.4` | 2.488 | 3.008 | 4.778 | 9.116 |
+| sky130 `muli.sequential.8` | 2.765 | 3.651 | 4.992 | 9.660 |
+| sky130 `muli` (pipelined) | 3.022 | 4.140 | 5.516 | 7.333 |
 
-The divider is also characterized at 1, 2 and 4 bits (ASAP7: 0.168, 0.230,
-0.251). Read the multiplier rows with the accumulator in mind: the step is a
-partial product and a full-width add, and at 32 bits the add is most of it,
-which is why the step at 4 and the step at 8 are within 2% of each other
-there and of the whole product. The step separates from the product at 64
-bits, where the sequential unit at step 8 is 1.166 ns against the pipelined
-unit's 1.699.
+The divider is also characterized at 1, 2 and 4 bits (ASAP7: 0.113, 0.154,
+0.168). Read the multiplier rows with the accumulator in mind: a step is a
+partial product and a full-width add, one carry-save tree with one prefix
+adder at its end (see "The adders"), so it grows slowly with the width: at
+64 bits the sequential unit's step is 0.458 ns (four bits a step) against
+the pipelined unit's whole product at 0.758.
 
 The ready path is where the two implementations differ port to port. On
-ASAP7 the sequential multiplier's is 0.048 ns and the pipelined one's
-0.180 ns; on sky130 they are 0.389 ns (step 8; 0.407 at step 4) and
+ASAP7 the sequential multiplier's is 0.033 ns and the pipelined one's
+0.124 ns; on sky130 they are 0.406 ns (step 8; 0.405 at step 4) and
 6.854 ns. `handshake.divui`'s
 delays are carried from the reference model and are all zero, so the
-sequential divider's 0.051 ns (ASAP7) and 0.407 ns (sky130) are the first
+sequential divider's 0.034 ns (ASAP7) and 0.407 ns (sky130) are the first
 measured numbers that unit has.
 
 Only the placers that model the ready and valid paths read those numbers

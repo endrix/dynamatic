@@ -17,7 +17,8 @@
 #   DRIVER_CELL   what drives every input during mapping, LOAD_FF the load
 #                 on every output (femtofarads, as OpenROAD's flow scripts
 #                 hand them to ABC)
-#   ABC_SCRIPT    yosys' constrained-liberty script for ABC
+#   ABC_SCRIPT    yosys' constrained-liberty script for ABC, without the
+#                 rewriting (dc2, dretime) that would undo a prefix adder
 #   STA           the OpenSTA binary
 #   PDK_LABEL     the library and corner, for a report's first line
 #   PDK_DIR_VAR   the environment variable that locates the library
@@ -54,4 +55,60 @@ unset _pdk_dir
 # pdk_write_abc_constr <file>: what ABC assumes at the design's boundary.
 pdk_write_abc_constr() {
   printf 'set_driving_cell %s\nset_load %s\n' "$DRIVER_CELL" "$LOAD_FF" > "$1"
+}
+
+# pdk_synth_commands <top>: yosys' generic synthesis of <top>, flattened, one
+# command a line, before the flip-flops and the logic are mapped to the
+# library. report-timing.sh and the characterization's backend both run it,
+# so that a unit's delay and a design's path come from one flow.
+#
+# The adder. Yosys maps every carry chain (an add, a subtract, a compare: an
+# `$alu` cell) to a Brent-Kung lookahead unit, and ABC rebuilds that as a
+# ripple-carry chain of majority gates, about 28 ps a bit on ASAP7. On an
+# FPGA the carry chain is dedicated silicon; on a cell library the flow has
+# to ask for a parallel-prefix adder: ADDER=sklansky (the default),
+# kogge-stone or han-carlson, or ADDER=yosys for yosys' own.
+#
+# And the prefix adder has to survive the mapping. `synth` ends with a
+# generic `abc` over all of its gates, and that pass, like a `dc2` in the
+# mapping script, folds a prefix tree back into a chain: a 64-bit Sklansky
+# add measured 964 ps on ASAP7 SLVT through `synth` at a 1 ns target, and
+# 955 ps at 0.2 ns. So `synth` stops before its gate mapping; every other
+# cell is mapped and cleaned by `abc` and `opt` as `synth` would do it (not
+# running that pass at all costs registers: the constant and equivalent ones
+# it exposes stay, 727 to 1,129 flip-flops on one actor); and the `$alu`
+# cells are mapped last. The same add is then 217 ps at 1 ns, 192 ps at
+# 0.2 ns.
+#
+# A sum of more than two terms. `alumacc` makes a multiply, or an add of
+# several operands, a `$macc` cell, and the techmap that maps it (through
+# `maccmap`: a carry-save tree and one final adder) maps that final adder
+# too, in the same pass, as yosys' own adder, which `abc` then folds into a
+# chain. Running `maccmap` first leaves the final adder an `$alu` like any
+# other. Without it the prefix adder made a 64-bit multiply slower, 1,121 to
+# 1,409 ps on ASAP7 SLVT and 10.2 to 17.7 ns on sky130; with it, 758 ps and
+# 7.3 ns. Not `synth -booth`: a Booth multiplier is smaller and a little
+# faster alone (688 ps, 8,126 cells rather than 12,769), but it takes the
+# multiply out of the sum it belongs to, so a sequential multiplier's step,
+# an accumulator plus a partial product, pays two adders: 402 to 600 ps at
+# 32 bits.
+pdk_synth_commands() {
+  local adder map=""
+  adder="$(echo "${ADDER:-}" | tr -d '[:space:]')"
+  adder="${adder:-sklansky}"
+  [[ "$adder" != "yosys" ]] && map=" -map +/choices/$adder.v"
+  printf '%s\n' \
+    "synth -top $1 -flatten -run begin:fine" \
+    "opt -fast -full" \
+    "memory_map" \
+    "opt -full" \
+    "maccmap" \
+    'techmap t:$alu %n' \
+    "opt -fast" \
+    "abc" \
+    "opt -fast" \
+    "techmap -map +/techmap.v$map" \
+    "opt -fast" \
+    "hierarchy -check" \
+    "check"
 }
