@@ -39,7 +39,12 @@ In the previous example, we assumed there is only one input and one output port.
 The combinational delays can connect ports of the same or different types. The ones of different types supported for now are the following ones: VR (valid to ready), CV (control to valid), CR (control to ready), VC (valid to control), and VD (valid to data).
 
 
-**Note** : The current code does not seem to use the information related to inport and outport delays. Furthermore all the port delays are 0 for all listed components. We assume this is the intended behaviour for now. We welcome a change to this documentation if the code structure changes. 
+**Note**: the buffer placer reads the inport and outport delays of a unit
+with a latency (its `path_inDelay` and `path_outDelay` constraints), and a
+placed buffer's when the buffering group is given a buffer model (the MILPs
+give a null one). The FPGA model's port delays are all zero. The cell-library
+models measure them for every unit with registers -- see "A unit's
+registers" below.
 
 
 
@@ -441,11 +446,57 @@ implementation makes it. It is also the only reduction available, since the
 placer looks a unit up by its operation name and `handshake.buffer` is the
 name of all six.
 
+A buffer type also has an entry of its own,
+`handshake.buffer.<BUFFER_TYPE>`, which `TimingDatabase::getModel` times a
+buffer of that type by; the base entry stays the reduction, for a lookup by
+the name alone.
+
 The buffer placer accepts the model: on `fir`, `--handshake-place-buffers`
 with `algorithm=fpga20 solver=cbc` places buffers at a 1.0 ns target period
 against `components-asap7.json` and reports the MILP infeasible at 0.5 ns,
 where against `components.json` it is already infeasible at 1.0 ns and needs
 2.0 ns.
+
+### A unit's registers
+
+A port-to-port delay leaves a unit's registers out: a path that starts at one
+or ends in one has no input port at one end or no output port at the other.
+On a cell library they are not small. A transparent slot's
+(`ONE_SLOT_BREAK_R`) data out is its multiplexer, which its full register
+selects over every data bit, so its data leaves the slot about 0.11 ns after
+the clock at 32 bits on ASAP7 SLVT, where its data passes through in 0.01; an
+opaque slot's valid in drives its data registers' enable, 0.08 ns into them
+with the setup. Every unit with registers has paths like these: the
+multiplexer and the merge behind their output slot (`TEHB`), the control
+merge, an eager fork's flags for the outputs that have taken their copy.
+
+So a standard-cell characterization measures them, as the entry's port
+models: `outport`, from every register to each class of output port (the
+clock to output and the logic after it), and `inport`, from each class of
+input port into every register (the logic before it and the setup). The
+queries are OpenSTA's `report_checks -from [all_registers] -to <port>` and
+`-from <port> -to [all_registers]`, the second read back as the period less
+the path's slack. Each signal is keyed by the data width, valid and ready
+too: the enable and the select fan out over the data (a transparent slot's
+valid into its registers is 0.06 ns at 1 bit and 0.12 at 32). The
+deserializer reads the valid and ready delays at `"1"`, which is always
+written, and keeps them at every width too
+(`TimingModel::PortModel::validDelayAt`); a data width past the widest entry
+takes the widest, which understates what the width adds but does not leave
+the register out. A unit with no register keeps zero port models.
+
+ASAP7 SLVT, 32 bits, ns:
+
+| slot | through: data, valid, ready | register to outputs | inputs to register |
+| --- | --- | --- | --- |
+| `ONE_SLOT_BREAK_DV` | -, -, 0.026 | 0.035, 0.040, 0.066 | 0.035, 0.078, 0.095 |
+| `ONE_SLOT_BREAK_R` | 0.010, 0.037, - | 0.109, 0.060, 0.090 | 0.040, 0.123, 0.090 |
+| `ONE_SLOT_BREAK_DVR` | -, -, - | 0.035, 0.035, 0.061 | 0.045, 0.090, 0.033 |
+
+("-": registered, no path through.) A design's critical paths agree: in an
+ifld body cut to 540 ps, the worst path starts at a transparent slot's full
+register and spends 0.13 ns in its clock to output and the fan-out tree after
+it, a path no port-to-port delay has.
 
 ### The units keyed by implementation
 
@@ -536,8 +587,8 @@ which reaches every stage.
 
 Only the placers that model the ready and valid paths read those numbers
 (`fpl22`, `costaware`). `fpga20` models the data path alone, and for a unit
-with a latency reads only the port-to-register delays, zero in every entry;
-and a sequential unit's latency comes from the op's `latency` attribute
+with a latency reads only the port-to-register delays (see "A unit's
+registers"); and a sequential unit's latency comes from the op's `latency` attribute
 before the model's table (`esa-unit-impl` writes it). So on the esa flow an
 `fpga20` placement is the same with these entries and without them; the
 latency table is read only for an op that names the implementation and
@@ -787,8 +838,8 @@ exception is a unit the reference cannot list because the config does not
 name it, the sequential divider and multiplier above: their latency is a
 formula of the width and the step, and it is written against the measured
 delay of one iteration. `inport` and
-`outport` are zero, as they are in `components.json`, and the placer does not
-read them.
+`outport` are the unit's registers, as for every unit (see "A unit's
+registers").
 
 ## How Timing Information is Used
 

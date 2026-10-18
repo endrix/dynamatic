@@ -142,6 +142,10 @@ def characterize_generated(unit_name, entries, dirs, dynamatic_dir,
             keys = [generated_units.size_key(unit_name, size)]
             if size in generated_units.ATTRIBUTE_VALUES["SIZE"]:
                 keys.append(unit_name)
+        if "BUFFER_TYPE" in variables:
+            # a slot type's own entry beside the base one, which reduces over
+            # all six
+            keys.append(generated_units.type_key(unit_name, variables["BUFFER_TYPE"]))
         for key in keys:
             keyed.setdefault(key, []).extend(point_chars)
         scripts.extend(point_scripts)

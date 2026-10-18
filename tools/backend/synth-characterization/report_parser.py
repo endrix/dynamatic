@@ -3,9 +3,9 @@ import os
 import re
 import json
 
-from generated_units import base_unit
+from generated_units import base_unit, type_base
 from pdk_backend import is_pdk, units_per_ns
-from utils import WIDE_WIDTHS
+from utils import WIDE_WIDTHS, UnitCharacterization
 
 # Constants for parsing the report that specify which line
 # contains the delay information.
@@ -30,13 +30,27 @@ RE_DELAY_OPENSTA = re.compile(r'^\s+([\d.]+)\s+data arrival time\s*$')
 # not list either: a combinational unit, one implementation, no internal delay.
 DEFAULT_LATENCY = {"0": {"64": {"0.0": 0.0}}}
 
-# Port-to-register delays. The characterization does not measure them and the
-# buffer placer does not read them, but the timing model's deserializer expects
-# both keys to be there (see lib/Support/TimingModels.cpp).
+# The port models of a unit with no registers: nothing between a port and a
+# register. The timing model's deserializer expects both keys to be there (see
+# lib/Support/TimingModels.cpp). The Vivado backend measures no port model, and
+# writes this for every unit.
 ZERO_PORT_MODEL = {"delay": {"data": {"64": 0},
                              "valid": {"1": 0},
                              "ready": {"1": 0},
                              "VR": 0, "CV": 0, "CR": 0, "VC": 0, "VD": 0}}
+
+# A standard-cell backend's port models (utils.UnitCharacterization's
+# register_delay_types): `inport`, from an input port into a register, its
+# setup included; `outport`, from a register to an output port, its clock to
+# output included. The buffer placer reads them as a registered unit's
+# (BufferPlacementMILP's path_inDelay and path_outDelay) and as a slot's own
+# (path_bufferedChannelIn and Out). Each signal is keyed by the unit's data
+# width -- a register's enable or a select fans out over the data, so the
+# valid and ready delays grow with it too -- and the deserializer reads the
+# valid and ready ones at "1", which is always written. A condition port (a
+# select, an index) is a data channel and goes to the data delays.
+PORT_SIGNALS = {"data": "data", "condition": "data", "valid": "valid", "ready": "ready"}
+RE_SLACK_OPENSTA = re.compile(r'^\s+(-?[\d.]+)\s+slack \((MET|VIOLATED)\)\s*$')
 
 # This function extracts the delay from a line in the report file.
 # It uses a regular expression to find the delay value in nanoseconds.
@@ -106,6 +120,55 @@ def extract_single_rpt(rpt_file, synth_tool="vivado"):
     return max_delay  # Return 0.0 if no delay is found
 
 
+def extract_capture_rpt(rpt_file, synth_tool, period_ns):
+    """
+    The largest delay from an input port into a register, its setup included,
+    in an OpenSTA report of such paths: the period less each path's slack
+    (the path starts at a zero input delay on an ideal clock, so its required
+    time is the period less the register's setup).
+
+    Args:
+        rpt_file (str): Path to the report file.
+        synth_tool (str): Value of --synth-tool, a PDK.
+        period_ns (float): The clock period the report was timed at, in ns.
+
+    Returns:
+        float: The delay in nanoseconds, 0.0 if the report has no path.
+    """
+    per_ns = units_per_ns(synth_tool)
+    worst = 0.0
+    with open(rpt_file, 'r') as f:
+        for line in f:
+            match = RE_SLACK_OPENSTA.match(line)
+            if match:
+                worst = max(worst, period_ns - float(match.group(1)) / per_ns)
+    return worst
+
+
+def port_model(by_signal):
+    """
+    A port model from its measured delays.
+
+    Args:
+        by_signal (dict): "data", "valid", "ready" -> {bitwidth (str): ns}.
+
+    Returns:
+        dict: the model's `inport` or `outport` entry; ZERO_PORT_MODEL when
+            nothing was measured, which is every unit with no register.
+    """
+    if not any(v > 0.0 for widths in by_signal.values() for v in widths.values()):
+        return ZERO_PORT_MODEL
+    delay = {"VR": 0, "CV": 0, "CR": 0, "VC": 0, "VD": 0}
+    for signal in ("data", "valid", "ready"):
+        widths = dict(sorted(by_signal.get(signal, {}).items(), key=lambda kv: int(kv[0])))
+        if signal != "data" and widths and "1" not in widths:
+            # the deserializer reads valid and ready at "1": the narrowest
+            # width's delay stands for it
+            widths = {"1": next(iter(widths.values())), **widths}
+        delay[signal] = widths or ({"64": 0} if signal == "data" else {"1": 0})
+    return {"delay": delay}
+
+
 def read_reference_latencies(reference_json):
     """
     Read the latency table of every unit in a reference timing model.
@@ -166,6 +229,8 @@ def extract_rpt_data(map_unit_to_list_unit_chars, json_output,
         CRDelayFinal = 0.0
         VCDelayFinal = 0.0
         VDDelayFinal = 0.0
+        # the port models: "in"/"out" -> signal -> bitwidth -> ns
+        ports = {"in": {}, "out": {}}
         traversedUnitOnce = False
         for unit_char in list_unit_chars:
             traversedParamOnce = False
@@ -188,6 +253,20 @@ def extract_rpt_data(map_unit_to_list_unit_chars, json_output,
                     continue
                 traversedParamOnce = True
                 traversedUnitOnce = True
+                if UnitCharacterization.REGISTER in delay_type:
+                    # A port model, at every width the unit was written at:
+                    # nothing older holds these entries to 64 bits.
+                    bitwidth = str(unit_char.get_parameter_value("DATA_TYPE"))
+                    if delay_type[0] == UnitCharacterization.REGISTER:
+                        side, signal = "out", PORT_SIGNALS[delay_type[1]]
+                        delay = extract_single_rpt(rpt_filename, synth_tool)
+                    else:
+                        side, signal = "in", PORT_SIGNALS[delay_type[0]]
+                        delay = extract_capture_rpt(rpt_filename, synth_tool,
+                                                    unit_char.clock_period)
+                    by_width = ports[side].setdefault(signal, {})
+                    by_width[bitwidth] = max(by_width.get(bitwidth, 0.0), delay)
+                    continue
                 if wide and delay_type != ("data", "data"):
                     continue
                 # Extract delay from the report file
@@ -240,7 +319,7 @@ def extract_rpt_data(map_unit_to_list_unit_chars, json_output,
             # An entry at one size of a unit (`handshake.fork.size.8`) has
             # the unit's latency: a size adds channels, not stages.
             latency_table = latencies.get(
-                unit_name, latencies.get(base_unit(unit_name), DEFAULT_LATENCY))
+                unit_name, latencies.get(base_unit(type_base(unit_name)), DEFAULT_LATENCY))
 
         output_data[unit_name] = {"latency": latency_table,
                                   "delay": {"data": dataDict,
@@ -251,8 +330,8 @@ def extract_rpt_data(map_unit_to_list_unit_chars, json_output,
                                             "CR": CRDelayFinal,
                                             "VC": VCDelayFinal,
                                             "VD": VDDelayFinal},
-                                  "inport": ZERO_PORT_MODEL,
-                                  "outport": ZERO_PORT_MODEL}
+                                  "inport": port_model(ports["in"]),
+                                  "outport": port_model(ports["out"])}
 
     bound_sizes(output_data)
 
@@ -311,7 +390,22 @@ def bound_sizes(output_data):
                                              bound[signal]["1"])
                 for name in ("VR", "CV", "CR", "VC", "VD"):
                     delay[name] = max(delay[name], bound[name])
+                # the port models, per signal and width
+                for port in ("inport", "outport"):
+                    mine = output_data[key][port]
+                    theirs = bound_ports[port]
+                    if theirs is ZERO_PORT_MODEL:
+                        continue
+                    if mine is ZERO_PORT_MODEL:
+                        mine = output_data[key][port] = json.loads(json.dumps(theirs))
+                        continue
+                    for signal in ("data", "valid", "ready"):
+                        for width, d in theirs["delay"][signal].items():
+                            mine["delay"][signal][width] = max(
+                                mine["delay"][signal].get(width, d), d)
             bound = delay
+            bound_ports = {port: output_data[key][port]
+                           for port in ("inport", "outport")}
 
 
 def write_stages(stages, json_output):

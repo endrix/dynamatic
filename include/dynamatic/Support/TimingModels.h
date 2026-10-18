@@ -242,6 +242,22 @@ public:
     double validDelay = 0.0;
     /// Delay of port's ready wire.
     double readyDelay = 0.0;
+    /// The valid and ready delays at every data width the model measured
+    /// them at (`validDelay` and `readyDelay` are the "1" entries): a
+    /// register's enable, or the select of a slot's multiplexer, fans out
+    /// over the data, so they grow with it.
+    BitwidthDepMetric<double> validDelays, readyDelays;
+
+    /// The data delay at `bitwidth`: the entry at the smallest width at or
+    /// above it; past the widest, the widest, which understates what the
+    /// width adds to a register's path (an enable's or a select's fan-out)
+    /// but does not leave the register out.
+    double dataDelayAt(unsigned bitwidth) const;
+    /// The valid delay at `bitwidth`, as `dataDelayAt`; `validDelay` when the
+    /// model has it at no width but "1".
+    double validDelayAt(unsigned bitwidth) const;
+    /// The ready delay at `bitwidth`, as `validDelayAt`.
+    double readyDelayAt(unsigned bitwidth) const;
   };
 
   /// Operation's latency and max frequency (as clock period)
@@ -263,9 +279,11 @@ public:
   /// Delay of ready wire.
   double readyDelay = 0.0;
 
-  /// Input ports' timing model.
+  /// Input ports' timing model: for a unit with registers, the delay from
+  /// an input port into one, its setup included (`inport`).
   PortModel inputModel;
-  /// Output ports' timing model.
+  /// Output ports' timing model: for a unit with registers, the delay from
+  /// one to an output port, its clock to output included (`outport`).
   PortModel outputModel;
 
   /// Combinational delay from any valid input to a ready output pin.

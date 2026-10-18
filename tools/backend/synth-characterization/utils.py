@@ -428,6 +428,16 @@ class UnitCharacterization:
                         ("valid", "ready"), ("condition", "valid"), ("condition", "ready"),
                         ("valid", "condition"), ("valid", "data")]
 
+    # The unit's registers, for a standard-cell backend: from them to each
+    # class of output port (the outport delays) and from each class of input
+    # port into them (the inport delays). A condition is a data channel (a
+    # select, an index), and goes to the data delays.
+    REGISTER = "register"
+    register_delay_types = [(REGISTER, "data"), (REGISTER, "valid"), (REGISTER, "ready"),
+                            (REGISTER, "condition"),
+                            ("data", REGISTER), ("valid", REGISTER), ("ready", REGISTER),
+                            ("condition", REGISTER)]
+
     def __init__(self, unit_name: str, top_entity_name: str, params: dict, hdl_files: List[str], vhdl_interface_info: VhdlInterfaceInfo, unique_id: int):
         """
         Initialize the UnitCharacterization object.
@@ -445,6 +455,7 @@ class UnitCharacterization:
         self.vhdl_interface_info = vhdl_interface_info
         self.map_signals_type_to_delay_rpt = {}
         self.tcl_file = None
+        self.clock_period = None  # ns, once generate_tcl has it
 
     def generate_tcl(self, tcl_dir: str, rpt_dir: str, sdc_file: str,
                      synth_tool: str, clock_period: float) -> List[str]:
@@ -465,6 +476,7 @@ class UnitCharacterization:
             str: Path to the generated script.
         """
         asap7 = is_pdk(synth_tool)
+        self.clock_period = clock_period
         # Create a script for each parameter set
         suffix = "sh" if asap7 else "tcl"
         tcl_file = (f"{tcl_dir}/synth_{self.top_entity_name}"
@@ -483,6 +495,19 @@ class UnitCharacterization:
                 "input_ports": input_ports,
                 "output_ports": output_ports
             }
+        if asap7:
+            for delay_type in self.register_delay_types:
+                delay_type_str = f"{delay_type[0]}_{delay_type[1]}"
+                rpt_timing = f"{rpt_dir}/rpt_timing_{self.top_entity_name}_top_{self.unique_id}_{delay_type_str}.txt"
+                self.map_signals_type_to_delay_rpt[delay_type] = rpt_timing
+                if delay_type[0] == self.REGISTER:
+                    map_rpt_to_ports[rpt_timing] = {
+                        "input_ports": [], "registers": "from",
+                        "output_ports": self.vhdl_interface_info.get_output_ports_by_type(delay_type[1])}
+                else:
+                    map_rpt_to_ports[rpt_timing] = {
+                        "input_ports": self.vhdl_interface_info.get_input_ports_by_type(delay_type[0]),
+                        "registers": "to", "output_ports": []}
         # Write the script; a standard-cell backend also reports the unit's
         # longest register-to-register path (get_stage_rpt).
         if asap7:

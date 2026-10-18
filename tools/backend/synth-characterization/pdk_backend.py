@@ -154,7 +154,9 @@ def write_pdk_script(synth_tool, top_entity_name, hdl_files, script_file,
         script_file (str): path of the shell script to write.
         period_ns (float): clock period in nanoseconds.
         map_rpt_to_ports (dict): {report file: {"input_ports": [...],
-            "output_ports": [...]}}, one entry per delay class.
+            "output_ports": [...]}}, one entry per delay class; a class of
+            the unit's registers has `"registers": "from"` (to its output
+            ports) or `"registers": "to"` (from its input ports).
         stage_rpt (str): report file for the unit's longest register-to-
             register path, the floor its own stages put under the clock on
             this library; None asks for no such report.
@@ -189,7 +191,45 @@ def write_pdk_script(synth_tool, top_entity_name, hdl_files, script_file,
                 "  report_checks -from $fp -to $tp -path_delay max"
                 " -format full_clock_expanded -digits 3 >> $rpt\n"
                 "}\n")
+        # A unit's registers, as its port models have them: from a register
+        # to an output port (its clock to output and the logic after it --
+        # the outport delay), and from an input port into a register (the
+        # logic before it and its setup -- the inport delay, read back as the
+        # period less the path's slack). A unit with no registers has
+        # neither, and no report.
+        f.write("# Largest delay from the unit's registers to any of the output\n"
+                "# ports `to` (a list): the worst path is the class's.\n"
+                "proc launch_delay {rpt to} {\n"
+                "  set tp [get_ports -quiet $to]\n"
+                "  if {[llength $tp] == 0 || [llength [all_registers]] == 0} {\n"
+                "    return\n"
+                "  }\n"
+                "  report_checks -from [all_registers] -to $tp -path_delay max"
+                " -format full_clock_expanded -digits 3 >> $rpt\n"
+                "}\n")
+        f.write("# Largest delay from any of the input ports `from` (a list) into\n"
+                "# the unit's registers.\n"
+                "proc capture_delay {rpt from} {\n"
+                "  set fp [get_ports -quiet $from]\n"
+                "  if {[llength $fp] == 0 || [llength [all_registers]] == 0} {\n"
+                "    return\n"
+                "  }\n"
+                "  report_checks -from $fp -to [all_registers] -path_delay max"
+                " -format full_clock_expanded -digits 3 >> $rpt\n"
+                "}\n")
         for rpt_timing, ports_info in map_rpt_to_ports.items():
+            registers = ports_info.get("registers")
+            # one query for all the class's ports: its worst path is the delay
+            if registers == "from":
+                oports = port_query_names(ports_info["output_ports"], False)
+                if oports:
+                    f.write(f"launch_delay {{{rpt_timing}}} {{{' '.join(oports)}}}\n")
+                continue
+            if registers == "to":
+                iports = port_query_names(ports_info["input_ports"], True)
+                if iports:
+                    f.write(f"capture_delay {{{rpt_timing}}} {{{' '.join(iports)}}}\n")
+                continue
             for iport in port_query_names(ports_info["input_ports"], True):
                 for oport in port_query_names(ports_info["output_ports"], False):
                     f.write(f"unit_delay {{{rpt_timing}}} {{{iport}}} {{{oport}}}\n")

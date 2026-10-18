@@ -94,6 +94,28 @@ LogicalResult TimingModel::getTotalDataDelay(unsigned bitwidth,
   return success();
 }
 
+/// A handshake delay of a port model at `bitwidth` (PortModel::validDelayAt).
+static double delayAt(const BitwidthDepMetric<double> &delays, double atOne,
+                      unsigned bitwidth) {
+  if (auto delay = delays.select(bitwidth); succeeded(delay))
+    return delay->get();
+  if (auto widest = delays.widestBitwidth(); succeeded(widest))
+    return delays.data.at(*widest);
+  return atOne;
+}
+
+double TimingModel::PortModel::dataDelayAt(unsigned bitwidth) const {
+  return delayAt(dataDelay, 0.0, bitwidth);
+}
+
+double TimingModel::PortModel::validDelayAt(unsigned bitwidth) const {
+  return delayAt(validDelays, validDelay, bitwidth);
+}
+
+double TimingModel::PortModel::readyDelayAt(unsigned bitwidth) const {
+  return delayAt(readyDelays, readyDelay, bitwidth);
+}
+
 void TimingDatabase::insertTimingModel(StringRef timingModelKey,
                                        TimingModel &model) {
   models.try_emplace(timingModelKey, model);
@@ -127,6 +149,19 @@ static unsigned getUnitSize(Operation *op) {
 
 const TimingModel *TimingDatabase::getModel(Operation *op) const {
   StringRef baseName = op->getName().getStringRef();
+
+  // A buffer's six types are one unit, with an entry each beside the base
+  // entry, which reduces over them: `handshake.buffer.ONE_SLOT_BREAK_R`. The
+  // types share no path -- an opaque slot registers its data and valid, a
+  // transparent one passes them through a multiplexer its register selects.
+  // A model with no entry for the type times the buffer by the base entry.
+  if (auto bufferOp = dyn_cast<handshake::BufferOp>(op)) {
+    std::string typeKey =
+        (baseName + "." + handshake::stringifyEnum(bufferOp.getBufferType()))
+            .str();
+    if (const TimingModel *model = getModel(StringRef(typeKey)))
+      return model;
+  }
 
   // A unit whose delays grow with its size is characterised at several sizes,
   // each an entry `<name>.size.<N>` beside the base entry, for the same reason
@@ -394,19 +429,16 @@ LogicalResult TimingDatabase::getPortDelay(Operation *op, SignalType signalType,
   const TimingModel::PortModel &portModel =
       portType == PortType::IN ? model->inputModel : model->outputModel;
 
+  unsigned bitwidth = getOpDatawidth(op);
   switch (signalType) {
-  case SignalType::DATA: {
-    auto delayOrFail = portModel.dataDelay.select(op);
-    if (failed(delayOrFail))
-      return failure();
-    delay = delayOrFail->get();
+  case SignalType::DATA:
+    delay = portModel.dataDelayAt(bitwidth);
     return success();
-  }
   case SignalType::VALID:
-    delay = portModel.validDelay;
+    delay = portModel.validDelayAt(bitwidth);
     return success();
   case SignalType::READY:
-    delay = portModel.readyDelay;
+    delay = portModel.readyDelayAt(bitwidth);
     return success();
   }
 }
@@ -967,6 +999,8 @@ static const std::string LATENCY[] = {"latency"};
 static const std::string DELAY[] = {"delay", "data"};
 static const std::string DELAY_VALID[] = {"delay", "valid", "1"};
 static const std::string DELAY_READY[] = {"delay", "ready", "1"};
+static const std::string DELAY_VALID_WIDTHS[] = {"delay", "valid"};
+static const std::string DELAY_READY_WIDTHS[] = {"delay", "ready"};
 static const std::string DELAY_VR[] = {"delay", "VR"};
 static const std::string DELAY_CV[] = {"delay", "CV"};
 static const std::string DELAY_CR[] = {"delay", "CR"};
@@ -986,6 +1020,11 @@ bool dynamatic::fromJSON(const ljson::Value &value,
   // Deserialize the valid/ready delays
   FW_FALSE(deserializeNested(DELAY_VALID, object, model.validDelay, path));
   FW_FALSE(deserializeNested(DELAY_READY, object, model.readyDelay, path));
+  // and the same at every width the model has them at, "1" among them
+  FW_FALSE(
+      deserializeNested(DELAY_VALID_WIDTHS, object, model.validDelays, path));
+  FW_FALSE(
+      deserializeNested(DELAY_READY_WIDTHS, object, model.readyDelays, path));
   return true;
 }
 
