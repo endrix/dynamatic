@@ -104,6 +104,11 @@ public:
     case CPSolver::ERROR:
       llvm::errs() << "There is an error during the model solving!\n";
       return failure();
+    case CPSolver::NOSOLUTION:
+      llvm::errs() << "The solver stopped (e.g., on its time limit) before it "
+                      "found an integer solution! Raise the solver timeout or "
+                      "relax the target period.\n";
+      return failure();
     case CPSolver::OPTIMAL:
     case CPSolver::NONOPTIMAL:
       // No error handling
