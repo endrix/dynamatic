@@ -255,8 +255,15 @@ endif()
 # CBC solver setup
 #-------------------------------------------------------------------------------
 
+# Dynamatic runs `cbc` as a subprocess found on PATH, so an installed one (brew
+# install cbc, apt install coinor-cbc) is all it needs. The prebuilt download is
+# an x86_64 Linux binary and is only fetched where it can run.
 if(DYNAMATIC_ENABLE_CBC)
-  if (UNIX)
+  find_program(DYNAMATIC_CBC_EXECUTABLE cbc)
+  if(DYNAMATIC_CBC_EXECUTABLE)
+    message(STATUS "Using the CBC solver at ${DYNAMATIC_CBC_EXECUTABLE}")
+    add_compile_definitions(DYNAMATIC_ENABLE_CBC)
+  elseif(UNIX AND NOT APPLE AND CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
     FetchContent_Declare(
       cbc
       DOWNLOAD_EXTRACT_TIMESTAMP TRUE
@@ -268,7 +275,8 @@ if(DYNAMATIC_ENABLE_CBC)
     FetchContent_MakeAvailable(cbc)
     add_compile_definitions(DYNAMATIC_ENABLE_CBC)
   else()
-    message(FATAL_ERROR "Cbc integration is not tested on the OS you use!")
+    message(FATAL_ERROR "No cbc on PATH and no prebuilt CBC for this platform. "
+                        "Install one (brew install cbc, apt install coinor-cbc).")
   endif()
 endif()
 
