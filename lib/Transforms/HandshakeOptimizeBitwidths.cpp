@@ -1440,10 +1440,13 @@ struct ArithShrUIFW : OpRewritePattern<handshake::ShRUIOp> {
       if (numOfShiftPositions.uge(inputBitwidth)) {
         // The entire input is shifted away and only 0 bits from the extension
         // remain.
-        auto constant = rewriter.replaceOpWithNewOp<handshake::ConstantOp>(
-            op, op.getType(), rewriter.getZeroAttr(op.getType().getDataType()),
-            constantControl);
+        // The block is inherited before the replacement, which erases `op`.
+        rewriter.setInsertionPoint(op);
+        auto constant = handshake::ConstantOp::create(
+            rewriter, op.getLoc(), op.getType(),
+            rewriter.getZeroAttr(op.getType().getDataType()), constantControl);
         inheritBB(op, constant);
+        rewriter.replaceOp(op, constant);
         return success();
       }
 
