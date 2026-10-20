@@ -535,7 +535,8 @@ if [[ BUILD_CHIESEL_LSQ -eq 1 ]]; then
   create_generator_symlink "$LSQ_GEN_PATH/$LSQ_GEN_JAR"
 fi 
 
-if [[ ENABLE_CBC -eq 1 ]]; then
+# Only the fetched prebuilt is linked; a system cbc is already on PATH.
+if [[ ENABLE_CBC -eq 1 && -f build/cbc/bin/cbc ]]; then
   create_symlink "../build/cbc/bin/cbc"
 fi 
 
