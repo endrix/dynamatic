@@ -46,6 +46,15 @@
   },
   {
     "name": "handshake.control_merge",
+    "parameters": [
+      {"name": "SIZE", "type": "unsigned"},
+      {"name": "KILL_RESET", "type": "unsigned", "eq": 1}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t control_merge -p size=$SIZE data_bitwidth=$DATA_BITWIDTH index_bitwidth=$INDEX_BITWIDTH kill_reset=$KILL_RESET",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.control_merge",
    "parameters": [
     {"name": "SIZE", "type": "unsigned"}
   ],
@@ -118,10 +127,27 @@
   },
   {
     "name": "handshake.first",
+    "parameters": [
+      {"name": "SIZE", "type": "unsigned"},
+      {"name": "KILL_RESET", "type": "unsigned", "eq": 1}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t first -p size=$SIZE bitwidth=$BITWIDTH kill_reset=$KILL_RESET",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.first",
    "parameters": [
       {"name": "SIZE", "type": "unsigned"}
    ],
     "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t first -p size=$SIZE bitwidth=$BITWIDTH",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.priority",
+    "parameters": [
+      {"name": "KILL_RESET", "type": "unsigned", "eq": 1}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t priority -p bitwidth=$BITWIDTH kill_reset=$KILL_RESET",
     "hdl": "smv"
   },
   {
@@ -141,10 +167,28 @@
   },
   {
     "name": "handshake.merge",
+    "parameters": [
+      {"name": "SIZE", "type": "unsigned"},
+      {"name": "KILL_RESET", "type": "unsigned", "eq": 1}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t merge -p size=$SIZE bitwidth=$BITWIDTH kill_reset=$KILL_RESET",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.merge",
    "parameters": [
       {"name": "SIZE", "type": "unsigned"}
    ],
     "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t merge -p size=$SIZE bitwidth=$BITWIDTH",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.mux",
+    "parameters": [
+      {"name": "SIZE", "type": "unsigned"},
+      {"name": "KILL_RESET", "type": "unsigned", "eq": 1}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t mux -p size=$SIZE data_bitwidth=$DATA_BITWIDTH index_bitwidth=$INDEX_BITWIDTH kill_reset=$KILL_RESET",
     "hdl": "smv"
   },
   {
@@ -157,7 +201,23 @@
   },
   {
     "name": "handshake.select",
+    "parameters": [
+      {"name": "KILL_RESET", "type": "unsigned", "eq": 1}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t select -p bitwidth=$BITWIDTH kill_reset=$KILL_RESET",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.select",
     "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t select -p bitwidth=$BITWIDTH",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.sink",
+    "parameters": [
+      {"name": "KILL_RESET", "type": "unsigned", "eq": 1}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t sink -p bitwidth=$BITWIDTH kill_reset=$KILL_RESET",
     "hdl": "smv"
   },
   {
@@ -199,9 +259,26 @@
   {
     "name": "handshake.addf",
     "parameters": [
+      {"name": "DATA_TYPE", "type": "dataflow", "data-eq": 64, "extra-eq": 0},
+      {"name": "KILL_RESET", "type": "unsigned", "eq": 1}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t addf --abstract-data -p latency=12 is_double=$IS_DOUBLE kill_reset=$KILL_RESET",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.addf",
+    "parameters": [
       { "name": "DATA_TYPE", "type": "dataflow", "data-eq": 64, "extra-eq": 0 }
     ],
     "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t addf --abstract-data -p latency=12 is_double=$IS_DOUBLE",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.addf",
+    "parameters": [
+      {"name": "KILL_RESET", "type": "unsigned", "eq": 1}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t addf --abstract-data -p latency=9 is_double=$IS_DOUBLE kill_reset=$KILL_RESET",
     "hdl": "smv"
   },
   {
@@ -230,9 +307,27 @@
   {
     "name": "handshake.cmpf",
     "parameters": [
+      {"name": "PREDICATE", "type": "string"},
+      {"name": "KILL_RESET", "type": "unsigned", "eq": 1}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t cmpf --abstract-data -p latency=0 predicate='\"$PREDICATE\"' is_double=$IS_DOUBLE kill_reset=$KILL_RESET",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.cmpf",
+    "parameters": [
       {"name": "PREDICATE", "type": "string"}
     ],  
     "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t cmpf --abstract-data -p latency=0 predicate='\"$PREDICATE\"' is_double=$IS_DOUBLE",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.divf",
+    "parameters": [
+      {"name": "DATA_TYPE", "type": "dataflow", "data-eq": 64, "extra-eq": 0},
+      {"name": "KILL_RESET", "type": "unsigned", "eq": 1}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t divf --abstract-data -p latency=36 is_double=$IS_DOUBLE kill_reset=$KILL_RESET",
     "hdl": "smv"
   },
   {
@@ -245,7 +340,24 @@
   },
   {
     "name": "handshake.divf",
+    "parameters": [
+      {"name": "KILL_RESET", "type": "unsigned", "eq": 1}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t divf --abstract-data -p latency=29 is_double=$IS_DOUBLE kill_reset=$KILL_RESET",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.divf",
     "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t divf --abstract-data -p latency=29 is_double=$IS_DOUBLE",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.divsi",
+    "parameters": [
+      {"name": "IMPL", "type": "string", "eq": "pipelined"},
+      {"name": "KILL_RESET", "type": "unsigned", "eq": 1}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t divsi --abstract-data -p latency=35 bitwidth=$BITWIDTH kill_reset=$KILL_RESET",
     "hdl": "smv"
   },
   {
@@ -254,6 +366,16 @@
       {"name": "IMPL", "type": "string", "eq": "pipelined"}
     ],
     "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t divsi --abstract-data -p latency=35 bitwidth=$BITWIDTH",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.divui",
+    "parameters": [
+      {"name": "LATENCY", "type": "unsigned"},
+      {"name": "IMPL", "type": "string"},
+      {"name": "KILL_RESET", "type": "unsigned", "eq": 1}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t divui --abstract-data -p latency=$LATENCY impl='\"$IMPL\"' bitwidth=$BITWIDTH kill_reset=$KILL_RESET",
     "hdl": "smv"
   },
   {
@@ -283,7 +405,23 @@
   },
   {
     "name": "handshake.extui",
+    "parameters": [
+      {"name": "KILL_RESET", "type": "unsigned", "eq": 1}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t extui --abstract-data -p latency=0 input_bitwidth=$INPUT_BITWIDTH output_bitwidth=$OUTPUT_BITWIDTH kill_reset=$KILL_RESET",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.extui",
     "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t extui --abstract-data -p latency=0 input_bitwidth=$INPUT_BITWIDTH output_bitwidth=$OUTPUT_BITWIDTH",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.fptosi",
+    "parameters": [
+      {"name": "KILL_RESET", "type": "unsigned", "eq": 1}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t fptosi --abstract-data -p latency=5 bitwidth=$BITWIDTH kill_reset=$KILL_RESET",
     "hdl": "smv"
   },
   {
@@ -293,7 +431,23 @@
   },
   {
     "name": "handshake.maximumf",
+    "parameters": [
+      {"name": "KILL_RESET", "type": "unsigned", "eq": 1}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t maximumf --abstract-data -p latency=0 is_double=$IS_DOUBLE kill_reset=$KILL_RESET",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.maximumf",
     "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t maximumf --abstract-data -p latency=0 is_double=$IS_DOUBLE",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.minimumf",
+    "parameters": [
+      {"name": "KILL_RESET", "type": "unsigned", "eq": 1}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t minimumf --abstract-data -p latency=0 is_double=$IS_DOUBLE kill_reset=$KILL_RESET",
     "hdl": "smv"
   },
   {
@@ -303,7 +457,25 @@
   },
   {
     "name": "handshake.mulf",
+    "parameters": [
+      {"name": "KILL_RESET", "type": "unsigned", "eq": 1}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t mulf --abstract-data -p latency=4 is_double=$IS_DOUBLE kill_reset=$KILL_RESET",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.mulf",
     "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t mulf --abstract-data -p latency=4 is_double=$IS_DOUBLE",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.muli",
+    "parameters": [
+      {"name": "LATENCY", "type": "unsigned"},
+      {"name": "IMPL", "type": "string"},
+      {"name": "KILL_RESET", "type": "unsigned", "eq": 1}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t muli --abstract-data -p latency=$LATENCY impl='\"$IMPL\"' bitwidth=$BITWIDTH kill_reset=$KILL_RESET",
     "hdl": "smv"
   },
   {
@@ -353,7 +525,24 @@
   },
   {
     "name": "handshake.sitofp",
+    "parameters": [
+      {"name": "KILL_RESET", "type": "unsigned", "eq": 1}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t sitofp --abstract-data -p latency=5 bitwidth=$BITWIDTH kill_reset=$KILL_RESET",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.sitofp",
     "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t sitofp --abstract-data -p latency=5 bitwidth=$BITWIDTH",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.subf",
+    "parameters": [
+      {"name": "DATA_TYPE", "type": "dataflow", "data-eq": 64, "extra-eq": 0},
+      {"name": "KILL_RESET", "type": "unsigned", "eq": 1}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t subf --abstract-data -p latency=12 is_double=$IS_DOUBLE kill_reset=$KILL_RESET",
     "hdl": "smv"
   },
   {
@@ -362,6 +551,14 @@
       { "name": "DATA_TYPE", "type": "dataflow", "data-eq": 64, "extra-eq": 0 }
     ],
     "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t subf --abstract-data -p latency=12 is_double=$IS_DOUBLE",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.subf",
+    "parameters": [
+      {"name": "KILL_RESET", "type": "unsigned", "eq": 1}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t subf --abstract-data -p latency=9 is_double=$IS_DOUBLE kill_reset=$KILL_RESET",
     "hdl": "smv"
   },
   {
@@ -377,6 +574,14 @@
   {
     "name": "handshake.truncf",
     "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t truncf --abstract-data -p latency=0",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.trunci",
+    "parameters": [
+      {"name": "KILL_RESET", "type": "unsigned", "eq": 1}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t trunci --abstract-data -p latency=0 input_bitwidth=$INPUT_BITWIDTH output_bitwidth=$OUTPUT_BITWIDTH kill_reset=$KILL_RESET",
     "hdl": "smv"
   },
   {

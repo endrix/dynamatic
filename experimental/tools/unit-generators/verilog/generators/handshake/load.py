@@ -8,6 +8,10 @@ def generate_load(name, params):
     data_bitwidth = params["data_bitwidth"]
 
     if params.get("kill_drop", 0):
+        if params.get("extra_signals", None):
+            raise ValueError(
+                "a load that drops on a kill carries no extra signals: its "
+                "words are counted, not tagged")
         return _generate_load_kill_drop(name, data_bitwidth, addr_bitwidth)
     return _generate_load(name, data_bitwidth, addr_bitwidth)
 

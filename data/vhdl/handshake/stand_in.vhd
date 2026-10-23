@@ -11,6 +11,17 @@ use ieee.numeric_std.all;
 -- feeds, a combinational loop. The same circuit as the generator's
 -- (tools/unit-generators/vhdl/generators/handshake/stand_in.py), with the
 -- width lifted into a generic.
+--
+-- The precondition: no kill while a token is offered at `outs` and not taken.
+-- A kill while the zero is owed and not taken would owe a second one, which
+-- two bits cannot hold (one zero for two rounds, and the decision waits for
+-- ever for the other); a kill while the producer's own token is offered and
+-- not taken resets the producer under `valid`, and the token becomes a zero
+-- before it transfers. So the stand-in's one reader must take a token the
+-- cycle it arrives, with nothing between that can hold it back (an eager fork
+-- whose other reader stalls, a join). Asserted in simulation (severity
+-- failure, between `pragma translate_off` and `translate_on`); synthesis
+-- skips it.
 entity stand_in is
   generic (
     DATA_TYPE : integer
@@ -60,4 +71,20 @@ begin
       end if;
     end if;
   end process;
+
+  -- The precondition, in simulation only: a round ends only when no token
+  -- waits at `outs`, neither the zero owed nor the producer's own.
+  -- pragma translate_off
+  process (clk) is
+  begin
+    if rising_edge(clk) and rst = '0' and kill = '1' and outs_ready = '0' then
+      assert owe = '0'
+        report "stand_in: a round ended (kill) while the zero it owes was offered and not taken"
+        severity failure;
+      assert ins_valid = '0'
+        report "stand_in: a round ended (kill) while the producer's token was offered and not taken"
+        severity failure;
+    end if;
+  end process;
+  -- pragma translate_on
 end architecture;

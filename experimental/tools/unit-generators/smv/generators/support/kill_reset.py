@@ -11,15 +11,16 @@ def add_reset(text):
     the text, and every instance of a module of the text is handed `rst`.
     A variable with no `init` is a free choice and stays one.
     """
-    modules = re.findall(r"^MODULE\s+(\w+)", text, re.M)
+    modules = re.findall(r"^[ \t]*MODULE\s+(\w+)", text, re.M)
 
     def module_header(m):
-        params = m.group(2)
+        params = m.group(3)
         if params is None or not params.strip():
-            return f"MODULE {m.group(1)}(rst)"
-        return f"MODULE {m.group(1)}({params}, rst)"
+            return f"{m.group(1)}MODULE {m.group(2)}(rst)"
+        return f"{m.group(1)}MODULE {m.group(2)}({params}, rst)"
 
-    text = re.sub(r"^MODULE\s+(\w+)\s*(?:\(([^)]*)\))?", module_header, text, flags=re.M)
+    # (a generator may indent a MODULE line: the data control_merge does)
+    text = re.sub(r"^([ \t]*)MODULE\s+(\w+)\s*(?:\(([^)]*)\))?", module_header, text, flags=re.M)
 
     # the instances of the text's own modules
     def instances(line):
@@ -42,7 +43,7 @@ def add_reset(text):
     text = "\n".join(instances(line) for line in text.split("\n"))
 
     # the reset of every initialized variable, module by module
-    parts = re.split(r"(?=^MODULE\s)", text, flags=re.M)
+    parts = re.split(r"(?=^[ \t]*MODULE\s)", text, flags=re.M)
     out = []
     for part in parts:
         inits = dict(re.findall(r"init\((\w+)\)\s*:=\s*([^;]+);", part))

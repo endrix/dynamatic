@@ -615,6 +615,18 @@ def FirstOp : Handshake_Op<"first", [
     in OPERAND order, so a slow input early in that order stalls the whole unit
     even when it carries nothing. `first` waits only for a winner.
 
+    Each input gives one token a round and is then not ready until the round
+    completes -- and is ready again in the cycle it completes, to give the
+    next round's token at once. Whether the round completes this cycle is
+    the other inputs' arrivals and the answer's transfer, so each input's
+    `ready` reads the registers, the OTHER inputs' `valid` and the output's
+    `ready`, as a join's does; never its own `valid`. The valid and the data
+    out are combinational in the inputs (latency zero) and read no `ready`.
+    A unit whose `valid` reads a `ready` (a lazy fork) upstream of two inputs
+    of one `first` therefore closes a combinational loop through it,
+    valid -> ready -> valid, even where the logic masks it: static timing,
+    Verilator and NuSMV all see it.
+
     Example:
 
     ```mlir
@@ -675,11 +687,20 @@ def PriorityOp : Handshake_Op<"priority", [
     always -- declaring a priority is declaring that wait -- and `lo` never
     is when `hi` decides.
 
-    Both inputs' `ready` are functions of registers only, so the unit cannot
-    close a valid -> ready -> valid ring the way a lazy fork can; the valid
-    and the data out are combinational in the inputs (latency zero). A
-    dataless form would decide nothing (the payload is the answer), so the
-    channels carry data and no extra signals.
+    An input that has given its token is ready again in the cycle the round
+    completes, to give the next round's token at once; with the answer out
+    earlier, a non-zero `hi` among those is answered in that same cycle.
+    Whether the round completes this cycle is the other input's arrival and
+    the answer's transfer, so each input's `ready` reads the registers, the
+    OTHER input's `valid` and the output's `ready`, as a join's does; never
+    its own `valid`. The valid and the data out are combinational in the
+    inputs (latency zero) and read no `ready`. A unit whose `valid` reads a
+    `ready` (a lazy fork) upstream of both inputs therefore closes a
+    combinational loop through the unit, valid -> ready -> valid, even where
+    the logic masks it (a lazy fork into `hi` and `lo` makes them arrive
+    together): static timing, Verilator and NuSMV all see it. A dataless
+    form would decide nothing (the payload is the answer), so the channels
+    carry data and no extra signals.
 
     Example:
 
@@ -742,11 +763,24 @@ def CommitOp : Handshake_Op<"commit", [
     synchronous, as every unit's is, so they are idle the cycle after the
     decision. A `load` with the attribute is not reset (its address side
     faces a memory controller, which cannot forget a granted request): it
-    drops the words it still owes the units that were. A `stand_in` answers
-    for a stopped producer in the round it was stopped.
+    drops the words it still owes the units that were, at most three, which
+    only a memory controller on its address bounds. A `stand_in` answers
+    for a stopped producer in the round it was stopped. A unit of a domain
+    holds nothing or is reset synchronously (a reset made by logic glitches);
+    the lowering refuses any other kind in one, and a commit, a stand-in, a
+    store, a memory interface or an end with the attribute.
 
     `kill` is a raw wire, as an `unbundle`'s signals are: no token, nothing
     waits for it.
+
+    Inside a domain the kill withdraws tokens, by design: a channel between
+    two units of a domain (the latch to the guard's body, a load's word to
+    the units it serves) may see `valid` fall at the kill edge with no
+    transfer, and its reader, reset in the same edge, never sees it. A
+    protocol monitor that checks every channel (`valid` held until `ready`,
+    a formal property on each channel) must exempt the channels inside a
+    kill domain. The channels out of one -- through a `stand_in`, or as a
+    load's address -- keep the protocol.
 
     Example:
 
@@ -810,6 +844,18 @@ def StandInOp : Handshake_Op<"stand_in", [
     a `first` of negated flags, a `priority` or a `select` after the answer
     is absorbed like any late token, and changes nothing. The payload is an
     integer, so that there is a zero; no extra signals.
+
+    The precondition: no `kill` while a token is offered at `outs` and not
+    taken. Not an owed zero -- two bits hold one, so a kill while it waits
+    would end two rounds with one zero, and the decision downstream would
+    wait for ever for the second -- and not the producer's own token, which
+    the reset would turn into a zero under `valid`, the data changing before
+    the transfer. "Exactly one token a round" holds only under it. So the
+    stand-in's one reader must take a token the cycle it arrives, as a
+    decision unit takes a token of the round it is in, with nothing between
+    them that can hold it back (an eager fork whose other reader stalls, a
+    join waiting for another input). The VHDL and Verilog forms assert it in
+    simulation; the hardware does not check it.
 
     Example:
 

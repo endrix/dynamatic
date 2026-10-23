@@ -9,6 +9,13 @@ MODULE main
   rst : boolean;
   s : slot(ins, iv, r, rst);
   f : copy(fv, r0, r1, rst);
+  c0 : unsigned word [2];
+  c1 : unsigned word [2];
+  cv0 : boolean;
+  cv1 : boolean;
+  cr : boolean;
+  cir : boolean;
+  c : cmerge(c0, c1, cv0, cv1, cr, cir, rst);
   was_rst : boolean;
   ASSIGN
   init(was_rst) := FALSE;
@@ -16,3 +23,4 @@ MODULE main
   -- the step after a reset the slot is empty and every copy is armed again
   INVARSPEC was_rst -> (!s.full & !s.inner_one_slot_break_r.full)
   INVARSPEC was_rst -> (f.inner_reg_block_0.reg_value & f.inner_reg_block_1.reg_value)
+  INVARSPEC was_rst -> (!c.inner_control_merge.inner_one_slot_break_r.inner_one_slot_break_r.full & c.inner_control_merge.inner_fork.inner_reg_block_0.reg_value & c.inner_control_merge.inner_fork.inner_reg_block_1.reg_value)

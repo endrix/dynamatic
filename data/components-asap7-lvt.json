@@ -5890,6 +5890,7 @@
     }
   },
   "handshake.first.size.2": {
+    "stand_in": "handshake.first.size.2: its phase-3 characterization (data/vhdl/handshake/first.vhd before the completing-round term), with VR copied from handshake.control_merge.size.2 and ready from handshake.mux.size.2: since the completing-round term each input's ready reads the other inputs' valids and the output's ready, as a join's does, where the characterized unit's ready came from registers (VR 0, ready 0). A stand-in until a characterization run over rtl-config-vhdl-vivado.json, which lists data/vhdl/handshake/first.vhd, replaces this entry",
     "latency": {
       "0": {
         "64": {
@@ -5914,9 +5915,9 @@
         "1": 0.117679
       },
       "ready": {
-        "1": 0.0
+        "1": 0.033621000000000005
       },
-      "VR": 0.0,
+      "VR": 0.095145,
       "CV": 0.0,
       "CR": 0.0,
       "VC": 0.0,
@@ -6014,7 +6015,7 @@
     }
   },
   "handshake.priority": {
-    "stand_in": "handshake.first.size.2, copied: handshake.priority is not characterized yet. Both are two-input round units of the same shape (a seen bit per input, a zero-detect, a data register and a two-way multiplexer into the output, ready from registers); a characterization run over rtl-config-vhdl-vivado.json, which lists data/vhdl/handshake/priority.vhd, replaces this entry",
+    "stand_in": "handshake.first.size.2, copied: handshake.priority is not characterized yet. Both are two-input round units of the same shape (a seen bit per input, a zero-detect, a data register and a two-way multiplexer into the output); since the completing-round term each input's ready reads the other input's valid and the output's ready, as a join's does, so VR is copied from handshake.control_merge.size.2 and ready from handshake.mux.size.2 (first's own entry is a stand-in in the same way); a characterization run over rtl-config-vhdl-vivado.json, which lists data/vhdl/handshake/priority.vhd, replaces this entry",
     "latency": {
       "0": {
         "64": {
@@ -6039,9 +6040,9 @@
         "1": 0.117679
       },
       "ready": {
-        "1": 0.0
+        "1": 0.033621000000000005
       },
-      "VR": 0.0,
+      "VR": 0.095145,
       "CV": 0.0,
       "CR": 0.0,
       "VC": 0.0,
@@ -6207,7 +6208,7 @@
     }
   },
   "handshake.stand_in": {
-    "stand_in": "handshake.buffer.ONE_SLOT_BREAK_R, copied: handshake.stand_in is not characterized yet. Both put a two-way multiplexer on the data (a register or the input; here the zero or the input), an OR on valid and a gate on ready, with one or two flip-flops beside; a characterization run over rtl-config-vhdl-vivado.json, which lists data/vhdl/handshake/stand_in.vhd, replaces this entry",
+    "stand_in": "handshake.buffer.ONE_SLOT_BREAK_R, copied, with the ready of handshake.lazy_fork.size.2 (an AND gate): handshake.stand_in is not characterized yet. Both put a two-way multiplexer on the data (a register or the input; here the zero or the input) and an OR on valid, with one or two flip-flops beside; the stand-in's ready is a gate (outs_ready and not owe), not a flip-flop's as the slot's is, so the slot's ready of 0 is replaced by the lazy fork's AND; a characterization run over rtl-config-vhdl-vivado.json, which lists data/vhdl/handshake/stand_in.vhd, replaces this entry",
     "latency": {
       "0": {
         "64": {
@@ -6232,7 +6233,7 @@
         "1": 0.042941
       },
       "ready": {
-        "1": 0.0
+        "1": 0.012088
       },
       "VR": 0.0,
       "CV": 0.0,
@@ -6332,6 +6333,7 @@
     }
   },
   "handshake.first": {
+    "stand_in": "handshake.first: its phase-3 characterization (data/vhdl/handshake/first.vhd before the completing-round term), with VR copied from handshake.control_merge and ready from handshake.mux: since the completing-round term each input's ready reads the other inputs' valids and the output's ready, as a join's does, where the characterized unit's ready came from registers (VR 0, ready 0). A stand-in until a characterization run over rtl-config-vhdl-vivado.json, which lists data/vhdl/handshake/first.vhd, replaces this entry",
     "latency": {
       "0": {
         "64": {
@@ -6356,9 +6358,9 @@
         "1": 0.117679
       },
       "ready": {
-        "1": 0.0
+        "1": 0.033621000000000005
       },
-      "VR": 0.0,
+      "VR": 0.095145,
       "CV": 0.0,
       "CR": 0.0,
       "VC": 0.0,
@@ -6456,6 +6458,7 @@
     }
   },
   "handshake.first.size.3": {
+    "stand_in": "handshake.first.size.3: its phase-3 characterization (data/vhdl/handshake/first.vhd before the completing-round term), with VR copied from handshake.control_merge.size.3 and ready from handshake.mux.size.3: since the completing-round term each input's ready reads the other inputs' valids and the output's ready, as a join's does, where the characterized unit's ready came from registers (VR 0, ready 0). A stand-in until a characterization run over rtl-config-vhdl-vivado.json, which lists data/vhdl/handshake/first.vhd, replaces this entry",
     "latency": {
       "0": {
         "64": {
@@ -6474,9 +6477,9 @@
         "1": 0.182363
       },
       "ready": {
-        "1": 0.0
+        "1": 0.033621000000000005
       },
-      "VR": 0.0,
+      "VR": 0.095145,
       "CV": 0.0,
       "CR": 0.0,
       "VC": 0.0,
@@ -6574,6 +6577,7 @@
     }
   },
   "handshake.first.size.4": {
+    "stand_in": "handshake.first.size.4: its phase-3 characterization (data/vhdl/handshake/first.vhd before the completing-round term), with VR copied from handshake.control_merge.size.4 and ready from handshake.mux.size.4: since the completing-round term each input's ready reads the other inputs' valids and the output's ready, as a join's does, where the characterized unit's ready came from registers (VR 0, ready 0). A stand-in until a characterization run over rtl-config-vhdl-vivado.json, which lists data/vhdl/handshake/first.vhd, replaces this entry",
     "latency": {
       "0": {
         "64": {
@@ -6592,9 +6596,9 @@
         "1": 0.182363
       },
       "ready": {
-        "1": 0.0
+        "1": 0.033621000000000005
       },
-      "VR": 0.0,
+      "VR": 0.13949899999999998,
       "CV": 0.0,
       "CR": 0.0,
       "VC": 0.0,
@@ -6692,6 +6696,7 @@
     }
   },
   "handshake.first.size.8": {
+    "stand_in": "handshake.first.size.8: its phase-3 characterization (data/vhdl/handshake/first.vhd before the completing-round term), with VR copied from handshake.control_merge.size.8 and ready from handshake.mux.size.8: since the completing-round term each input's ready reads the other inputs' valids and the output's ready, as a join's does, where the characterized unit's ready came from registers (VR 0, ready 0). A stand-in until a characterization run over rtl-config-vhdl-vivado.json, which lists data/vhdl/handshake/first.vhd, replaces this entry",
     "latency": {
       "0": {
         "64": {
@@ -6710,9 +6715,9 @@
         "1": 0.223962
       },
       "ready": {
-        "1": 0.0
+        "1": 0.036162
       },
-      "VR": 0.0,
+      "VR": 0.16977099999999998,
       "CV": 0.0,
       "CR": 0.0,
       "VC": 0.0,
@@ -6810,6 +6815,7 @@
     }
   },
   "handshake.first.size.16": {
+    "stand_in": "handshake.first.size.16: its phase-3 characterization (data/vhdl/handshake/first.vhd before the completing-round term), with VR copied from handshake.control_merge.size.16 and ready from handshake.mux.size.16: since the completing-round term each input's ready reads the other inputs' valids and the output's ready, as a join's does, where the characterized unit's ready came from registers (VR 0, ready 0). A stand-in until a characterization run over rtl-config-vhdl-vivado.json, which lists data/vhdl/handshake/first.vhd, replaces this entry",
     "latency": {
       "0": {
         "64": {
@@ -6828,9 +6834,9 @@
         "1": 0.351508
       },
       "ready": {
-        "1": 0.0
+        "1": 0.039709
       },
-      "VR": 0.0,
+      "VR": 0.215408,
       "CV": 0.0,
       "CR": 0.0,
       "VC": 0.0,
@@ -6928,6 +6934,7 @@
     }
   },
   "handshake.first.size.32": {
+    "stand_in": "handshake.first.size.32: its phase-3 characterization (data/vhdl/handshake/first.vhd before the completing-round term), with VR copied from handshake.control_merge.size.32 and ready from handshake.mux.size.32: since the completing-round term each input's ready reads the other inputs' valids and the output's ready, as a join's does, where the characterized unit's ready came from registers (VR 0, ready 0). A stand-in until a characterization run over rtl-config-vhdl-vivado.json, which lists data/vhdl/handshake/first.vhd, replaces this entry",
     "latency": {
       "0": {
         "64": {
@@ -6946,9 +6953,9 @@
         "1": 0.539836
       },
       "ready": {
-        "1": 0.0
+        "1": 0.067163
       },
-      "VR": 0.0,
+      "VR": 0.364703,
       "CV": 0.0,
       "CR": 0.0,
       "VC": 0.0,
@@ -7046,6 +7053,7 @@
     }
   },
   "handshake.first.size.64": {
+    "stand_in": "handshake.first.size.64: its phase-3 characterization (data/vhdl/handshake/first.vhd before the completing-round term), with VR copied from handshake.control_merge.size.64 and ready from handshake.mux.size.64: since the completing-round term each input's ready reads the other inputs' valids and the output's ready, as a join's does, where the characterized unit's ready came from registers (VR 0, ready 0). A stand-in until a characterization run over rtl-config-vhdl-vivado.json, which lists data/vhdl/handshake/first.vhd, replaces this entry",
     "latency": {
       "0": {
         "64": {
@@ -7064,9 +7072,9 @@
         "1": 1.01566
       },
       "ready": {
-        "1": 0.0
+        "1": 0.090057
       },
-      "VR": 0.0,
+      "VR": 0.6477670000000001,
       "CV": 0.0,
       "CR": 0.0,
       "VC": 0.0,
@@ -7164,6 +7172,7 @@
     }
   },
   "handshake.first.size.128": {
+    "stand_in": "handshake.first.size.128: its phase-3 characterization (data/vhdl/handshake/first.vhd before the completing-round term), with VR copied from handshake.control_merge.size.128 and ready from handshake.mux.size.128: since the completing-round term each input's ready reads the other inputs' valids and the output's ready, as a join's does, where the characterized unit's ready came from registers (VR 0, ready 0). A stand-in until a characterization run over rtl-config-vhdl-vivado.json, which lists data/vhdl/handshake/first.vhd, replaces this entry",
     "latency": {
       "0": {
         "64": {
@@ -7182,9 +7191,9 @@
         "1": 2.1310149999999997
       },
       "ready": {
-        "1": 0.0
+        "1": 0.091501
       },
-      "VR": 0.0,
+      "VR": 1.0930199999999999,
       "CV": 0.0,
       "CR": 0.0,
       "VC": 0.0,
@@ -7282,6 +7291,7 @@
     }
   },
   "handshake.first.size.256": {
+    "stand_in": "handshake.first.size.256: its phase-3 characterization (data/vhdl/handshake/first.vhd before the completing-round term), with VR copied from handshake.control_merge.size.256 and ready from handshake.mux.size.256: since the completing-round term each input's ready reads the other inputs' valids and the output's ready, as a join's does, where the characterized unit's ready came from registers (VR 0, ready 0). A stand-in until a characterization run over rtl-config-vhdl-vivado.json, which lists data/vhdl/handshake/first.vhd, replaces this entry",
     "latency": {
       "0": {
         "64": {
@@ -7300,9 +7310,9 @@
         "1": 4.288329
       },
       "ready": {
-        "1": 0.0
+        "1": 0.09970399999999999
       },
-      "VR": 0.0,
+      "VR": 2.1380079999999997,
       "CV": 0.0,
       "CR": 0.0,
       "VC": 0.0,

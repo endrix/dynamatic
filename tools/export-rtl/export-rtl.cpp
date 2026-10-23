@@ -1544,16 +1544,40 @@ LogicalResult SMVWriter::write(hw::HWModuleOp modOp,
   // every unit inside it, and the module's own SMV takes none: such a body
   // is abstracted before it reaches SMV (as the formal harness does), never
   // modelled as if it could not be reset.
+  //
+  // A unit reset by a commit's kill is modelled by its component's KILL_RESET
+  // variant, which takes the reset as its last parameter (`constructIOMappings`
+  // passes it there). A component with no such variant matches the plain
+  // entry (the matcher ignores parameters a component does not list), whose
+  // module takes one parameter fewer than the instance passes: refused here,
+  // rather than written as a model NuSMV rejects.
   for (hw::InstanceOp instOp : modOp.getOps<hw::InstanceOp>()) {
-    if (!isa<hw::HWModuleOp>(getHWModule(instOp).getOperation()))
-      continue;
-    auto names = getHWModule(instOp).getInputNamesStr();
+    hw::HWModuleLike instMod = getHWModule(instOp);
+    bool killed = false;
+    auto names = instMod.getInputNamesStr();
     for (auto [oprd, name] : llvm::zip_equal(instOp.getOperands(), names))
       if (name.str() == RST_PORT && !isa<BlockArgument>(oprd))
-        return instOp.emitError()
-               << "is reset by a commit's kill, and SMV has no model of a "
-                  "module whose units are reset by a wire of the module "
-                  "around it: abstract its body";
+        killed = true;
+    if (!killed)
+      continue;
+    auto extModOp = dyn_cast<hw::HWModuleExternOp>(instMod.getOperation());
+    if (!extModOp)
+      return instOp.emitError()
+             << "is reset by a commit's kill, and SMV has no model of a "
+                "module whose units are reset by a wire of the module "
+                "around it: abstract its body";
+    const RTLMatch &match = *exportInfo.externals.at(extModOp);
+    if (llvm::none_of(match.component->getParameters(),
+                      [](const RTLParameter *param) {
+                        return param->getName() == "KILL_RESET";
+                      }))
+      return instOp.emitError()
+             << "is in a kill domain (reset by a commit's kill), and the SMV "
+                "model it matches ('"
+             << match.component->getName()
+             << "') takes no reset: add a KILL_RESET entry for it to the SMV "
+                "configuration (`kill_reset=$KILL_RESET`, the generic reset "
+                "transform)";
   }
   WriteModData data(modOp, os);
   if (failed(createInternalSignals(data)))

@@ -1,0 +1,35 @@
+-- The SMV export of kill-domain.mlir's @guard under free inputs, for
+-- kill-domain-nusmv.mlir: the step after the commit's transfer, every unit
+-- of the domain that holds something is empty (the latch, the permit's slot,
+-- the slot the placer put between the latch and the load), and the neighbour,
+-- outside the domain, still holds the token it held and did not pass on.
+MODULE main
+  VAR
+  arg : unsigned word [2];
+  arg_valid : boolean;
+  permit_valid : boolean;
+  other : unsigned word [2];
+  other_valid : boolean;
+  dec : unsigned word [3];
+  dec_valid : boolean;
+  mem_loadData : unsigned word [8];
+  memStart_valid : boolean;
+  ctrlEnd_valid : boolean;
+  start_valid : boolean;
+  flag_ready : boolean;
+  other_out_ready : boolean;
+  dec_out_ready : boolean;
+  memEnd_ready : boolean;
+  end_ready : boolean;
+  u : guard(self, arg, arg_valid, permit_valid, other, other_valid, dec, dec_valid,
+            mem_loadData, memStart_valid, ctrlEnd_valid, start_valid, flag_ready,
+            other_out_ready, dec_out_ready, memEnd_ready, end_ready);
+  was_kill : boolean;
+  held : boolean;
+  ASSIGN
+  init(was_kill) := FALSE;
+  next(was_kill) := u.commit0.kill;
+  init(held) := FALSE;
+  next(held) := u.buffer3.full & !other_out_ready;
+  INVARSPEC NAME domain_reset := was_kill -> (!u.buffer0.full & !u.buffer1.full & !u.buffer2.inner_one_slot_break_dv.outs_valid_i)
+  INVARSPEC NAME neighbour_kept := (was_kill & held) -> u.buffer3.full

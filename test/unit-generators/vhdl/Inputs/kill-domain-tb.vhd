@@ -1,13 +1,17 @@
 -- A testbench for kill-domain-ghdl.mlir: the exported @kd, whose latch (a
 -- ONE_SLOT_BREAK_R in kill domain 0) feeds a stand-in, beside a neighbour
 -- slot outside the domain, and a commit on `d`. One step a cycle: the inputs
--- set, the combinational outputs checked, the clock ticks. The rounds: the
--- latch and the neighbour each hold a token; the commit's transfer resets the
--- latch and leaves the neighbour full, and the stand-in, whose producer had
--- not passed, offers one zero the next cycle until taken; a token that
--- passes in the commit's own cycle owes nothing; a token that passed earlier
--- in the round owes nothing; a commit with nothing passed and the zero taken
--- at once. Fails (severity failure) on the first thing wrong.
+-- set, the combinational outputs checked, the clock ticks. Every commit comes
+-- when nothing waits at the stand-in's output: the stand-in's precondition,
+-- which it asserts. The rounds: a commit with nothing passed owes a zero,
+-- offered the next cycle and held until taken, and leaves the neighbour full;
+-- the latch takes a token, which waits behind the zero; a commit in the cycle
+-- the zero is taken resets the latch (its token never shows) and owes the
+-- next round's zero, the neighbour still full; a token that passes in the
+-- commit's own cycle owes nothing; a token that passed earlier in the round
+-- owes nothing; a commit with nothing passed and the zero taken at once; a
+-- token offered while the zero is owed waits behind it. Fails (severity
+-- failure) on the first thing wrong.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -76,12 +80,16 @@ begin
     wait until rising_edge(clk);
     rst <= '0';
     wait for 1 ns;
-    -- the latch and the neighbour take a token each, their readers stalled
-    step('1', 2, '1', 3, '0', '0', '0', '1', 2, '1', 3, '1');
-    step('0', 0, '0', 0, '0', '0', '0', '1', 2, '1', 3, '0');
-    -- the commit's transfer: the latch is reset, the neighbour is not
-    step('0', 0, '0', 0, '1', '0', '0', '1', 2, '1', 3, '0');
-    -- the stand-in's zero, held until taken; the latch is empty and ready
+    -- a commit with nothing passed: a zero owed; the neighbour takes a
+    -- token, its reader stalled
+    step('0', 0, '1', 3, '1', '1', '0', '0', 0, '1', 3, '1');
+    -- the zero, held; the latch takes a token, which waits behind it
+    step('1', 2, '0', 0, '0', '0', '0', '1', 0, '1', 3, '1');
+    -- the zero taken and a commit in that cycle: the latch, full, is reset,
+    -- the next round owes a zero, the neighbour is not reset
+    step('0', 0, '0', 0, '1', '1', '0', '1', 0, '1', 3, '0');
+    -- that zero, held until taken; the latch is empty and ready, its token
+    -- gone; the neighbour still full
     step('0', 0, '0', 0, '0', '0', '0', '1', 0, '1', 3, '1');
     step('0', 0, '0', 0, '0', '1', '1', '1', 0, '1', 3, '1');
     -- paid: nothing more, the neighbour taken

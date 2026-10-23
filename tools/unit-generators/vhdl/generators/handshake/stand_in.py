@@ -8,11 +8,18 @@ def generate_stand_in(name, params):
 
     The zero is registered: offered in the kill cycle, `outs_valid` would
     depend on the decision's transfer, and the transfer on the readies of the
-    units this channel feeds -- a combinational loop through them. A kill
-    while a zero is still owed and not being taken would owe a second one,
-    which two bits cannot hold; the units a stand-in feeds take a late token
-    the cycle it comes (they absorb on arrival), so the zero is always taken
-    the cycle it is offered.
+    units this channel feeds -- a combinational loop through them.
+
+    The precondition: no kill while a token is offered at `outs` and not
+    taken. A kill while the zero is owed and not taken would owe a second
+    one, which two bits cannot hold (one zero for two rounds, and the
+    decision waits for ever for the other); a kill while the producer's own
+    token is offered and not taken resets the producer under `valid`, and
+    the token becomes a zero before it transfers. So the stand-in's one
+    reader must take a token the cycle it arrives, with nothing between that
+    can hold it back (an eager fork whose other reader stalls, a join). A
+    process between `pragma translate_off` and `translate_on` asserts it in
+    simulation (severity failure); synthesis skips it.
     """
     bitwidth = params["bitwidth"]
     extra_signals = params.get("extra_signals", None)
@@ -81,6 +88,22 @@ begin
       end if;
     end if;
   end process;
+
+  -- The precondition, in simulation only: a round ends only when no token
+  -- waits at `outs`, neither the zero owed nor the producer's own.
+  -- pragma translate_off
+  process (clk) is
+  begin
+    if rising_edge(clk) and rst = '0' and kill = '1' and outs_ready = '0' then
+      assert owe = '0'
+        report "stand_in: a round ended (kill) while the zero it owes was offered and not taken"
+        severity failure;
+      assert ins_valid = '0'
+        report "stand_in: a round ended (kill) while the producer's token was offered and not taken"
+        severity failure;
+    end if;
+  end process;
+  -- pragma translate_on
 end architecture;
 """
 

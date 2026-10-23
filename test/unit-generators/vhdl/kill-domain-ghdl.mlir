@@ -10,7 +10,10 @@
 // resets the slot in the domain and not its neighbour; the stand-in on the
 // slot, whose token had not passed, offers one zero the cycle after and holds
 // it until taken; a token that passed in the commit's cycle, or earlier in the
-// round, owes nothing; a token offered while the zero is owed waits behind it.
+// round, owes nothing; a token offered while the zero is owed waits behind it,
+// and a commit in the cycle that zero is taken resets the slot holding it.
+// No commit comes while a token waits at the stand-in's output (its
+// precondition, which the stand-in's VHDL asserts).
 
 // CHECK: kill domain: 19 cycles as expected
 // CHECK-NOT: failure
