@@ -721,6 +721,134 @@ def PriorityOp : Handshake_Op<"priority", [
   }];
 }
 
+def CommitOp : Handshake_Op<"commit", [
+  Pure,
+  AllTypesMatch<["ins", "outs"]>,
+  NamedIOInterface
+]> {
+  let summary = "a wire that says when its token has passed";
+  let description = [{
+    `outs` is `ins`, unchanged and with no register: valid, data and ready
+    pass straight through, latency zero. `kill` is high the cycle the token
+    transfers -- `ins` valid and `outs` ready -- and while the circuit is
+    under reset.
+
+    It is how a round stops what it no longer needs. Producers racing to a
+    decision (`first`, `priority`) that write no state and push nothing hold
+    nothing anyone outside them can see, so once the decision has gone
+    through the commit, the ones still working can be reset and nobody can
+    tell. Their units carry `handshake.kill_domain`, the commit's `domain`,
+    and the hardware lowering gives each of them `kill` as its reset --
+    synchronous, as every unit's is, so they are idle the cycle after the
+    decision. A `load` with the attribute is not reset (its address side
+    faces a memory controller, which cannot forget a granted request): it
+    drops the words it still owes the units that were. A `stand_in` answers
+    for a stopped producer in the round it was stopped.
+
+    `kill` is a raw wire, as an `unbundle`'s signals are: no token, nothing
+    waits for it.
+
+    Example:
+
+    ```mlir
+    %decision, %kill = commit %choice {domain = 0 : ui32} : <i3>
+    ```
+  }];
+
+  let arguments = (ins HandshakeType:$ins,
+                       DefaultValuedAttr<UI32Attr, "0">:$domain);
+  let results = (outs HandshakeType:$outs, I1:$kill);
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    $ins attr-dict `:` custom<HandshakeType>(type($outs))
+  }];
+
+  let extraClassDeclaration = [{
+    std::string getOperandName(unsigned idx) {
+      assert(idx < 1 && "index too high");
+      return "ins";
+    }
+    std::string getResultName(unsigned idx) {
+      assert(idx < 2 && "index too high");
+      return idx == 0 ? "outs" : "kill";
+    }
+  }];
+
+  let extraClassDefinition = [{
+    ::mlir::FailureOr<::llvm::SmallVector<::mlir::NamedAttribute>>
+    CommitOp::getRTLParameters() {
+      ::mlir::MLIRContext *ctx = (*this)->getContext();
+      return ::llvm::SmallVector<::mlir::NamedAttribute>{
+        {::mlir::StringAttr::get(ctx, "BITWIDTH"),
+         ::mlir::TypeAttr::get(getOuts().getType())}
+      };
+    }
+  }];
+}
+
+def StandInOp : Handshake_Op<"stand_in", [
+  AllTypesMatch<["ins", "outs"]>,
+  NamedIOInterface
+]> {
+  let summary = "answers zero for a producer a commit stopped";
+  let description = [{
+    `outs` is `ins` while the producer answers. On `kill` (a `commit`'s), if
+    this round's token has not passed, the unit owes one: a zero, offered
+    the NEXT cycle; `ins` passes again once it has been taken. The units
+    downstream receive exactly one token a round whether the producer
+    answered or was stopped (`commit`).
+
+    Two bits: the round's token has passed (`kill` ends the round), a zero
+    is owed. The zero is registered because a zero offered in the kill cycle
+    would make `outs`'s valid depend on the decision's transfer, which
+    depends on the readies of the units this token feeds: a combinational
+    loop. While the zero is owed, `ins` is not ready (its producer has just
+    been reset and offers nothing).
+
+    A decision unit takes the zero for a late loser: a false flag reaching
+    a `first` of negated flags, a `priority` or a `select` after the answer
+    is absorbed like any late token, and changes nothing. The payload is an
+    integer, so that there is a zero; no extra signals.
+
+    Example:
+
+    ```mlir
+    %flag = stand_in %raw, %kill : <i1>
+    ```
+  }];
+
+  let arguments = (ins HandshakeType:$ins, I1:$kill);
+  let results = (outs HandshakeType:$outs);
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    $ins `,` $kill attr-dict `:` custom<HandshakeType>(type($outs))
+  }];
+
+  let extraClassDeclaration = [{
+    std::string getOperandName(unsigned idx) {
+      assert(idx < 2 && "index too high");
+      return idx == 0 ? "ins" : "kill";
+    }
+    std::string getResultName(unsigned idx) {
+      assert(idx < 1 && "index too high");
+      return "outs";
+    }
+  }];
+
+  let extraClassDefinition = [{
+    ::mlir::FailureOr<::llvm::SmallVector<::mlir::NamedAttribute>>
+    StandInOp::getRTLParameters() {
+      ::mlir::MLIRContext *ctx = (*this)->getContext();
+      return ::llvm::SmallVector<::mlir::NamedAttribute>{
+        {::mlir::StringAttr::get(ctx, "BITWIDTH"),
+         ::mlir::TypeAttr::get(getOuts().getType())}
+      };
+    }
+  }];
+}
+
 def MergeOp : Handshake_Op<"merge", [
   Pure,
   // SameOperandsAndResultsType is a built-in variant of AllTypesMatch with useful

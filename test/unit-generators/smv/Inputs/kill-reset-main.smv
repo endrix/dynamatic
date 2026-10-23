@@ -1,0 +1,18 @@
+MODULE main
+  VAR
+  ins : unsigned word [2];
+  iv : boolean;
+  r : boolean;
+  r0 : boolean;
+  r1 : boolean;
+  fv : boolean;
+  rst : boolean;
+  s : slot(ins, iv, r, rst);
+  f : copy(fv, r0, r1, rst);
+  was_rst : boolean;
+  ASSIGN
+  init(was_rst) := FALSE;
+  next(was_rst) := rst;
+  -- the step after a reset the slot is empty and every copy is armed again
+  INVARSPEC was_rst -> (!s.full & !s.inner_one_slot_break_r.full)
+  INVARSPEC was_rst -> (f.inner_reg_block_0.reg_value & f.inner_reg_block_1.reg_value)

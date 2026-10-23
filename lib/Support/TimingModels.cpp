@@ -55,6 +55,10 @@ unsigned dynamatic::getOpDatawidth(Operation *op) {
         // both inputs and the output are one type
         return getHandshakeTypeBitWidth(priorityOp.getHi().getType());
       })
+      .Case<handshake::CommitOp, handshake::StandInOp>([&](auto) {
+        // the channel through it; the kill is a raw wire beside it
+        return getHandshakeTypeBitWidth(op->getOperand(0).getType());
+      })
       .Case<handshake::BufferOp, handshake::ForkOp, handshake::LazyForkOp,
             handshake::BranchOp, handshake::SinkOp>([&](auto) {
         return getHandshakeTypeBitWidth(op->getOperand(0).getType());

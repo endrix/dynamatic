@@ -1488,6 +1488,7 @@ void SMVWriter::constructIOMappings(
     }
   };
 
+  std::optional<std::string> killReset;
   auto addInPortType = [&](Type portType, StringRef port, Value oprd) {
     auto signal = getValueName(oprd);
     std::string signalName = signal.str();
@@ -1510,6 +1511,13 @@ void SMVWriter::constructIOMappings(
           if (getSignalName(port).first != CLK_PORT &&
               getSignalName(port).first != RST_PORT)
             mappings[getSignalName(port)].push_back(signalName);
+          // A unit a commit stops (`handshake.kill_domain`) is reset by the
+          // commit's kill, not by the module's reset, which SMV has no use
+          // for: its model takes that wire as its last parameter (the
+          // generator's `kill_reset`), after the output readies.
+          else if (getSignalName(port).first == RST_PORT &&
+                   !isa<BlockArgument>(oprd))
+            killReset = signalName;
         });
   };
 
@@ -1526,10 +1534,27 @@ void SMVWriter::constructIOMappings(
   auto outs = llvm::zip_equal(instOp.getResults(), modOp.getOutputNamesStr());
   for (auto [oprd, portAttr] : outs)
     addOutPortType(oprd.getType(), portAttr.str(), oprd);
+  if (killReset)
+    mappings[getSignalName(RST_PORT)].push_back(*killReset);
 }
 
 LogicalResult SMVWriter::write(hw::HWModuleOp modOp,
                                raw_indented_ostream &os) const {
+  // A module instance reset by a commit's kill would need a reset input on
+  // every unit inside it, and the module's own SMV takes none: such a body
+  // is abstracted before it reaches SMV (as the formal harness does), never
+  // modelled as if it could not be reset.
+  for (hw::InstanceOp instOp : modOp.getOps<hw::InstanceOp>()) {
+    if (!isa<hw::HWModuleOp>(getHWModule(instOp).getOperation()))
+      continue;
+    auto names = getHWModule(instOp).getInputNamesStr();
+    for (auto [oprd, name] : llvm::zip_equal(instOp.getOperands(), names))
+      if (name.str() == RST_PORT && !isa<BlockArgument>(oprd))
+        return instOp.emitError()
+               << "is reset by a commit's kill, and SMV has no model of a "
+                  "module whose units are reset by a wire of the module "
+                  "around it: abstract its body";
+  }
   WriteModData data(modOp, os);
   if (failed(createInternalSignals(data)))
     return failure();

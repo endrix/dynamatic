@@ -27,6 +27,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from generators.handshake import priority as priority_gen  # noqa: E402
 from generators.support.utils import ATTR_BITWIDTH, SmvScalarType  # noqa: E402
+from generators.support.dependencies import combinational_reads  # noqa: E402
 
 
 def observer(w: int) -> str:
@@ -65,22 +66,32 @@ MODULE main
   x_hi := hv & dut.hi_ready;
   x_lo := lv & dut.lo_ready;
   x_out := dut.outs_valid & rdy;
+  -- a transfer is this round's unless the input gave its token already;
+  -- then it is the next round's, which the round's last cycle may take
+  now_hi := x_hi & !got_hi;
+  now_lo := x_lo & !got_lo;
+  next_hi := x_hi & got_hi;
+  next_lo := x_lo & got_lo;
   -- this round's inputs as known now, transfers of this cycle included
-  hi_in := got_hi | x_hi;
-  lo_in := got_lo | x_lo;
+  hi_in := got_hi | now_hi;
+  lo_in := got_lo | now_lo;
   hi_now := got_hi ? hi_val : hi;
   lo_now := got_lo ? lo_val : lo;
   hi_carries := hi_in & ({nz("hi_now")});
   -- the round closes once both inputs came and the answer was taken
   closes := hi_in & lo_in & (answered | x_out);
+  -- the next round's hi, taken in the cycle this one closes, decides it
+  next_carries := closes & next_hi & ({nz("hi")});
 
   ASSIGN
   init(got_hi) := FALSE;
-  next(got_hi) := closes ? FALSE : hi_in;
+  next(got_hi) := closes ? next_hi : hi_in;
   init(got_lo) := FALSE;
-  next(got_lo) := closes ? FALSE : lo_in;
+  next(got_lo) := closes ? next_lo : lo_in;
+  -- in a closing cycle whose answer was out before, an answer taken is the
+  -- next round's
   init(answered) := FALSE;
-  next(answered) := closes ? FALSE : (answered | x_out);
+  next(answered) := closes ? (answered & x_out) : (answered | x_out);
   init(hi_val) := {Z};
   next(hi_val) := x_hi ? hi : hi_val;
   init(lo_val) := {Z};
@@ -103,27 +114,32 @@ MODULE main
   INVAR last_lv -> (lv & lo = last_lo)
 
   -- SOUNDNESS: the answer is hi when hi carries an action, lo otherwise.
-  INVARSPEC NAME sound := dut.outs_valid -> (hi_carries ? dut.outs = hi_now : dut.outs = lo_now)
+  INVARSPEC NAME sound := (dut.outs_valid & !answered) -> (hi_carries ? dut.outs = hi_now : dut.outs = lo_now)
   -- hi is waited for, always: no answer before hi came.
-  INVARSPEC NAME waits_hi := dut.outs_valid -> hi_in
+  INVARSPEC NAME waits_hi := (dut.outs_valid & !answered) -> hi_in
   -- and lo is waited for when hi does not decide: `sound` compares against
   -- the raw lo wire before lo arrives, so alone it would pass a unit that
   -- answers a zero hi by passing that wire through.
-  INVARSPEC NAME waits_lo := (dut.outs_valid & !hi_carries) -> lo_in
+  INVARSPEC NAME waits_lo := (dut.outs_valid & !answered & !hi_carries) -> lo_in
   -- lo is not waited for when hi decides: the answer is out the cycle a
   -- non-zero hi arrives.
   INVARSPEC NAME hi_decides_now := (hi_carries & !answered) -> dut.outs_valid
   -- with hi zero, the answer is out the cycle lo is here.
   INVARSPEC NAME lo_decides_now := (hi_in & !hi_carries & lo_in & !answered) -> dut.outs_valid
-  -- ONE answer a round.
-  INVARSPEC NAME once := answered -> !dut.outs_valid
+  -- ONE answer a round: after it, nothing until the round closes, and then
+  -- only the next round's, which a non-zero hi taken in that cycle decides.
+  INVARSPEC NAME once := (dut.outs_valid & answered) -> (next_carries & dut.outs = hi)
+  -- THE ROUND CLOSES IN ITS LAST CYCLE: the next round's non-zero hi taken
+  -- then is answered then (a round ended by a late lo costs the next one no
+  -- cycle).
+  INVARSPEC NAME next_decides_now := (next_carries & answered) -> dut.outs_valid
   -- CONSUMPTION ON ARRIVAL: an input that has not given this round's token
-  -- is taken the cycle it is offered; one that has, is not taken again.
-  INVARSPEC NAME hi_on_arrival := dut.hi_ready <-> !got_hi
-  INVARSPEC NAME lo_on_arrival := dut.lo_ready <-> !got_lo
+  -- is taken the cycle it is offered; one that has, only in the cycle the
+  -- round closes, and that token is the next round's.
+  INVARSPEC NAME hi_on_arrival := dut.hi_ready <-> (!got_hi | closes)
+  INVARSPEC NAME lo_on_arrival := dut.lo_ready <-> (!got_lo | closes)
   -- the answer, once offered, stays offered and unchanged until taken
   INVARSPEC NAME held := was_offered -> (dut.outs_valid & dut.outs = was_outs)
-  -- NO DEADLOCK: an answer stays reachable from every reachable state.
   CTLSPEC NAME live := AG EF dut.outs_valid
 """
 
@@ -162,6 +178,16 @@ def main() -> int:
 
     specs = [l for l in out.splitlines() if l.startswith("-- invariant") or
              l.startswith("-- specification")]
+    # NO VALID -> READY RING THROUGH THE UNIT: neither input's ready reads
+    # that input's valid, and the output's valid does not read the output's
+    # ready (the completing round reads the other input and the answer's
+    # transfer, as a join does) -- combinationally, through the DEFINEs.
+    reads = combinational_reads(model, f"priority{args.bitwidth}")
+    for p in ("hi", "lo"):
+        own = f"{p}_valid" in reads[f"{p}_ready"]
+        specs.append(f"-- structure {p}_ready reads not {p}_valid  is {'false' if own else 'true'}")
+    loop = "outs_ready" in reads["outs_valid"]
+    specs.append(f"-- structure outs_valid reads not outs_ready  is {'false' if loop else 'true'}")
     bad = [l for l in specs if "is false" in l]
     for l in specs:
         print(("  FAIL " if "is false" in l else "  ok   ") + l[3:])

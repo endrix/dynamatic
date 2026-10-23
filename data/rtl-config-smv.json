@@ -6,6 +6,17 @@
   },
   {
     "name": "handshake.buffer",
+    "parameters": [
+      {"name": "NUM_SLOTS", "type": "unsigned"},
+      {"name": "BUFFER_TYPE", "type": "string"},
+      {"name": "DV_LATENCY", "type": "unsigned"},
+      {"name": "KILL_RESET", "type": "unsigned", "eq": 1}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t buffer -p num_slots=$NUM_SLOTS dv_latency=$DV_LATENCY bitwidth=$BITWIDTH  buffer_type='\"$BUFFER_TYPE\"' kill_reset=$KILL_RESET",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.buffer",
    "parameters": [
     {"name": "NUM_SLOTS", "type": "unsigned"},
     {
@@ -43,10 +54,28 @@
   },
   {
     "name": "handshake.fork",
+    "parameters": [
+      {"name": "SIZE", "type": "unsigned"},
+      {"name": "KILL_RESET", "type": "unsigned", "eq": 1}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t fork -p size=$SIZE bitwidth=$BITWIDTH kill_reset=$KILL_RESET",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.fork",
    "parameters": [
       {"name": "SIZE", "type": "unsigned"}
    ],
     "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t fork -p size=$SIZE bitwidth=$BITWIDTH",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.join",
+    "parameters": [
+      {"name": "SIZE", "type": "unsigned"},
+      {"name": "KILL_RESET", "type": "unsigned", "eq": 1}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t join -p size=$SIZE kill_reset=$KILL_RESET",
     "hdl": "smv"
   },
   {
@@ -59,10 +88,27 @@
   },
   {
     "name": "handshake.lazy_fork",
+    "parameters": [
+      {"name": "SIZE", "type": "unsigned"},
+      {"name": "KILL_RESET", "type": "unsigned", "eq": 1}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t lazy_fork -p size=$SIZE bitwidth=$BITWIDTH kill_reset=$KILL_RESET",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.lazy_fork",
    "parameters": [
       {"name": "SIZE", "type": "unsigned"}
    ],
     "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t lazy_fork -p size=$SIZE bitwidth=$BITWIDTH",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.load",
+    "parameters": [
+      {"name": "KILL_DROP", "type": "unsigned", "eq": 1}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t load -p data_bitwidth=$DATA_BITWIDTH addr_bitwidth=$ADDR_BITWIDTH kill_drop=$KILL_DROP",
     "hdl": "smv"
   },
   {
@@ -81,6 +127,16 @@
   {
     "name": "handshake.priority",
     "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t priority -p bitwidth=$BITWIDTH",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.commit",
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t commit -p bitwidth=$BITWIDTH",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.stand_in",
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t stand_in -p bitwidth=$BITWIDTH",
     "hdl": "smv"
   },
   {
