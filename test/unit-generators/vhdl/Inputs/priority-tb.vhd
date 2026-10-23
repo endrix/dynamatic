@@ -5,8 +5,9 @@
 -- held and answered the cycle a zero hi arrives; a non-zero hi beats a lo that
 -- came first; a zero hi waits for lo; a stalled sink keeps the answer while
 -- the late input is absorbed; two zeros answer zero; rounds back to back, one
--- a cycle; a stalled answer from lo. Each input is ready exactly while it has
--- not given its round's token. Fails (severity failure) on the first thing
+-- a cycle; a stalled answer from lo; a zero hi and lo in one cycle with the
+-- sink stalled; the next round's hi offered while the round is open. Each
+-- input is ready exactly while it has not given its round's token. Fails (severity failure) on the first thing
 -- wrong.
 library ieee;
 use ieee.std_logic_1164.all;
@@ -98,6 +99,19 @@ begin
     step('0', 0, '1', 8, '0', '1', 8, '0', '1');
     step('0', 0, '0', 0, '0', '1', 8, '0', '0');
     step('0', 0, '0', 0, '1', '1', 8, '0', '0');
+    step('0', 0, '0', 0, '1', '0', 0, '1', '1');
+    -- a zero hi and lo in the same cycle, the sink stalled: lo is held
+    step('1', 0, '1', 5, '0', '1', 5, '1', '1');
+    step('0', 0, '0', 0, '0', '1', 5, '0', '0');
+    step('0', 0, '0', 0, '1', '1', 5, '0', '0');
+    step('0', 0, '0', 0, '1', '0', 0, '1', '1');
+    -- the next round's hi offered while the round is open: not taken, the
+    -- stalled answer unchanged; taken the cycle after the round closes
+    step('1', 4, '0', 0, '0', '1', 4, '1', '1');
+    step('1', 8, '0', 0, '0', '1', 4, '0', '1');
+    step('1', 8, '1', 2, '1', '1', 4, '0', '1');
+    step('1', 8, '0', 0, '1', '1', 8, '1', '1');
+    step('0', 0, '1', 0, '1', '0', 0, '0', '1');
     step('0', 0, '0', 0, '1', '0', 0, '1', '1');
     report "priority: " & integer'image(cycle) & " cycles as expected";
     std.env.finish;

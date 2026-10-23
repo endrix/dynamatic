@@ -50,6 +50,9 @@ if shutil.which("ghdl"):
 # NuSMV, for the tests that model-check what the SMV generators write.
 if shutil.which("NuSMV"):
     config.available_features.add("nusmv")
+# Icarus Verilog, for the tests that simulate what the Verilog generators write.
+if shutil.which("iverilog") and shutil.which("vvp"):
+    config.available_features.add("iverilog")
 if config.cmake_build_type == "Release":
     print("[WARNING] Skipping `invalid.mlir` in Release mode")
     config.excludes.append("invalid.mlir")

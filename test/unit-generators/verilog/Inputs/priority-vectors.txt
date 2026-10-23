@@ -1,0 +1,43 @@
+# handshake.priority: the rounds of ../../vhdl/Inputs/priority-tb.vhd, one a
+# line, for priority-tb.v. Columns: hi_valid hi lo_valid lo outs_ready, then
+# the expected outs_valid outs hi_ready lo_ready (outs checked only when
+# outs_valid is expected). Regenerate from the VHDL when its steps change.
+1 4 0 0 1 1 4 1 1
+0 0 0 0 1 0 0 0 1
+0 0 1 2 1 0 0 0 1
+0 0 0 0 1 0 0 1 1
+0 0 1 2 1 0 0 1 1
+0 0 0 0 1 0 0 1 0
+1 0 0 0 1 1 2 1 0
+0 0 0 0 1 0 0 1 1
+0 0 1 2 1 0 0 1 1
+1 8 0 0 1 1 8 1 0
+0 0 0 0 1 0 0 1 1
+1 0 0 0 1 0 0 1 1
+0 0 0 0 1 0 0 0 1
+0 0 1 1 1 1 1 0 1
+0 0 0 0 1 0 0 1 1
+1 4 0 0 0 1 4 1 1
+0 0 1 2 0 1 4 0 1
+0 0 0 0 0 1 4 0 0
+0 0 0 0 1 1 4 0 0
+0 0 0 0 1 0 0 1 1
+1 0 1 0 1 1 0 1 1
+1 1 1 2 1 1 1 1 1
+1 0 1 4 1 1 4 1 1
+0 0 0 0 1 0 0 1 1
+1 0 0 0 0 0 0 1 1
+0 0 1 8 0 1 8 0 1
+0 0 0 0 0 1 8 0 0
+0 0 0 0 1 1 8 0 0
+0 0 0 0 1 0 0 1 1
+1 0 1 5 0 1 5 1 1
+0 0 0 0 0 1 5 0 0
+0 0 0 0 1 1 5 0 0
+0 0 0 0 1 0 0 1 1
+1 4 0 0 0 1 4 1 1
+1 8 0 0 0 1 4 0 1
+1 8 1 2 1 1 4 0 1
+1 8 0 0 1 1 8 1 1
+0 0 1 0 1 0 0 0 1
+0 0 0 0 1 0 0 1 1

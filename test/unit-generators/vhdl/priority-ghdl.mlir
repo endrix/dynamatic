@@ -10,7 +10,9 @@
 // characterization measures, against the same rounds (Inputs/priority-tb.vhd):
 // hi decides alone the cycle it arrives, a late lo is absorbed, lo is held
 // until a zero hi answers it, a non-zero hi beats a lo that came first, a
-// stalled answer is kept, one round a cycle back to back.
+// stalled answer is kept, one round a cycle back to back, a zero hi and lo in
+// one cycle under a stall, the next round's hi refused while the round is
+// open. The same rounds drive the Verilog in ../verilog/priority-iverilog.mlir.
 
-// CHECK: priority: 29 cycles as expected
+// CHECK: priority: 39 cycles as expected
 // CHECK-NOT: failure

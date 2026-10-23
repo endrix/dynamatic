@@ -106,6 +106,10 @@ MODULE main
   INVARSPEC NAME sound := dut.outs_valid -> (hi_carries ? dut.outs = hi_now : dut.outs = lo_now)
   -- hi is waited for, always: no answer before hi came.
   INVARSPEC NAME waits_hi := dut.outs_valid -> hi_in
+  -- and lo is waited for when hi does not decide: `sound` compares against
+  -- the raw lo wire before lo arrives, so alone it would pass a unit that
+  -- answers a zero hi by passing that wire through.
+  INVARSPEC NAME waits_lo := (dut.outs_valid & !hi_carries) -> lo_in
   -- lo is not waited for when hi decides: the answer is out the cycle a
   -- non-zero hi arrives.
   INVARSPEC NAME hi_decides_now := (hi_carries & !answered) -> dut.outs_valid

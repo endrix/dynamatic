@@ -1612,7 +1612,7 @@
         "extra-eq": 0
       }
     ],
-    "generic": "$DYNAMATIC/data/verilog/handshake/priority.v",
+    "generic": "$DYNAMATIC/data/verilog/handshake/priority_merge.v",
     "module-name": "priority_merge",
     "hdl": "verilog"
   },
