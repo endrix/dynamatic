@@ -47,6 +47,9 @@ if shutil.which("ghdl"):
     config.available_features.add("ghdl")
     if "GHDL_PREFIX" in os.environ:
         config.environment["GHDL_PREFIX"] = os.environ["GHDL_PREFIX"]
+# NuSMV, for the tests that model-check what the SMV generators write.
+if shutil.which("NuSMV"):
+    config.available_features.add("nusmv")
 if config.cmake_build_type == "Release":
     print("[WARNING] Skipping `invalid.mlir` in Release mode")
     config.excludes.append("invalid.mlir")

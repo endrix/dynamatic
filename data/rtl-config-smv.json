@@ -79,6 +79,11 @@
     "hdl": "smv"
   },
   {
+    "name": "handshake.priority",
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t priority -p bitwidth=$BITWIDTH",
+    "hdl": "smv"
+  },
+  {
     "name": "handshake.merge",
    "parameters": [
       {"name": "SIZE", "type": "unsigned"}

@@ -644,6 +644,83 @@ def FirstOp : Handshake_Op<"first", [
   }];
 }
 
+def PriorityOp : Handshake_Op<"priority", [
+  Pure,
+  AllTypesMatch<["hi", "lo", "result"]>,
+  NamedIOInterface
+]> {
+  let summary = "priority merge that waits for its high input only";
+  let description = [{
+    `hi` when it carries something, `lo` otherwise -- decided the moment the
+    tokens it holds determine the answer. A payload of `0` is the reserved
+    "nothing selected", as for `first`.
+
+    It consumes exactly one token on EACH input per round, each the cycle it
+    arrives (a `seen` bit per input: an input that has given its token is
+    not ready again until the round closes), and emits exactly one:
+
+      - `hi`, the cycle a non-zero `hi` arrives, whether `lo` has arrived or
+        not; a `lo` that arrives later is absorbed;
+      - when `hi` arrives zero, `lo`, the cycle `lo` is there (it may have
+        arrived first, and is then held).
+
+    The round closes once both inputs are in and the answer has been taken,
+    in either order.
+
+    Why it is not built from the stock units: the step
+    `hi | (lo & (hi == 0))` is made of joins, so it waits for `lo` even when
+    `hi` already decides, and a slow `lo` holds up every answer. Why it is
+    not `first`: `first` takes whichever non-zero arrives first, and a
+    non-zero `lo` arriving before `hi` would win. Here `hi` is waited for,
+    always -- declaring a priority is declaring that wait -- and `lo` never
+    is when `hi` decides.
+
+    Both inputs' `ready` are functions of registers only, so the unit cannot
+    close a valid -> ready -> valid ring the way a lazy fork can; the valid
+    and the data out are combinational in the inputs (latency zero). A
+    dataless form would decide nothing (the payload is the answer), so the
+    channels carry data and no extra signals.
+
+    Example:
+
+    ```mlir
+    %0 = priority %hi, %lo : <i4>
+    ```
+  }];
+
+  let arguments = (ins HandshakeType:$hi, HandshakeType:$lo);
+  let results = (outs HandshakeType:$result);
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    $hi `,` $lo attr-dict `:` custom<HandshakeType>(type($result))
+  }];
+
+  let extraClassDeclaration = [{
+    // Operand 0 is `hi`, operand 1 `lo`; the result is `outs`, the name the
+    // RTL generators give it.
+    std::string getOperandName(unsigned idx) {
+      assert(idx < 2 && "index too high");
+      return idx == 0 ? "hi" : "lo";
+    }
+    std::string getResultName(unsigned idx) {
+      assert(idx < 1 && "index too high");
+      return "outs";
+    }
+  }];
+
+  let extraClassDefinition = [{
+    ::mlir::FailureOr<::llvm::SmallVector<::mlir::NamedAttribute>>
+    PriorityOp::getRTLParameters() {
+      ::mlir::MLIRContext *ctx = (*this)->getContext();
+      return ::llvm::SmallVector<::mlir::NamedAttribute>{
+        {::mlir::StringAttr::get(ctx, "BITWIDTH"),
+         ::mlir::TypeAttr::get(getResult().getType())}
+      };
+    }
+  }];
+}
+
 def MergeOp : Handshake_Op<"merge", [
   Pure,
   // SameOperandsAndResultsType is a built-in variant of AllTypesMatch with useful

@@ -16,9 +16,14 @@ def generate_trunci(name, params):
 
 
 def _generate_trunci(name, latency, input_type, output_type):
+    # The low `output` bits: bits output-1 down to 0. A one-bit result is a
+    # boolean in these models.
+    low = f"ins[{output_type.bitwidth - 1}:0]"
+    if output_type.bitwidth == 1:
+        low = f"bool({low})"
     return f"""
 {generate_unanary_op_header(name)}
-  DEFINE outs := ins[{output_type.bitwidth}:0];
+  DEFINE outs := {low};
   
   {generate_delay_buffer(f"{name}__delay_buffer", {ATTR_LATENCY: latency})}
 """

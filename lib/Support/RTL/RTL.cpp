@@ -323,6 +323,7 @@ LogicalResult RTLMatch::registerBitwidthParameter(hw::HWModuleExternOp &modOp,
       handshakeOp == "handshake.lazy_fork" ||
       handshakeOp == "handshake.merge" ||
       handshakeOp == "handshake.first" ||
+      handshakeOp == "handshake.priority" ||
       handshakeOp == "handshake.muli" ||
       handshakeOp == "handshake.sink" ||
       handshakeOp == "handshake.formal.dead_buffer" ||
@@ -485,6 +486,7 @@ RTLMatch::registerExtraSignalParameters(hw::HWModuleExternOp &modOp,
       handshakeOp == "handshake.fork" ||
       handshakeOp == "handshake.merge" ||
       handshakeOp == "handshake.first" ||
+      handshakeOp == "handshake.priority" ||
       handshakeOp == "handshake.mulf" ||
       handshakeOp == "handshake.muli" ||
       handshakeOp == "handshake.select" ||

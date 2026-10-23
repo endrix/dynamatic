@@ -627,6 +627,10 @@ ModuleDiscriminator::ModuleDiscriminator(Operation *op) {
         addUnsigned("SIZE", op->getNumOperands());
         addType("DATA_TYPE", op->getResult(0));
       })
+      .Case<handshake::PriorityOp>([&](auto) {
+        // Two inputs always, `hi` and `lo`: the bitwidth alone
+        addType("DATA_TYPE", op->getResult(0));
+      })
       .Case<handshake::MergeOp>([&](handshake::MergeOp mergeOp) {
         // Number of input channels and bitwidth; and whether the unit keeps
         // the slot behind its arbiter (`TEHB`, 1 unless the op's
@@ -2939,6 +2943,7 @@ public:
         ConvertToHWInstance<handshake::BranchOp>,
         ConvertToHWInstance<handshake::MergeOp>,
         ConvertToHWInstance<handshake::FirstOp>,
+        ConvertToHWInstance<handshake::PriorityOp>,
         ConvertToHWInstance<handshake::ControlMergeOp>,
         ConvertToHWInstance<handshake::MuxOp>,
         ConvertToHWInstance<handshake::JoinOp>,
