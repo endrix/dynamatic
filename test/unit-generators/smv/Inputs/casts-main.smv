@@ -1,0 +1,16 @@
+-- The casts of casts-one-bit-values.mlir on every input value: each output
+-- is what the cast means, as a number.
+MODULE main
+  VAR
+  b : boolean;
+  w : unsigned word [4];
+  u : extui_1_4(b, TRUE, TRUE);
+  s : extsi_1_4(b, TRUE, TRUE);
+  x : extsi_4_8(w, TRUE, TRUE);
+  t : trunci_4_1(w, TRUE, TRUE);
+  v : trunci_4_2(w, TRUE, TRUE);
+  INVARSPEC NAME extui_one := u.outs = (b ? 0ud4_1 : 0ud4_0)
+  INVARSPEC NAME extsi_one := s.outs = (b ? 0ud4_15 : 0ud4_0)
+  INVARSPEC NAME extsi_sign := toint(x.outs) = (toint(w) >= 8 ? toint(w) + 240 : toint(w))
+  INVARSPEC NAME trunci_one := t.outs = (toint(w) mod 2 = 1)
+  INVARSPEC NAME trunci_two := toint(v.outs) = toint(w) mod 4

@@ -51,6 +51,10 @@ unsigned dynamatic::getOpDatawidth(Operation *op) {
             return getHandshakeTypeBitWidth(
                 mergeLikeOp.getDataOperands().front().getType());
           })
+      .Case<handshake::PriorityOp>([&](handshake::PriorityOp priorityOp) {
+        // both inputs and the output are one type
+        return getHandshakeTypeBitWidth(priorityOp.getHi().getType());
+      })
       .Case<handshake::BufferOp, handshake::ForkOp, handshake::LazyForkOp,
             handshake::BranchOp, handshake::SinkOp>([&](auto) {
         return getHandshakeTypeBitWidth(op->getOperand(0).getType());

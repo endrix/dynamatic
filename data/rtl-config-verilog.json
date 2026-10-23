@@ -1603,6 +1603,20 @@
     "hdl": "verilog"
   },
   {
+    "name": "handshake.priority",
+    "parameters": [
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      }
+    ],
+    "generic": "$DYNAMATIC/data/verilog/handshake/priority_merge.v",
+    "module-name": "priority_merge",
+    "hdl": "verilog"
+  },
+  {
     "name": "handshake.br",
     "parameters": [
       {

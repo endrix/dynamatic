@@ -16,9 +16,12 @@ def generate_extui(name, params):
 
 
 def _generate_extui(name, latency, input_type, output_type):
+    # A one-bit channel is a boolean in these models, and `extend` takes a
+    # word: the boolean is made a one-bit word first, and zero-extended.
+    word = "word1(ins)" if input_type.bitwidth == 1 else "ins"
     return f"""
 {generate_unanary_op_header(name)}
-  DEFINE outs := extend(ins, {output_type.bitwidth - input_type.bitwidth});
+  DEFINE outs := extend({word}, {output_type.bitwidth - input_type.bitwidth});
   
   {generate_delay_buffer(f"{name}__delay_buffer", {ATTR_LATENCY: latency})}
 """

@@ -223,6 +223,31 @@ void handshake::HandshakeDialect::getCanonicalizationPatterns(
 
 OpResult FirstOp::getDataResult() { return cast<OpResult>(getResult()); }
 
+//===----------------------------------------------------------------------===//
+// PriorityOp
+//===----------------------------------------------------------------------===//
+
+/// The three channels are one type already (AllTypesMatch); what is left is
+/// that the type carries an answer. A zero payload is "nothing selected" and
+/// a winner is told from a loser by being non-zero, so a control channel
+/// would decide nothing; and the RTL holds the payload alone, so extra
+/// signals would be dropped rather than carried.
+LogicalResult PriorityOp::verify() {
+  auto channel = dyn_cast<ChannelType>(getResult().getType());
+  if (!channel)
+    return emitOpError()
+           << "decides on its payload (zero is 'nothing selected'), so its "
+              "channels carry data; a dataless priority would be a join";
+  if (!isa<IntegerType>(channel.getDataType()))
+    return emitOpError() << "compares its high input with zero, so the "
+                            "payload is an integer, not "
+                         << channel.getDataType();
+  if (!channel.getExtraSignals().empty())
+    return emitOpError() << "holds the payload alone; a channel with extra "
+                            "signals would lose them";
+  return success();
+}
+
 OpResult MergeOp::getDataResult() { return cast<OpResult>(getResult()); }
 
 //===----------------------------------------------------------------------===//
