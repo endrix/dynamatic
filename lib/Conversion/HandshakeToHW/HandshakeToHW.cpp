@@ -2941,8 +2941,8 @@ static LogicalResult closeKillDomains(handshake::FuncOp funcOp) {
     return isa<handshake::ChannelType, handshake::ControlType>(v.getType());
   };
   // The domain a stand-in answers for: its commit's.
-  auto standInDomain = [](handshake::StandInOp standIn)
-      -> std::optional<uint64_t> {
+  auto standInDomain =
+      [](handshake::StandInOp standIn) -> std::optional<uint64_t> {
     if (auto commit = standIn.getKill().getDefiningOp<handshake::CommitOp>())
       return commit.getDomain();
     return std::nullopt;
