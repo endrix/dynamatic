@@ -1,13 +1,16 @@
 // RUN: dynamatic-opt %s --lower-handshake-to-hw --split-input-file --verify-diagnostics
 
-// A unit in a kill domain no commit of the module defines has no reset to
-// take.
-handshake.func @no_commit(%a: !handshake.channel<i2>, %d: !handshake.channel<i3>, ...)
+// A unit in a kill domain no commit of the function names has no reset to
+// take (here domain 1, beside domain 0 and its commit).
+handshake.func @no_commit(%a: !handshake.channel<i2>, %c: !handshake.channel<i2>,
+                          %d: !handshake.channel<i3>, ...)
     -> !handshake.channel<i3>
-    attributes {argNames = ["a", "d"], resNames = ["out0"]} {
-  // expected-error @below {{is in kill domain 3 and no commit of this module has that domain}}
-  %b = buffer %a, bufferType = ONE_SLOT_BREAK_R, numSlots = 1, dvLatency = 0 {handshake.kill_domain = 3 : ui32} : <i2>
-  sink %b {handshake.kill_domain = 3 : ui32} : <i2>
+    attributes {argNames = ["a", "c", "d"], resNames = ["out0"]} {
+  %b0 = buffer %c, bufferType = ONE_SLOT_BREAK_R, numSlots = 1, dvLatency = 0 {handshake.kill_domain = 0 : ui32} : <i2>
+  sink %b0 {handshake.kill_domain = 0 : ui32} : <i2>
+  // expected-error @below {{is in kill domain 1 and no commit of this function names that domain: it has no reset to take}}
+  %b = buffer %a, bufferType = ONE_SLOT_BREAK_R, numSlots = 1, dvLatency = 0 {handshake.kill_domain = 1 : ui32} : <i2>
+  sink %b {handshake.kill_domain = 1 : ui32} : <i2>
   %out, %kill = commit %d : <i3>
   end %out : <i3>
 }
@@ -57,30 +60,118 @@ handshake.func @word_out(%a: !handshake.channel<i2>, %d: !handshake.channel<i3>,
 
 // -----
 
-// One transfer resets a domain: two commits of one domain in a module would
-// leave its units with two resets.
-handshake.func @two_commits(%a: !handshake.channel<i2>, %d: !handshake.channel<i3>,
-                            %e: !handshake.channel<i3>, ...)
+// A commit's domain has a unit or a stand-in: its kill would reset nothing.
+// (Domain 0 has two commits, which is allowed; domain 2 has nothing.)
+handshake.func @commit_alone(%a: !handshake.channel<i2>, %d: !handshake.channel<i3>,
+                             %e: !handshake.channel<i3>, ...)
     -> (!handshake.channel<i3>, !handshake.channel<i3>)
     attributes {argNames = ["a", "d", "e"], resNames = ["out0", "out1"]} {
   %b = buffer %a, bufferType = ONE_SLOT_BREAK_R, numSlots = 1, dvLatency = 0 {handshake.kill_domain = 0 : ui32} : <i2>
   sink %b {handshake.kill_domain = 0 : ui32} : <i2>
   %out, %kill = commit %d : <i3>
-  // expected-error @below {{two commits for kill domain 0 in one module}}
   %out2, %kill2 = commit %e : <i3>
-  end %out, %out2 : <i3>, <i3>
+  // expected-error @below {{is a commit of kill domain 2, and no unit of this function is in that domain and no stand-in answers for it: its kill would reset nothing}}
+  %out3, %kill3 = commit %out2 {domain = 2 : ui32} : <i3>
+  end %out, %out3 : <i3>, <i3>
 }
 
 // -----
 
-// A stand-in answers for the domain whose commit's kill it takes: a kill from
-// anywhere else names no domain.
+// A stand-in takes the kills of ALL its domain's commits: the transfer of one
+// it does not take resets its producer and owes nothing here, so the round
+// that commit ends never gets the stand-in's token. Here the shared domain 2
+// has a commit on each of two decisions (as in kill-domain-shared.mlir) and
+// its stand-in takes the first's kill only.
+handshake.func @stand_in_some(%a: !handshake.channel<i1>, %d0: !handshake.channel<i3>,
+                              %d1: !handshake.channel<i3>, ...)
+    -> (!handshake.channel<i1>, !handshake.channel<i3>, !handshake.channel<i3>)
+    attributes {argNames = ["a", "d0", "d1"], resNames = ["f", "o0", "o1"]} {
+  %la = buffer %a, bufferType = ONE_SLOT_BREAK_R, numSlots = 1, dvLatency = 0 {handshake.kill_domain = 2 : ui32} : <i1>
+  %o0, %k0 = commit %d0 {domain = 2 : ui32} : <i3>
+  // expected-note @below {{a commit of kill domain 2 whose kill the stand-in does not take}}
+  %o1, %k1 = commit %d1 {domain = 2 : ui32} : <i3>
+  // expected-error @below {{stands in for kill domain 2 and takes the kills of 1 of its 2 commits: the transfer of one it does not take resets its producer with no zero owed here, and the round's reader waits for ever; a stand-in takes the kill of every commit of its domain}}
+  %f = stand_in %la, %k0 : <i1>
+  end %f, %o0, %o1 : <i1>, <i3>, <i3>
+}
+
+// -----
+
+// A stand-in takes each kill once: two bits of one commit are high in the
+// cycle that ends one round.
+handshake.func @kill_twice(%a: !handshake.channel<i1>, %d: !handshake.channel<i3>, ...)
+    -> (!handshake.channel<i1>, !handshake.channel<i3>)
+    attributes {argNames = ["a", "d"], resNames = ["f", "o"]} {
+  %la = buffer %a, bufferType = ONE_SLOT_BREAK_R, numSlots = 1, dvLatency = 0 {handshake.kill_domain = 0 : ui32} : <i1>
+  %out, %kill = commit %d : <i3>
+  // expected-error @below {{stands in for kill domain 0 and takes one commit's kill twice (#0 and #1): a commit's transfer ends one round, so a stand-in takes each kill once}}
+  %f = stand_in %la, %kill, %kill : <i1>
+  end %f, %out : <i1>, <i3>
+}
+
+// -----
+
+// A decision stops a domain through one commit: two commits of one domain in
+// series on one channel (here with domain 1's between them) see one transfer
+// and end one round.
+handshake.func @series_same_domain(%a: !handshake.channel<i2>, %c: !handshake.channel<i2>,
+                                   %d: !handshake.channel<i3>, ...)
+    -> !handshake.channel<i3>
+    attributes {argNames = ["a", "c", "d"], resNames = ["o"]} {
+  %b = buffer %a, bufferType = ONE_SLOT_BREAK_R, numSlots = 1, dvLatency = 0 {handshake.kill_domain = 0 : ui32} : <i2>
+  sink %b {handshake.kill_domain = 0 : ui32} : <i2>
+  %b1 = buffer %c, bufferType = ONE_SLOT_BREAK_R, numSlots = 1, dvLatency = 0 {handshake.kill_domain = 1 : ui32} : <i2>
+  sink %b1 {handshake.kill_domain = 1 : ui32} : <i2>
+  // expected-note @below {{the commit of kill domain 0 before it on the channel}}
+  %o0, %k0 = commit %d : <i3>
+  %o1, %k1 = commit %o0 {domain = 1 : ui32} : <i3>
+  // expected-error @below {{is a commit of kill domain 0 in series after another commit of it: the two see one transfer and end one round, so one of them is all the decision needs}}
+  %o2, %k2 = commit %o1 : <i3>
+  end %o2 : <i3>
+}
+
+// -----
+
+// A stand-in answers for one domain, its producer's: its kills are commits'
+// of that domain (all of them), never of two.
+handshake.func @two_domains_kills(%a: !handshake.channel<i1>, %c: !handshake.channel<i1>,
+                                  %d: !handshake.channel<i3>, %e: !handshake.channel<i3>, ...)
+    -> (!handshake.channel<i1>, !handshake.channel<i3>, !handshake.channel<i3>)
+    attributes {argNames = ["a", "c", "d", "e"], resNames = ["f", "o1", "o2"]} {
+  %la = buffer %a, bufferType = ONE_SLOT_BREAK_R, numSlots = 1, dvLatency = 0 {handshake.kill_domain = 0 : ui32} : <i1>
+  %lc = buffer %c, bufferType = ONE_SLOT_BREAK_R, numSlots = 1, dvLatency = 0 {handshake.kill_domain = 1 : ui32} : <i1>
+  sink %lc {handshake.kill_domain = 1 : ui32} : <i1>
+  %out, %kill = commit %d : <i3>
+  %out2, %kill2 = commit %e {domain = 1 : ui32} : <i3>
+  // expected-error @below {{stands in for kill domain 0 (its kill #0 is a commit's of it), and its kill #1 is kill domain 1's: a stand-in answers for one domain, its producer's}}
+  %f = stand_in %la, %kill, %kill2 : <i1>
+  end %f, %out, %out2 : <i1>, <i3>, <i3>
+}
+
+// -----
+
+// A stand-in answers for the domain whose commits' kills it takes: a kill
+// from anywhere else names no domain.
 handshake.func @kill_arg(%a: !handshake.channel<i1>, %k: i1, ...)
     -> (!handshake.channel<i1>)
     attributes {argNames = ["a", "k"], resNames = ["out0"]} {
-  // expected-error @below {{stands in for a producer, and its kill is no commit's}}
+  // expected-error @below {{stands in for a producer, and its kill #0 is no commit's: a stand-in answers for the domain whose commits' kills it takes}}
   %f = stand_in %a, %k : <i1>
   end %f : <i1>
+}
+
+// -----
+
+// ... whichever of its kills it is.
+handshake.func @kill_arg_second(%a: !handshake.channel<i1>, %d: !handshake.channel<i3>,
+                                %k: i1, ...)
+    -> (!handshake.channel<i1>, !handshake.channel<i3>)
+    attributes {argNames = ["a", "d", "k"], resNames = ["out0", "out1"]} {
+  %la = buffer %a, bufferType = ONE_SLOT_BREAK_R, numSlots = 1, dvLatency = 0 {handshake.kill_domain = 0 : ui32} : <i1>
+  %out, %kill = commit %d : <i3>
+  // expected-error @below {{stands in for a producer, and its kill #1 is no commit's}}
+  %f = stand_in %la, %kill, %k : <i1>
+  end %f, %out : <i1>, <i3>
 }
 
 // -----

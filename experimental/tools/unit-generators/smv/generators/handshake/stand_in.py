@@ -7,8 +7,26 @@ def generate_stand_in(name, params):
     round's token has passed; `kill` ends the round) and `owe` (a zero is
     owed: offered from the cycle after the kill until taken, `ins` waiting
     meanwhile).
+
+    `size` kills, `kill_0` ..., the kills of all the commits of the
+    producer's domain (a domain may have several): any of them high ends ONE
+    round, `kill` their OR, the model otherwise the same whatever their
+    number. The rounds of a domain never overlap -- a round of the domain
+    starts only after the previous commit of the domain has transferred -- so
+    at most one kill is high in a cycle, and it ends the round this unit is
+    in. (Were state B's round to start before state A's commit transferred,
+    A's kill would wipe it with A's round, and B's reader would wait for ever
+    for this unit's token.) The producer's promise, which an observer states
+    as an assumption (verify-stand-in.py) or checks (`many` of the domain's
+    `kill_or`).
     """
     data_type = SmvScalarType(params[ATTR_BITWIDTH])
+    size = params[ATTR_SIZE]
+    if size < 1:
+        raise ValueError(
+            "handshake.stand_in answers for a producer a commit stops, so it "
+            "takes at least one kill")
+    kills = [f"kill_{i}" for i in range(size)]
 
     if data_type.bitwidth == 0:
         raise ValueError(
@@ -16,12 +34,14 @@ def generate_stand_in(name, params):
 
     zero = data_type.format_constant(0)
     return f"""
-MODULE {name}(ins, ins_valid, kill, outs_ready)
+MODULE {name}(ins, ins_valid, {", ".join(kills)}, outs_ready)
   VAR
   sent : boolean;
   owe : boolean;
 
   DEFINE
+  -- one round ends, whichever commit ends it
+  kill := {" | ".join(kills)};
   -- the producer's token goes through this cycle
   passed := ins_valid & outs_ready & !owe;
 

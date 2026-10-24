@@ -452,7 +452,25 @@
   },
   {
     "name": "handshake.stand_in",
-    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t stand_in -p bitwidth=$BITWIDTH extra_signals=$EXTRA_SIGNALS"
+    "parameters": [
+      {
+        "name": "SIZE",
+        "type": "unsigned",
+        "lb": 1
+      }
+    ],
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t stand_in -p size=$SIZE bitwidth=$BITWIDTH extra_signals=$EXTRA_SIGNALS"
+  },
+  {
+    "name": "kill_or",
+    "parameters": [
+      {
+        "name": "SIZE",
+        "type": "unsigned",
+        "lb": 2
+      }
+    ],
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t kill_or -p size=$SIZE"
   },
   {
     "name": "handshake.merge",

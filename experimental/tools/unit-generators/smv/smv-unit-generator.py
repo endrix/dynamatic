@@ -14,6 +14,7 @@ import generators.handshake.first as first
 import generators.handshake.priority as priority
 import generators.handshake.commit as commit
 import generators.handshake.stand_in as stand_in
+import generators.support.kill_or as kill_or
 import generators.handshake.fork as fork
 import generators.handshake.lazy_fork as lazy_fork
 import generators.handshake.load as load
@@ -82,6 +83,8 @@ def generate_code(name, mod_type, parameters):
             return commit.generate_commit(name, parameters)
         case "stand_in":
             return stand_in.generate_stand_in(name, parameters)
+        case "kill_or":
+            return kill_or.generate_kill_or(name, parameters)
         case "fork":
             return fork.generate_fork(name, parameters)
         case "lazy_fork":
