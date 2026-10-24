@@ -7,7 +7,8 @@
 // its own (it drops what the stopped units are owed, KILL_DROP); a neighbour,
 // the commit and the stand-in keep the module's reset. A unit of the domain
 // is told apart by KILL_RESET for the backends that model the reset as an
-// input; its circuit is any other's.
+// input; its circuit is any other's. The stand-in's kills are one port, a bit
+// a kill (here one, SIZE = 1).
 
 // CHECK-LABEL: hw.module @guard
 // CHECK: hw.instance "buffer0" @[[LATCH:.*]](ins: %arg: {{.*}}, clk: %clk: i1, rst: %commit0.kill: i1)
@@ -18,12 +19,13 @@
 // CHECK: hw.instance "trunci0" @{{.*}}(ins: %load0.dataOut: {{.*}}, clk: %clk: i1, rst: %commit0.kill: i1)
 // CHECK: hw.instance "buffer3" @[[NEIGHBOUR:.*]](ins: %other: {{.*}}, clk: %clk: i1, rst: %rst: i1)
 // CHECK: %commit0.outs, %commit0.kill = hw.instance "commit0" @{{.*}}(ins: %dec: {{.*}}, clk: %clk: i1, rst: %rst: i1) -> (outs: !handshake.channel<i3>, kill: i1)
-// CHECK: hw.instance "stand_in0" @{{.*}}(ins: %trunci0.outs: {{.*}}, kill: %commit0.kill: i1, clk: %clk: i1, rst: %rst: i1)
+// CHECK: hw.instance "stand_in0" @[[STANDIN:.*]](ins: %trunci0.outs: {{.*}}, kill_0: %commit0.kill: i1, clk: %clk: i1, rst: %rst: i1)
 // CHECK-NOT: handshake.kill_domain
 // CHECK-NOT: handshake.kill_source
 // CHECK: hw.module.extern @[[LATCH]]({{.*}}) attributes {hw.name = "handshake.buffer", hw.parameters = {{{.*}}KILL_RESET = 1 : ui32
 // CHECK: hw.module.extern @[[LOAD]](in %addrIn : {{.*}}, in %dataFromMem : {{.*}}, in %kill : i1, in %clk : i1, in %rst : i1, {{.*}}) attributes {hw.name = "handshake.load", hw.parameters = {{{.*}}KILL_DROP = 1 : ui32
 // CHECK: hw.module.extern @[[NEIGHBOUR]]({{.*}}) attributes {hw.name = "handshake.buffer", hw.parameters = {BUFFER_TYPE = "ONE_SLOT_BREAK_R", DATA_TYPE = !handshake.channel<i2>, DV_LATENCY = 0 : ui32, NUM_SLOTS = 1 : ui32}}
+// CHECK: hw.module.extern @[[STANDIN]](in %ins : {{.*}}, in %kill_0 : i1, in %clk : i1, in %rst : i1, {{.*}}) attributes {hw.name = "handshake.stand_in", hw.parameters = {DATA_TYPE = !handshake.channel<i1>, SIZE = 1 : ui32}}
 handshake.func @guard(%arg: !handshake.channel<i2>, %permit: !handshake.control<>,
                       %other: !handshake.channel<i2>, %dec: !handshake.channel<i3>,
                       %mem: memref<4xi8>, %memStart: !handshake.control<>,

@@ -267,8 +267,13 @@ LogicalResult CommitOp::verify() {
 //===----------------------------------------------------------------------===//
 
 /// What the unit sends for a stopped producer is the zero of the channel's
-/// type, so the type has one: an integer payload, held alone.
+/// type, so the type has one: an integer payload, held alone. And it is told
+/// when the producer was stopped: at least one kill.
 LogicalResult StandInOp::verify() {
+  if (getKills().empty())
+    return emitOpError()
+           << "answers for a producer a commit stops, so it takes at least "
+              "one kill (a commit's); it takes none";
   auto channel = dyn_cast<ChannelType>(getOuts().getType());
   if (!channel)
     return emitOpError()

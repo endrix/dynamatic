@@ -1,10 +1,15 @@
 def generate_stand_in(name, params):
     """Answers zero for a producer a commit stopped (`handshake.stand_in`).
 
-    `outs` is `ins` while the producer answers. `kill` ends the round: if its
+    `outs` is `ins` while the producer answers. A kill ends the round: if its
     token has not passed, one zero is owed, offered from the next cycle on
     until taken; `ins` waits meanwhile. Two flip-flops: `sent` (this round's
     token has passed) and `owe`.
+
+    `kill` has `size` bits, one a commit (a domain may have several): any of
+    them high ends ONE round, the unit otherwise the same whatever their
+    number. The commits of a domain never end two rounds in one cycle (the
+    decisions they sit on are exclusive in time): the producer's promise.
 
     The zero is registered: offered in the kill cycle, `outs_valid` would
     depend on the decision's transfer, and the transfer on the readies of the
@@ -22,7 +27,13 @@ def generate_stand_in(name, params):
     simulation (severity failure); synthesis skips it.
     """
     bitwidth = params["bitwidth"]
+    size = params["size"]
     extra_signals = params.get("extra_signals", None)
+
+    if size < 1:
+        raise ValueError(
+            "handshake.stand_in answers for a producer a commit stops, so it "
+            "takes at least one kill")
 
     if bitwidth == 0:
         raise ValueError(
@@ -47,8 +58,8 @@ entity {name} is
     ins       : in  std_logic_vector({bitwidth} - 1 downto 0);
     ins_valid : in  std_logic;
     ins_ready : out std_logic;
-    -- the commit's transfer: the end of a round
-    kill : in std_logic;
+    -- the commits' transfers, one bit a commit: any ends the round
+    kill : in std_logic_vector({size} - 1 downto 0);
     -- output channel
     outs       : out std_logic_vector({bitwidth} - 1 downto 0);
     outs_valid : out std_logic;
@@ -60,9 +71,13 @@ end entity;
     architecture = f"""
 -- Architecture of stand_in
 architecture arch of {name} is
+  constant NO_KILL : std_logic_vector({size} - 1 downto 0) := (others => '0');
   signal sent, owe : std_logic;
   signal passed    : std_logic;
+  signal kill_any  : std_logic;
 begin
+  -- one round ends, whichever commit ends it
+  kill_any   <= '0' when kill = NO_KILL else '1';
   outs_valid <= owe or ins_valid;
   outs       <= (others => '0') when owe = '1' else ins;
   ins_ready  <= outs_ready and not owe;
@@ -77,14 +92,14 @@ begin
         owe  <= '0';
       else
         -- A kill ends the round: the next one has sent nothing yet.
-        if kill = '1' then
+        if kill_any = '1' then
           sent <= '0';
         else
           sent <= sent or passed;
         end if;
         -- A round ended with its token not passed owes a zero; an owed zero
         -- is paid when taken.
-        owe <= (kill and not (sent or passed)) or (owe and not outs_ready);
+        owe <= (kill_any and not (sent or passed)) or (owe and not outs_ready);
       end if;
     end if;
   end process;
@@ -94,7 +109,7 @@ begin
   -- pragma translate_off
   process (clk) is
   begin
-    if rising_edge(clk) and rst = '0' and kill = '1' and outs_ready = '0' then
+    if rising_edge(clk) and rst = '0' and kill_any = '1' and outs_ready = '0' then
       assert owe = '0'
         report "stand_in: a round ended (kill) while the zero it owes was offered and not taken"
         severity failure;

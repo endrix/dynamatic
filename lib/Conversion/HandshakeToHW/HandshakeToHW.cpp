@@ -631,9 +631,14 @@ ModuleDiscriminator::ModuleDiscriminator(Operation *op) {
         // Two inputs always, `hi` and `lo`: the bitwidth alone
         addType("DATA_TYPE", op->getResult(0));
       })
-      .Case<handshake::CommitOp, handshake::StandInOp>([&](auto) {
-        // A wire and its transfer, or its stand-in: the bitwidth alone
+      .Case<handshake::CommitOp>([&](auto) {
+        // A wire and its transfer: the bitwidth alone
         addType("DATA_TYPE", op->getOperand(0));
+      })
+      .Case<handshake::StandInOp>([&](handshake::StandInOp standIn) {
+        // The number of kills it ORs, and the bitwidth
+        addUnsigned("SIZE", standIn.getKills().size());
+        addType("DATA_TYPE", standIn.getIns());
       })
       .Case<handshake::MergeOp>([&](handshake::MergeOp mergeOp) {
         // Number of input channels and bitwidth; and whether the unit keeps
@@ -1242,7 +1247,8 @@ void ModuleDiscriminator::setParameters(hw::HWModuleExternOp modOp) {
 }
 
 /// The attribute a commit's instance carries: the domain whose units its
-/// `kill` resets (`wireKillDomains` reads it, then drops it).
+/// `kill` resets, alone or ORed with the domain's other commits' kills
+/// (`wireKillDomains` reads it, then drops it).
 static constexpr llvm::StringLiteral KILL_SOURCE_ATTR("handshake.kill_source");
 
 /// The attribute a killed load's instance carries in place of
@@ -2922,7 +2928,7 @@ static void insertIIMonitors(hw::HWModuleOp hwModOp,
 /// it joins the domain, whatever it is (a memory interface, a commit, a
 /// stand-in or an end never do). The domain must then be closed where its
 /// reset would show: a channel out of it goes to a unit of the domain, to a
-/// `stand_in` on its commit's kill (the producer's result), or into a load of
+/// `stand_in` on its commits' kills (the producer's result), or into a load of
 /// the domain as its address; a load's word goes only into the domain, and
 /// its address comes only from it, and its address goes only to a memory
 /// controller. What goes INTO a domain is not checked
@@ -2931,6 +2937,13 @@ static void insertIIMonitors(hw::HWModuleOp hwModOp,
 /// promise, not something a lowering can see. A unit is in a domain only if
 /// its kind is one the closure knows: one whose reset is synchronous, or one
 /// that holds nothing. Any other kind, marked or joined, is refused.
+///
+/// A domain may have several commits (`wireKillDomains` ORs their kills),
+/// and has at least one: a unit of a domain no commit names has no reset to
+/// take. A commit's domain has a unit or a stand-in, or its kill would reset
+/// nothing. A stand-in's kills are commits' kills, of one domain: the one its
+/// producer is in. That the commits of one domain never end two rounds in one
+/// cycle is the producer's promise too.
 static LogicalResult closeKillDomains(handshake::FuncOp funcOp) {
   auto domainOf = [](Operation *op) -> std::optional<uint64_t> {
     if (auto attr = op->getAttrOfType<IntegerAttr>(handshake::KILL_DOMAIN_ATTR))
@@ -2940,12 +2953,18 @@ static LogicalResult closeKillDomains(handshake::FuncOp funcOp) {
   auto isChannel = [](Value v) {
     return isa<handshake::ChannelType, handshake::ControlType>(v.getType());
   };
-  // The domain a stand-in answers for: its commit's.
+  // The domain a stand-in answers for: its commits', when every kill it takes
+  // is a commit's and the commits name one domain.
   auto standInDomain =
       [](handshake::StandInOp standIn) -> std::optional<uint64_t> {
-    if (auto commit = standIn.getKill().getDefiningOp<handshake::CommitOp>())
-      return commit.getDomain();
-    return std::nullopt;
+    std::optional<uint64_t> domain;
+    for (Value kill : standIn.getKills()) {
+      auto commit = kill.getDefiningOp<handshake::CommitOp>();
+      if (!commit || (domain && *domain != commit.getDomain()))
+        return std::nullopt;
+      domain = commit.getDomain();
+    }
+    return domain;
   };
   // What a unit of domain N may receive from (a unit of N, a load of N's
   // word) and hand on to (a unit of N, N's stand-in's input, N's load's
@@ -3043,6 +3062,31 @@ static LogicalResult closeKillDomains(handshake::FuncOp funcOp) {
     return WalkResult::advance();
   });
   if (marks.wasInterrupted())
+    return failure();
+
+  // A stand-in answers for the domain whose commits' kills it takes: every
+  // kill a commit's, the commits of one domain (some or all of its commits).
+  WalkResult kills =
+      funcOp.walk([&](handshake::StandInOp standIn) -> WalkResult {
+        std::optional<uint64_t> first;
+        for (auto [idx, kill] : llvm::enumerate(standIn.getKills())) {
+          auto commit = kill.getDefiningOp<handshake::CommitOp>();
+          if (!commit)
+            return standIn.emitError()
+                   << "stands in for a producer, and its kill #" << idx
+                   << " is no commit's: a stand-in answers for the domain "
+                      "whose commits' kills it takes";
+          if (first && *first != commit.getDomain())
+            return standIn.emitError()
+                   << "stands in for kill domain " << *first
+                   << " (its kill #0 is a commit's of it), and its kill #"
+                   << idx << " is kill domain " << commit.getDomain()
+                   << "'s: a stand-in answers for one domain, its producer's";
+          first = commit.getDomain();
+        }
+        return WalkResult::advance();
+      });
+  if (kills.wasInterrupted())
     return failure();
 
   // Joining: the units between units of domain N -- reached from it along
@@ -3151,14 +3195,12 @@ static LogicalResult closeKillDomains(handshake::FuncOp funcOp) {
   WalkResult result = funcOp.walk([&](Operation *op) -> WalkResult {
     std::optional<uint64_t> n = domainOf(op);
     if (auto standIn = dyn_cast<handshake::StandInOp>(op)) {
-      std::optional<uint64_t> m = standInDomain(standIn);
-      if (!m)
-        return standIn.emitError()
-               << "stands in for a producer, and its kill is no commit's";
+      // (Its kills name one domain: checked before the closure.)
+      uint64_t m = *standInDomain(standIn);
       Operation *insDef = standIn.getIns().getDefiningOp();
-      if (!fromInside(standIn.getIns(), *m) && !(insDef && inside(insDef, *m)))
+      if (!fromInside(standIn.getIns(), m) && !(insDef && inside(insDef, m)))
         return standIn.emitError()
-               << "stands in for kill domain " << *m
+               << "stands in for kill domain " << m
                << ", and its input does not come from a unit of it"
                << (insDef ? whyOutside(insDef) : "")
                << ": a token the domain's reset cannot take back would be "
@@ -3210,16 +3252,80 @@ static LogicalResult closeKillDomains(handshake::FuncOp funcOp) {
                       "a stand_in, or as a load's address";
     return WalkResult::advance();
   });
-  return failure(result.wasInterrupted());
+  if (result.wasInterrupted())
+    return failure();
+
+  // Every unit's domain has a commit (one or several), and every commit's
+  // domain has a unit or a stand-in.
+  llvm::SmallDenseSet<uint64_t> committed, used;
+  funcOp.walk([&](Operation *op) {
+    if (auto commit = dyn_cast<handshake::CommitOp>(op))
+      committed.insert(commit.getDomain());
+    else if (auto standIn = dyn_cast<handshake::StandInOp>(op))
+      used.insert(*standInDomain(standIn));
+    else if (std::optional<uint64_t> n = domainOf(op); n && op != funcOp)
+      used.insert(*n);
+  });
+  WalkResult paired = funcOp.walk([&](Operation *op) -> WalkResult {
+    std::optional<uint64_t> n = domainOf(op);
+    if (n && op != funcOp && !committed.contains(*n))
+      return op->emitError()
+             << "is in kill domain " << *n
+             << " and no commit of this function names that domain: it has "
+                "no reset to take";
+    return WalkResult::advance();
+  });
+  if (paired.wasInterrupted())
+    return failure();
+  paired = funcOp.walk([&](handshake::CommitOp commit) -> WalkResult {
+    if (!used.contains(commit.getDomain()))
+      return commit.emitError()
+             << "is a commit of kill domain " << commit.getDomain()
+             << ", and no unit of this function is in that domain and no "
+                "stand-in answers for it: its kill would reset nothing";
+    return WalkResult::advance();
+  });
+  return failure(paired.wasInterrupted());
+}
+
+/// The OR of a kill domain's kills (`wireKillDomains`): `size` one-bit inputs
+/// `ins_0` ... and one output `outs`, combinational, no clock and no reset
+/// (each kill has the reset in it already: a commit's is its transfer or the
+/// reset). Not a Handshake unit: the lowering's own, as `mem_to_bram` is; the
+/// RTL configurations name it `kill_or`. One extern module a size.
+static hw::HWModuleExternOp getKillOrExtern(mlir::ModuleOp topModOp,
+                                            unsigned size, Location loc) {
+  static constexpr llvm::StringLiteral HW_NAME = "kill_or";
+  std::string name = HW_NAME.str() + "_" + std::to_string(size);
+  if (hw::HWModuleExternOp extModOp = findExternMod(topModOp, name))
+    return extModOp;
+  MLIRContext *ctx = topModOp.getContext();
+  Type i1 = IntegerType::get(ctx, 1);
+  ModuleBuilder modBuilder(ctx);
+  for (unsigned idx = 0; idx < size; ++idx)
+    modBuilder.addInput("ins_" + std::to_string(idx), i1);
+  modBuilder.addOutput("outs", i1);
+  OpBuilder builder(ctx);
+  builder.setInsertionPointToEnd(topModOp.getBody());
+  auto extModOp = hw::HWModuleExternOp::create(
+      builder, loc, builder.getStringAttr(name), modBuilder.getPortInfo());
+  extModOp->setAttr(RTL_NAME_ATTR_NAME, builder.getStringAttr(HW_NAME));
+  Type ui32 = IntegerType::get(ctx, 32, IntegerType::Unsigned);
+  extModOp->setAttr(RTL_PARAMETERS_ATTR_NAME,
+                    builder.getDictionaryAttr({builder.getNamedAttr(
+                        "SIZE", IntegerAttr::get(ui32, size))}));
+  return extModOp;
 }
 
 /// THE KILL DOMAINS of a converted module (`handshake.commit`): every
-/// instance of a unit marked with a domain gets that domain's commit's `kill`
-/// as its `rst` -- the reset every unit applies on the clock edge, so the unit
-/// is back in its reset state the cycle after the commit's transfer -- and a
-/// load marked so gets it on its `kill` input instead, its reset untouched.
-/// Done here, on the finished module, because the commit and the units it
-/// stops are converted in whatever order the conversion takes them.
+/// instance of a unit marked with a domain gets that domain's kill as its
+/// `rst` -- the reset every unit applies on the clock edge, so the unit is
+/// back in its reset state the cycle after the transfer -- and a load marked
+/// so gets it on its `kill` input instead, its reset untouched. A domain's
+/// kill is its commit's `kill`, or, when the domain has several commits, the
+/// OR of their kills: one `kill_or` instance, `kill_domain<N>`, beside them.
+/// Done here, on the finished module, because the commits and the units they
+/// stop are converted in whatever order the conversion takes them.
 static LogicalResult wireKillDomains(hw::HWModuleOp hwModOp) {
   auto portIndex = [](ArrayAttr names,
                       StringRef name) -> std::optional<unsigned> {
@@ -3233,7 +3339,9 @@ static LogicalResult wireKillDomains(hw::HWModuleOp hwModOp) {
       return attr.getValue().getZExtValue();
     return std::nullopt;
   };
-  DenseMap<uint64_t, Value> kills;
+  // Each domain's commits, in the module's order, and the last of them.
+  llvm::MapVector<uint64_t, SmallVector<Value>> commitKills;
+  DenseMap<uint64_t, hw::InstanceOp> lastCommit;
   for (hw::InstanceOp instOp : hwModOp.getOps<hw::InstanceOp>()) {
     std::optional<uint64_t> domain = domainOf(instOp, KILL_SOURCE_ATTR);
     if (!domain)
@@ -3242,10 +3350,25 @@ static LogicalResult wireKillDomains(hw::HWModuleOp hwModOp) {
     std::optional<unsigned> out = portIndex(instOp.getResultNames(), "kill");
     if (!out)
       return instOp.emitError() << "a commit's instance with no 'kill' output";
-    if (!kills.try_emplace(*domain, instOp.getResult(*out)).second)
-      return instOp.emitError()
-             << "two commits for kill domain " << *domain
-             << " in one module: a unit can be reset by one transfer only";
+    commitKills[*domain].push_back(instOp.getResult(*out));
+    lastCommit[*domain] = instOp;
+  }
+  DenseMap<uint64_t, Value> kills;
+  auto topModOp = hwModOp->getParentOfType<mlir::ModuleOp>();
+  for (auto &[domain, values] : commitKills) {
+    if (values.size() == 1) {
+      kills[domain] = values.front();
+      continue;
+    }
+    hw::InstanceOp after = lastCommit[domain];
+    hw::HWModuleExternOp extModOp =
+        getKillOrExtern(topModOp, values.size(), after.getLoc());
+    OpBuilder builder(after);
+    builder.setInsertionPointAfter(after);
+    auto orOp = hw::InstanceOp::create(
+        builder, after.getLoc(), extModOp,
+        builder.getStringAttr("kill_domain" + std::to_string(domain)), values);
+    kills[domain] = orOp.getResult(0);
   }
   for (hw::InstanceOp instOp : hwModOp.getOps<hw::InstanceOp>()) {
     // A load's domain goes to its `kill` input (`KILL_DROP_ATTR`), every other
@@ -3257,11 +3380,13 @@ static LogicalResult wireKillDomains(hw::HWModuleOp hwModOp) {
     if (!domain)
       continue;
     instOp->removeAttr(attrName);
+    // (`closeKillDomains` refused a domain with no commit already; a module
+    // that was not closed is refused here.)
     Value kill = kills.lookup(*domain);
     if (!kill)
       return instOp.emitError()
              << "is in kill domain " << *domain
-             << " and no commit of this module has that domain";
+             << " and no commit of this module names that domain";
     std::optional<unsigned> in = portIndex(
         instOp.getArgNames(), load ? StringRef("kill") : StringRef(RST_PORT));
     if (!in)

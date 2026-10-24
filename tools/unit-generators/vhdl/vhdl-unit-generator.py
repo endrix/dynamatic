@@ -139,6 +139,7 @@ if __name__ == "__main__":
     generators.add("handshake.speculation", "speculator")
     generators.add("handshake.speculation", "non_spec")
     generators.add("support", "mem_to_bram")
+    generators.add("support", "kill_or")
     generators.add("handshake", "extui")
     generators.add("handshake", "shli")
     generators.add("handshake", "shrsi")

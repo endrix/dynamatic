@@ -59,6 +59,7 @@ generators.add("handshake", "buffer")
 generators.add("handshake", "ready_remover")
 generators.add("handshake", "valid_merger")
 generators.add("support", "mem_to_bram")
+generators.add("support", "kill_or")
 
 
 def parse_parameters(param_list):

@@ -13,8 +13,16 @@ cycle after one), a consumer free to stall, and a kill that never comes while
 a token of the unit is offered and not taken (the units it feeds absorb a late
 token the cycle it comes, so the round's decision cannot pass meanwhile).
 
+With --kills N the unit takes N kills, the commits of one domain: each
+commit's transfer ends a round of its own, and the environment keeps the
+domain's promise that two of them never come in one cycle (the decisions they
+sit on are exclusive in time). --no-exclusive drops that promise: two kills in
+one cycle then end two rounds, the unit owes one zero for them, and `one`
+fails -- the promise is what the unit's two bits rest on.
+
 Usage:
-    python3 verify-stand-in.py [--bitwidth W] [--checker PATH]
+    python3 verify-stand-in.py [--bitwidth W] [--kills N] [--no-exclusive]
+                               [--checker PATH]
 """
 import argparse
 import os
@@ -25,20 +33,25 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from generators.handshake import stand_in as stand_in_gen  # noqa: E402
-from generators.support.utils import ATTR_BITWIDTH, SmvScalarType  # noqa: E402
+from generators.support.utils import ATTR_BITWIDTH, ATTR_SIZE, SmvScalarType  # noqa: E402
 
 
-def observer(w: int) -> str:
+def observer(w: int, n: int, exclusive: bool) -> str:
     t = SmvScalarType(w)
     Z = t.format_constant(0)
+    kills = [f"kill_{i}" for i in range(n)]
+    kill_vars = "\n".join(f"  {k} : boolean;" for k in kills)
+    ended = " + ".join(f"({k} ? 1 : 0)" for k in kills)
+    promise = (f"  INVAR ended <= 1" if exclusive else
+               "  -- (no promise: two kills may come in one cycle)")
     return f"""
 MODULE main
   VAR
   ins : {t};
   iv : boolean;
-  kill : boolean;
+{kill_vars}
   rdy : boolean;
-  dut : stand_in{w}(ins, iv, kill, rdy);
+  dut : stand_in{w}(ins, iv, {", ".join(kills)}, rdy);
 
   -- the producer's token of this round has gone in
   p_sent : boolean;
@@ -52,9 +65,12 @@ MODULE main
   last_ins : {t};
 
   DEFINE
+  -- the rounds the commits end this cycle, one a commit that transfers
+  ended := {ended};
+  kill := {" | ".join(kills)};
   x_in := iv & dut.ins_ready;
   x_out := dut.outs_valid & rdy;
-  step := d + (x_out ? 1 : 0) - (kill ? 1 : 0);
+  step := d + (x_out ? 1 : 0) - ended;
 
   ASSIGN
   init(p_sent) := FALSE;
@@ -81,6 +97,8 @@ MODULE main
   INVAR last_iv -> (iv & ins = last_ins)
   -- the round: no kill while a token of the unit is offered and not taken
   INVAR kill -> !(dut.outs_valid & !rdy)
+  -- the domain: its commits never end two rounds in one cycle
+{promise}
 
   -- ONE TOKEN A ROUND: never two, never none -- the difference is what is
   -- owed, and a zero is owed exactly when the round ended with nothing out.
@@ -106,12 +124,15 @@ def find_checker(explicit):
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--bitwidth", type=int, default=1)
+    ap.add_argument("--kills", type=int, default=1)
+    ap.add_argument("--no-exclusive", action="store_true")
     ap.add_argument("--checker", default=None)
     args = ap.parse_args()
 
     model = stand_in_gen.generate_stand_in(
-        f"stand_in{args.bitwidth}", {ATTR_BITWIDTH: args.bitwidth})
-    text = model + observer(args.bitwidth)
+        f"stand_in{args.bitwidth}",
+        {ATTR_BITWIDTH: args.bitwidth, ATTR_SIZE: args.kills})
+    text = model + observer(args.bitwidth, args.kills, not args.no_exclusive)
 
     checker = find_checker(args.checker)
     if not checker:
@@ -132,8 +153,8 @@ def main() -> int:
     bad = [l for l in specs if "is false" in l]
     for l in specs:
         print(("  FAIL " if "is false" in l else "  ok   ") + l[3:])
-    print(f"\n  bitwidth {args.bitwidth}: {len(specs) - len(bad)} of "
-          f"{len(specs)} properties hold")
+    print(f"\n  bitwidth {args.bitwidth}, {args.kills} kill(s): "
+          f"{len(specs) - len(bad)} of {len(specs)} properties hold")
     if not specs:
         print(out, file=sys.stderr)
         return 2

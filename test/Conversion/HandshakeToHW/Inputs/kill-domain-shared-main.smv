@@ -1,0 +1,79 @@
+-- The SMV export of kill-domain-shared.mlir's @shared_guard under free inputs, for
+-- kill-domain-shared-nusmv.mlir. Domain 2 (the shared guard) has two commits,
+-- commit1 (in series after state 0's commit0, domain 0) and commit3 (after
+-- state 1's commit2, domain 1). The step after EITHER of domain 2's commits
+-- transfers, every unit of domain 2 that holds something is empty (its latch,
+-- its start slot, the slot the placer put after the latch); the step after
+-- domain 0's or 1's, that domain's latch is. Neither private domain is reset
+-- by the other's decision: a token the other's latch held, its reader not
+-- ready, is still there. And the shared stand-in, on both kills, offers a
+-- zero the cycle after either commit ended a round in which its producer's
+-- token had not passed (SI4 of phase 3b, at the unit's ports: the observer
+-- counts the rounds and the tokens itself). No property needs the domain's
+-- promise (its two commits never in one cycle): it is not assumed.
+MODULE main
+  VAR
+  a0 : boolean;
+  a0_valid : boolean;
+  a1 : boolean;
+  a1_valid : boolean;
+  a2 : unsigned word [2];
+  a2_valid : boolean;
+  s2_valid : boolean;
+  d0 : unsigned word [3];
+  d0_valid : boolean;
+  d1 : unsigned word [3];
+  d1_valid : boolean;
+  mem_loadData : unsigned word [8];
+  memStart_valid : boolean;
+  ctrlEnd_valid : boolean;
+  start_valid : boolean;
+  flag0_ready : boolean;
+  flag1_ready : boolean;
+  flag2_ready : boolean;
+  dec0_ready : boolean;
+  dec1_ready : boolean;
+  memEnd_ready : boolean;
+  end_ready : boolean;
+  u : shared_guard(self, a0, a0_valid, a1, a1_valid, a2, a2_valid, s2_valid, d0, d0_valid,
+                   d1, d1_valid, mem_loadData, memStart_valid, ctrlEnd_valid, start_valid,
+                   flag0_ready, flag1_ready, flag2_ready, dec0_ready, dec1_ready,
+                   memEnd_ready, end_ready);
+  was_k0 : boolean;
+  was_k1 : boolean;
+  was_k2a : boolean;
+  was_k2b : boolean;
+  held0 : boolean;
+  held1 : boolean;
+  sent2 : boolean;
+  owed2 : boolean;
+  DEFINE
+  -- domain 2's kill as the specification has it: either of its commits
+  k2 := u.commit1.kill | u.commit3.kill;
+  -- the shared stand-in's producer's token goes in
+  x2 := u.trunci0.outs_valid & u.stand_in2.ins_ready;
+  domain2_empty := !u.buffer2.full & !u.buffer3.full & !u.buffer4.outs_valid_i;
+  ASSIGN
+  init(was_k0) := FALSE;
+  next(was_k0) := u.commit0.kill;
+  init(was_k1) := FALSE;
+  next(was_k1) := u.commit2.kill;
+  init(was_k2a) := FALSE;
+  next(was_k2a) := u.commit1.kill;
+  init(was_k2b) := FALSE;
+  next(was_k2b) := u.commit3.kill;
+  init(held0) := FALSE;
+  next(held0) := u.buffer0.full & !u.stand_in0.ins_ready;
+  init(held1) := FALSE;
+  next(held1) := u.buffer1.full & !u.stand_in1.ins_ready;
+  init(sent2) := FALSE;
+  next(sent2) := k2 ? FALSE : (sent2 | x2);
+  init(owed2) := FALSE;
+  next(owed2) := k2 & !(sent2 | x2);
+  INVARSPEC NAME domain2_reset_by_state0 := was_k2a -> domain2_empty
+  INVARSPEC NAME domain2_reset_by_state1 := was_k2b -> domain2_empty
+  INVARSPEC NAME domain0_reset := was_k0 -> !u.buffer0.full
+  INVARSPEC NAME domain1_reset := was_k1 -> !u.buffer1.full
+  INVARSPEC NAME domain0_kept := (was_k1 & !was_k0 & held0) -> u.buffer0.full
+  INVARSPEC NAME domain1_kept := (was_k0 & !was_k1 & held1) -> u.buffer1.full
+  INVARSPEC NAME shared_zero_next := owed2 -> (u.stand_in2.outs_valid & u.stand_in2.outs = FALSE)

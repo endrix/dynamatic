@@ -1648,6 +1648,11 @@
     "name": "handshake.stand_in",
     "parameters": [
       {
+        "name": "SIZE",
+        "type": "unsigned",
+        "lb": 1
+      },
+      {
         "name": "DATA_TYPE",
         "type": "dataflow",
         "data-lb": 1,
@@ -1655,6 +1660,18 @@
       }
     ],
     "generic": "$DYNAMATIC/data/verilog/handshake/stand_in.v",
+    "hdl": "verilog"
+  },
+  {
+    "name": "kill_or",
+    "parameters": [
+      {
+        "name": "SIZE",
+        "type": "unsigned",
+        "lb": 2
+      }
+    ],
+    "generic": "$DYNAMATIC/data/verilog/support/kill_or.v",
     "hdl": "verilog"
   },
   {
