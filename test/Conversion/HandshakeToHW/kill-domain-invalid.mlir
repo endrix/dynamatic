@@ -77,8 +77,63 @@ handshake.func @commit_alone(%a: !handshake.channel<i2>, %d: !handshake.channel<
 
 // -----
 
+// A stand-in takes the kills of ALL its domain's commits: the transfer of one
+// it does not take resets its producer and owes nothing here, so the round
+// that commit ends never gets the stand-in's token. Here the shared domain 2
+// has a commit on each of two decisions (as in kill-domain-shared.mlir) and
+// its stand-in takes the first's kill only.
+handshake.func @stand_in_some(%a: !handshake.channel<i1>, %d0: !handshake.channel<i3>,
+                              %d1: !handshake.channel<i3>, ...)
+    -> (!handshake.channel<i1>, !handshake.channel<i3>, !handshake.channel<i3>)
+    attributes {argNames = ["a", "d0", "d1"], resNames = ["f", "o0", "o1"]} {
+  %la = buffer %a, bufferType = ONE_SLOT_BREAK_R, numSlots = 1, dvLatency = 0 {handshake.kill_domain = 2 : ui32} : <i1>
+  %o0, %k0 = commit %d0 {domain = 2 : ui32} : <i3>
+  // expected-note @below {{a commit of kill domain 2 whose kill the stand-in does not take}}
+  %o1, %k1 = commit %d1 {domain = 2 : ui32} : <i3>
+  // expected-error @below {{stands in for kill domain 2 and takes the kills of 1 of its 2 commits: the transfer of one it does not take resets its producer with no zero owed here, and the round's reader waits for ever; a stand-in takes the kill of every commit of its domain}}
+  %f = stand_in %la, %k0 : <i1>
+  end %f, %o0, %o1 : <i1>, <i3>, <i3>
+}
+
+// -----
+
+// A stand-in takes each kill once: two bits of one commit are high in the
+// cycle that ends one round.
+handshake.func @kill_twice(%a: !handshake.channel<i1>, %d: !handshake.channel<i3>, ...)
+    -> (!handshake.channel<i1>, !handshake.channel<i3>)
+    attributes {argNames = ["a", "d"], resNames = ["f", "o"]} {
+  %la = buffer %a, bufferType = ONE_SLOT_BREAK_R, numSlots = 1, dvLatency = 0 {handshake.kill_domain = 0 : ui32} : <i1>
+  %out, %kill = commit %d : <i3>
+  // expected-error @below {{stands in for kill domain 0 and takes one commit's kill twice (#0 and #1): a commit's transfer ends one round, so a stand-in takes each kill once}}
+  %f = stand_in %la, %kill, %kill : <i1>
+  end %f, %out : <i1>, <i3>
+}
+
+// -----
+
+// A decision stops a domain through one commit: two commits of one domain in
+// series on one channel (here with domain 1's between them) see one transfer
+// and end one round.
+handshake.func @series_same_domain(%a: !handshake.channel<i2>, %c: !handshake.channel<i2>,
+                                   %d: !handshake.channel<i3>, ...)
+    -> !handshake.channel<i3>
+    attributes {argNames = ["a", "c", "d"], resNames = ["o"]} {
+  %b = buffer %a, bufferType = ONE_SLOT_BREAK_R, numSlots = 1, dvLatency = 0 {handshake.kill_domain = 0 : ui32} : <i2>
+  sink %b {handshake.kill_domain = 0 : ui32} : <i2>
+  %b1 = buffer %c, bufferType = ONE_SLOT_BREAK_R, numSlots = 1, dvLatency = 0 {handshake.kill_domain = 1 : ui32} : <i2>
+  sink %b1 {handshake.kill_domain = 1 : ui32} : <i2>
+  // expected-note @below {{the commit of kill domain 0 before it on the channel}}
+  %o0, %k0 = commit %d : <i3>
+  %o1, %k1 = commit %o0 {domain = 1 : ui32} : <i3>
+  // expected-error @below {{is a commit of kill domain 0 in series after another commit of it: the two see one transfer and end one round, so one of them is all the decision needs}}
+  %o2, %k2 = commit %o1 : <i3>
+  end %o2 : <i3>
+}
+
+// -----
+
 // A stand-in answers for one domain, its producer's: its kills are commits'
-// of that domain (some or all of them), never of two.
+// of that domain (all of them), never of two.
 handshake.func @two_domains_kills(%a: !handshake.channel<i1>, %c: !handshake.channel<i1>,
                                   %d: !handshake.channel<i3>, %e: !handshake.channel<i3>, ...)
     -> (!handshake.channel<i1>, !handshake.channel<i3>, !handshake.channel<i3>)

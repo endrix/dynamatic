@@ -3,14 +3,17 @@
 // is `ins` while the producer answers; a kill ends the round, and if its token
 // has not passed one zero is owed, offered from the next cycle until taken,
 // `ins` waiting meanwhile. Two flip-flops, `sent` and `owe`. `kill` has SIZE
-// bits, one a commit (a domain may have several): any of them high ends ONE
-// round; the commits of a domain never end two rounds in one cycle (the
-// decisions they sit on are exclusive in time), the producer's promise. The
-// zero is
-// registered: offered in the kill cycle, `outs_valid` would depend on the
-// decision's transfer, and that on the readies of the units this channel
-// feeds, a combinational loop. The same circuit as
-// data/vhdl/handshake/stand_in.vhd.
+// bits, the kills of all the commits of the producer's domain (a domain may
+// have several): any of them high ends ONE round. The rounds of a domain never
+// overlap -- a round of the domain starts only after the previous commit of
+// the domain has transferred -- so at most one bit is high in a cycle, and it
+// ends the round this unit is in. (Were state B's round to start before state
+// A's commit transferred, A's kill would wipe it with A's round, and B's
+// reader would wait for ever for this unit's token.) The producer's promise,
+// asserted in simulation below. The zero is registered: offered in the kill
+// cycle, `outs_valid` would depend on the decision's transfer, and that on the
+// readies of the units this channel feeds, a combinational loop. The same
+// circuit as data/vhdl/handshake/stand_in.vhd.
 //
 // The precondition: no kill while a token is offered at `outs` and not taken.
 // A kill while the zero is owed and not taken would owe a second one, which
@@ -20,7 +23,9 @@
 // before it transfers. So the stand-in's one reader must take a token the
 // cycle it arrives, with nothing between that can hold it back (an eager fork
 // whose other reader stalls, a join). Asserted in simulation ($fatal, between
-// `synthesis translate_off` and `translate_on`); synthesis skips it.
+// `synthesis translate_off` and `translate_on`), and the domain's promise (no
+// two kills high in one cycle outside reset, $fatal under `ifndef SYNTHESIS`);
+// synthesis skips both.
 module stand_in #(
   parameter SIZE = 1,
   parameter DATA_TYPE = 32
@@ -73,5 +78,15 @@ module stand_in #(
         $fatal(1, "stand_in %m: a round ended (kill) while the producer's token was offered and not taken");
     end
   // synthesis translate_on
+
+  // The domain's promise, in simulation only: its rounds never overlap, so no
+  // two of its commits transfer in one cycle (under reset every commit's kill
+  // is high). `kill & (kill - 1)` is `kill` less its lowest bit set: not zero
+  // when two or more are.
+`ifndef SYNTHESIS
+  always @(posedge clk)
+    if (!rst && (kill & (kill - 1'b1)) != 0)
+      $fatal(1, "stand_in %m: two commits of its kill domain transferred in one cycle (the domain's rounds overlap)");
+`endif
 
 endmodule

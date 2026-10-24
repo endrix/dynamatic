@@ -19,11 +19,18 @@
 -- reset by `d`'s commit and is by `e`'s in the cycle that zero is taken; a
 -- token that passes in `e`'s commit's cycle owes nothing; and the latch, full
 -- behind flag's owed zero, is reset by `e`'s commit (domain 0's second, through
--- the OR) in the cycle that zero is taken. The expected values
--- are a model's of the units (their specifications, not their RTL), which
+-- the OR) in the cycle that zero is taken. Then the decisions' readers
+-- stalled: while `dec2` is not ready for three cycles, neither of `e`'s two
+-- commits in series transfers (no round of either domain ends, latch1 keeps
+-- its token behind flag1's owed zero, `d` stalled with it for a cycle), and
+-- in the cycle it is ready again both transfer, ending a round of each domain
+-- and resetting latch1 full. Every step checks that each commit passes its
+-- decision's valid and ready straight through. The expected values are a
+-- model's of the units (their specifications, not their RTL), which
 -- reproduces the 19 cycles written by hand before `e` was added. An observer
 -- checks the domain's promise: `d`'s and `e`'s decisions never transfer in
--- one cycle. Fails (severity failure) on the first thing wrong.
+-- one cycle; the stand-ins assert it too (no two kills in one cycle). Fails
+-- (severity failure) on the first thing wrong.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -64,9 +71,14 @@ begin
 
   process
     variable cycle : integer := 0;
+    -- the decisions' readers (dec_ready, dec2_ready), ready unless a step
+    -- stalls them
+    variable d_rdy, e_rdy : std_logic := '1';
     -- set the inputs (a, b, c offered with their values, the decisions on
-    -- d and e offered, the three flag/other readies), check the outputs
-    -- (values only when valid is expected), tick
+    -- d and e offered, the three flag/other readies, the decisions' readies
+    -- from d_rdy and e_rdy), check the outputs (values only when valid is
+    -- expected; each decision's valid and ready passed through its commits),
+    -- tick
     procedure step(a_v : std_logic; a_d : integer; b_v : std_logic; b_d : integer;
                    d_v : std_logic; e_v : std_logic; c_v : std_logic; c_d : integer;
                    f_r : std_logic; o_r : std_logic; g_r : std_logic;
@@ -76,9 +88,12 @@ begin
       av <= a_v; a <= std_logic_vector(to_unsigned(a_d, 2));
       bv <= b_v; b <= std_logic_vector(to_unsigned(b_d, 2));
       cv <= c_v; c <= std_logic_vector(to_unsigned(c_d, 2));
-      dv <= d_v; ev <= e_v; decr <= '1'; dec2r <= '1';
+      dv <= d_v; ev <= e_v; decr <= d_rdy; dec2r <= e_rdy;
       fr <= f_r; orr <= o_r; gr <= g_r;
       wait for 1 ns;
+      assert decv = d_v and dr = d_rdy and dec2v = e_v and er = e_rdy
+        report "cycle " & integer'image(cycle) & ": a decision's valid or ready not passed through its commits"
+        severity failure;
       assert fv = e_fv
         report "cycle " & integer'image(cycle) & ": flag_valid " & std_logic'image(fv)
         severity failure;
@@ -186,6 +201,23 @@ begin
     -- the zero taken and e's commit in that cycle: the latch, full, is reset by domain 0's second commit (its token never shows); both owe a zero
     step('0', 0, '0', 0, '0', '1', '0', 0, '1', '1', '1', '1', 0, '0', 0, '0', '0', 0, '1');
     -- the two zeros, taken; the latch empty and ready
+    step('0', 0, '0', 0, '0', '0', '0', 0, '1', '1', '1', '1', 0, '0', 0, '1', '1', 0, '1');
+    step('0', 0, '0', 0, '0', '0', '0', 0, '1', '1', '1', '0', 0, '0', 0, '1', '0', 0, '1');
+    -- e's commit, nothing passed in either round: both owe a zero
+    step('0', 0, '0', 0, '0', '1', '0', 0, '1', '1', '1', '0', 0, '0', 0, '1', '0', 0, '1');
+    -- e's decision offered again, its reader stalled (dec2 not ready): neither commit in series transfers; flag's zero taken, flag1's held; latch1 takes a token, which waits behind it
+    e_rdy := '0';
+    step('0', 0, '0', 0, '0', '1', '1', 3, '1', '1', '0', '1', 0, '0', 0, '1', '1', 0, '1');
+    -- the stall holds: no round of either domain ends; flag owes nothing, latch1 keeps its token behind flag1's zero
+    step('0', 0, '0', 0, '0', '1', '0', 0, '1', '1', '0', '0', 0, '0', 0, '1', '1', 0, '0');
+    -- d's decision offered too, its reader stalled as well: no commit transfers
+    d_rdy := '0';
+    step('0', 0, '0', 0, '1', '1', '0', 0, '1', '1', '0', '0', 0, '0', 0, '1', '1', 0, '0');
+    -- e's reader ready again: both commits in series transfer in this cycle, a round of each domain ends; flag1's zero taken, latch1, full, is reset (its token never shows); both owe the next round's zero
+    d_rdy := '1';
+    e_rdy := '1';
+    step('0', 0, '0', 0, '0', '1', '0', 0, '1', '1', '1', '0', 0, '0', 0, '1', '1', 0, '0');
+    -- the two zeros, taken; latch1 empty and ready
     step('0', 0, '0', 0, '0', '0', '0', 0, '1', '1', '1', '1', 0, '0', 0, '1', '1', 0, '1');
     step('0', 0, '0', 0, '0', '0', '0', 0, '1', '1', '1', '0', 0, '0', 0, '1', '0', 0, '1');
     report "kill domain: " & integer'image(cycle) & " cycles as expected";

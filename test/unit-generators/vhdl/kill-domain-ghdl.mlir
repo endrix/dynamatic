@@ -24,9 +24,12 @@
 // owed zero, survives `d`'s commit and is reset by `e`'s; domain 0's slot,
 // full behind its stand-in's owed zero, is reset by `e`'s commit too (the OR).
 // The two decisions never come in one cycle: the bench observes it (the
-// domain's promise).
+// domain's promise), and so does each stand-in's simulation assertion (no two
+// of its kills in one cycle). Then the decisions' readers stall: while e's
+// reader is not ready neither of its two commits in series transfers, and in
+// the cycle it is ready again both do, ending a round of both domains.
 
-// CHECK: kill domain: 39 cycles as expected
+// CHECK: kill domain: 46 cycles as expected
 // CHECK-NOT: failure
 
 handshake.func @kd(%a: !handshake.channel<i2>, %b: !handshake.channel<i2>, %d: !handshake.channel<i1>,

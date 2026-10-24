@@ -2941,9 +2941,11 @@ static void insertIIMonitors(hw::HWModuleOp hwModOp,
 /// A domain may have several commits (`wireKillDomains` ORs their kills),
 /// and has at least one: a unit of a domain no commit names has no reset to
 /// take. A commit's domain has a unit or a stand-in, or its kill would reset
-/// nothing. A stand-in's kills are commits' kills, of one domain: the one its
-/// producer is in. That the commits of one domain never end two rounds in one
-/// cycle is the producer's promise too.
+/// nothing. A stand-in takes the kills of all the commits of one domain, the
+/// one its producer is in: a commit it left out would reset the producer
+/// with no zero owed. That the rounds of a domain never overlap -- a round of
+/// the domain starts only after the previous commit of the domain has
+/// transferred -- is the producer's promise too (`handshake.commit`).
 static LogicalResult closeKillDomains(handshake::FuncOp funcOp) {
   auto domainOf = [](Operation *op) -> std::optional<uint64_t> {
     if (auto attr = op->getAttrOfType<IntegerAttr>(handshake::KILL_DOMAIN_ATTR))
@@ -3064,11 +3066,51 @@ static LogicalResult closeKillDomains(handshake::FuncOp funcOp) {
   if (marks.wasInterrupted())
     return failure();
 
+  // Each domain's commits, in the function's order: a stand-in of the domain
+  // takes the kill of every one of them.
+  llvm::MapVector<uint64_t, SmallVector<handshake::CommitOp>> commitsOf;
+  funcOp.walk([&](handshake::CommitOp commit) {
+    commitsOf[commit.getDomain()].push_back(commit);
+  });
+
+  // A decision stops a domain through ONE commit. Commits in series on one
+  // channel are wires that see one transfer: two of one domain there end one
+  // round with two kills, the second redundant, and a stand-in on both would
+  // see two kills high in a cycle that ends one round.
+  WalkResult series =
+      funcOp.walk([&](handshake::CommitOp commit) -> WalkResult {
+        llvm::SmallPtrSet<Operation *, 4> seen;
+        for (auto prev = commit.getIns().getDefiningOp<handshake::CommitOp>();
+             prev && seen.insert(prev).second;
+             prev = prev.getIns().getDefiningOp<handshake::CommitOp>()) {
+          if (prev.getDomain() != commit.getDomain())
+            continue;
+          InFlightDiagnostic diag =
+              commit.emitError()
+              << "is a commit of kill domain " << commit.getDomain()
+              << " in series after another commit of it: the two see one "
+                 "transfer and end one round, so one of them is all the "
+                 "decision needs";
+          diag.attachNote(prev.getLoc())
+              << "the commit of kill domain " << commit.getDomain()
+              << " before it on the channel";
+          return diag;
+        }
+        return WalkResult::advance();
+      });
+  if (series.wasInterrupted())
+    return failure();
+
   // A stand-in answers for the domain whose commits' kills it takes: every
-  // kill a commit's, the commits of one domain (some or all of its commits).
+  // kill a commit's, the commits of one domain, each once, and every commit
+  // of that domain. A commit whose kill it does not take resets its producer
+  // and owes nothing here, so the round that commit ends gets no token from
+  // it.
   WalkResult kills =
       funcOp.walk([&](handshake::StandInOp standIn) -> WalkResult {
         std::optional<uint64_t> first;
+        // Each commit whose kill it takes, and the index it takes it at.
+        llvm::SmallDenseMap<Operation *, unsigned, 4> taken;
         for (auto [idx, kill] : llvm::enumerate(standIn.getKills())) {
           auto commit = kill.getDefiningOp<handshake::CommitOp>();
           if (!commit)
@@ -3083,8 +3125,34 @@ static LogicalResult closeKillDomains(handshake::FuncOp funcOp) {
                    << idx << " is kill domain " << commit.getDomain()
                    << "'s: a stand-in answers for one domain, its producer's";
           first = commit.getDomain();
+          auto [at, fresh] = taken.try_emplace(commit, idx);
+          if (!fresh)
+            return standIn.emitError()
+                   << "stands in for kill domain " << *first
+                   << " and takes one commit's kill twice (#" << at->second
+                   << " and #" << idx
+                   << "): a commit's transfer ends one round, so a stand-in "
+                      "takes each kill once";
         }
-        return WalkResult::advance();
+        // (At least one kill: the op's verifier.)
+        assert(first && "a stand-in with no kill");
+        const SmallVector<handshake::CommitOp> &all = commitsOf[*first];
+        if (taken.size() == all.size())
+          return WalkResult::advance();
+        InFlightDiagnostic diag =
+            standIn.emitError()
+            << "stands in for kill domain " << *first << " and takes the kills "
+            << "of " << taken.size() << " of its " << all.size()
+            << " commits: the transfer of one it does not take resets its "
+               "producer with no zero owed here, and the round's reader waits "
+               "for ever; a stand-in takes the kill of every commit of its "
+               "domain";
+        for (handshake::CommitOp commit : all)
+          if (!taken.contains(commit))
+            diag.attachNote(commit.getLoc())
+                << "a commit of kill domain " << *first
+                << " whose kill the stand-in does not take";
+        return diag;
       });
   if (kills.wasInterrupted())
     return failure();

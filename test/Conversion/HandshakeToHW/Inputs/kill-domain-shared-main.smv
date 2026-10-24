@@ -9,8 +9,13 @@
 -- ready, is still there. And the shared stand-in, on both kills, offers a
 -- zero the cycle after either commit ended a round in which its producer's
 -- token had not passed (SI4 of phase 3b, at the unit's ports: the observer
--- counts the rounds and the tokens itself). No property needs the domain's
--- promise (its two commits never in one cycle): it is not assumed.
+-- counts the rounds and the tokens itself). The shared domain's load takes
+-- the OR as its kill too: the step after either commit it drops every word it
+-- owed, and offers none into the domain. Each pair of commits in series sees
+-- one transfer under any stall of the decision's reader (the readies are
+-- free). kill_or's `many` is two or more of the domain's commits in one
+-- cycle. No property needs the domain's promise (its rounds never overlap):
+-- it is not assumed.
 MODULE main
   VAR
   a0 : boolean;
@@ -47,6 +52,7 @@ MODULE main
   held1 : boolean;
   sent2 : boolean;
   owed2 : boolean;
+  load_owed : unsigned word [2];
   DEFINE
   -- domain 2's kill as the specification has it: either of its commits
   k2 := u.commit1.kill | u.commit3.kill;
@@ -70,6 +76,10 @@ MODULE main
   next(sent2) := k2 ? FALSE : (sent2 | x2);
   init(owed2) := FALSE;
   next(owed2) := k2 & !(sent2 | x2);
+  -- the words the load owes at the end of this cycle (addresses taken less
+  -- words passed on)
+  init(load_owed) := 0ud2_0;
+  next(load_owed) := u.load0.owed_next;
   INVARSPEC NAME domain2_reset_by_state0 := was_k2a -> domain2_empty
   INVARSPEC NAME domain2_reset_by_state1 := was_k2b -> domain2_empty
   INVARSPEC NAME domain0_reset := was_k0 -> !u.buffer0.full
@@ -77,3 +87,9 @@ MODULE main
   INVARSPEC NAME domain0_kept := (was_k1 & !was_k0 & held0) -> u.buffer0.full
   INVARSPEC NAME domain1_kept := (was_k0 & !was_k1 & held1) -> u.buffer1.full
   INVARSPEC NAME shared_zero_next := owed2 -> (u.stand_in2.outs_valid & u.stand_in2.outs = FALSE)
+  INVARSPEC NAME load_drops_by_state0 := was_k2a -> u.load0.drop = load_owed
+  INVARSPEC NAME load_drops_by_state1 := was_k2b -> u.load0.drop = load_owed
+  INVARSPEC NAME no_word_after_kill := (was_k2a | was_k2b) -> !u.load0.dataOut_valid
+  INVARSPEC NAME series_state0 := u.commit0.kill <-> u.commit1.kill
+  INVARSPEC NAME series_state1 := u.commit2.kill <-> u.commit3.kill
+  INVARSPEC NAME many_is_both := u.kill_domain2.many <-> (u.commit1.kill & u.commit3.kill)

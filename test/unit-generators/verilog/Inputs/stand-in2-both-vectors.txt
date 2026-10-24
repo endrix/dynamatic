@@ -1,0 +1,17 @@
+# handshake.stand_in with two kills (SIZE = 2), 2-bit payload, and the
+# domain's promise broken: its two kills high in one cycle outside reset (two
+# commits of the domain transferred together, its rounds overlapping). The
+# unit asserts the promise in simulation, and the run must stop at that cycle
+# (the line before last), the earlier lines passing: both kills high under
+# reset (each commit's kill has the reset in it), then one kill and then the
+# other, each a round of its own, then a token passed. Columns as in
+# stand-in2-vectors.txt: rst, ins_valid, ins, kill_0, kill_1, outs_ready, then
+# the expected outs_valid, outs and ins_ready.
+1 0 0 1 1 1 0 0 1
+0 0 0 1 0 1 0 0 1
+0 0 0 0 0 1 1 0 0
+0 0 0 0 1 1 0 0 1
+0 0 0 0 0 1 1 0 0
+0 1 3 0 0 1 1 3 1
+0 0 0 1 1 1 0 0 1
+0 0 0 0 0 1 0 0 1

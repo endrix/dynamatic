@@ -6,10 +6,15 @@ def generate_stand_in(name, params):
     until taken; `ins` waits meanwhile. Two flip-flops: `sent` (this round's
     token has passed) and `owe`.
 
-    `kill` has `size` bits, one a commit (a domain may have several): any of
-    them high ends ONE round, the unit otherwise the same whatever their
-    number. The commits of a domain never end two rounds in one cycle (the
-    decisions they sit on are exclusive in time): the producer's promise.
+    `kill` has `size` bits, the kills of all the commits of the producer's
+    domain (a domain may have several): any of them high ends ONE round, the
+    unit otherwise the same whatever their number. The rounds of a domain
+    never overlap -- a round of the domain starts only after the previous
+    commit of the domain has transferred -- so at most one bit is high in a
+    cycle, and it ends the round this unit is in. (Were state B's round to
+    start before state A's commit transferred, A's kill would wipe it with
+    A's round, and B's reader would wait for ever for this unit's token.) The
+    producer's promise, asserted in simulation with the precondition.
 
     The zero is registered: offered in the kill cycle, `outs_valid` would
     depend on the decision's transfer, and the transfer on the readies of the
@@ -24,7 +29,8 @@ def generate_stand_in(name, params):
     reader must take a token the cycle it arrives, with nothing between that
     can hold it back (an eager fork whose other reader stalls, a join). A
     process between `pragma translate_off` and `translate_on` asserts it in
-    simulation (severity failure); synthesis skips it.
+    simulation (severity failure), and the domain's promise (no two kills
+    high in one cycle outside reset); synthesis skips both.
     """
     bitwidth = params["bitwidth"]
     size = params["size"]
@@ -105,16 +111,30 @@ begin
   end process;
 
   -- The precondition, in simulation only: a round ends only when no token
-  -- waits at `outs`, neither the zero owed nor the producer's own.
+  -- waits at `outs`, neither the zero owed nor the producer's own. And the
+  -- domain's promise: its rounds never overlap, so no two of its commits
+  -- transfer in one cycle (under reset every commit's kill is high).
   -- pragma translate_off
   process (clk) is
+    variable kills_high : integer;
   begin
-    if rising_edge(clk) and rst = '0' and kill_any = '1' and outs_ready = '0' then
-      assert owe = '0'
-        report "stand_in: a round ended (kill) while the zero it owes was offered and not taken"
-        severity failure;
-      assert ins_valid = '0'
-        report "stand_in: a round ended (kill) while the producer's token was offered and not taken"
+    if rising_edge(clk) and rst = '0' then
+      if kill_any = '1' and outs_ready = '0' then
+        assert owe = '0'
+          report "stand_in: a round ended (kill) while the zero it owes was offered and not taken"
+          severity failure;
+        assert ins_valid = '0'
+          report "stand_in: a round ended (kill) while the producer's token was offered and not taken"
+          severity failure;
+      end if;
+      kills_high := 0;
+      for i in kill'range loop
+        if kill(i) = '1' then
+          kills_high := kills_high + 1;
+        end if;
+      end loop;
+      assert kills_high <= 1
+        report "stand_in: two commits of its kill domain transferred in one cycle (the domain's rounds overlap)"
         severity failure;
     end if;
   end process;

@@ -14,11 +14,15 @@ a token of the unit is offered and not taken (the units it feeds absorb a late
 token the cycle it comes, so the round's decision cannot pass meanwhile).
 
 With --kills N the unit takes N kills, the commits of one domain: each
-commit's transfer ends a round of its own, and the environment keeps the
-domain's promise that two of them never come in one cycle (the decisions they
-sit on are exclusive in time). --no-exclusive drops that promise: two kills in
-one cycle then end two rounds, the unit owes one zero for them, and `one`
-fails -- the promise is what the unit's two bits rest on.
+commit's transfer ends a round of its own (`ended` counts the kills high in a
+cycle), and the environment keeps the domain's promise that two of them never
+come in one cycle (its rounds never overlap: a round of the domain starts
+only after the previous commit of the domain has transferred). The lowering
+makes "a kill a round" literal: a stand-in takes the kill of every commit of
+its domain, each once, and two commits of one domain are never in series on a
+channel (both see one transfer, one round). --no-exclusive drops the promise:
+two kills in one cycle then end two rounds, the unit owes one zero for them,
+and `one` fails -- the promise is what the unit's two bits rest on.
 
 Usage:
     python3 verify-stand-in.py [--bitwidth W] [--kills N] [--no-exclusive]

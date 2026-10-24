@@ -6,13 +6,17 @@ use ieee.numeric_std.all;
 -- is `ins` while the producer answers; a kill ends the round, and if its token
 -- has not passed one zero is owed, offered from the next cycle until taken,
 -- `ins` waiting meanwhile. Two flip-flops, `sent` and `owe`. `kill` has SIZE
--- bits, one a commit (a domain may have several): any of them high ends ONE
--- round; the commits of a domain never end two rounds in one cycle (the
--- decisions they sit on are exclusive in time), the producer's promise. The
--- zero is
--- registered: offered in the kill cycle, `outs_valid` would depend on the
--- decision's transfer, and that on the readies of the units this channel
--- feeds, a combinational loop. The same circuit as the generator's
+-- bits, the kills of all the commits of the producer's domain (a domain may
+-- have several): any of them high ends ONE round. The rounds of a domain never
+-- overlap -- a round of the domain starts only after the previous commit of
+-- the domain has transferred -- so at most one bit is high in a cycle, and it
+-- ends the round this unit is in. (Were state B's round to start before state
+-- A's commit transferred, A's kill would wipe it with A's round, and B's
+-- reader would wait for ever for this unit's token.) The producer's promise,
+-- asserted in simulation below. The zero is registered: offered in the kill
+-- cycle, `outs_valid` would depend on the decision's transfer, and that on the
+-- readies of the units this channel feeds, a combinational loop. The same
+-- circuit as the generator's
 -- (tools/unit-generators/vhdl/generators/handshake/stand_in.py), with the
 -- width and the number of kills lifted into generics.
 --
@@ -24,8 +28,9 @@ use ieee.numeric_std.all;
 -- before it transfers. So the stand-in's one reader must take a token the
 -- cycle it arrives, with nothing between that can hold it back (an eager fork
 -- whose other reader stalls, a join). Asserted in simulation (severity
--- failure, between `pragma translate_off` and `translate_on`); synthesis
--- skips it.
+-- failure, between `pragma translate_off` and `translate_on`), with the
+-- domain's promise (no two kills high in one cycle outside reset); synthesis
+-- skips both.
 entity stand_in is
   generic (
     SIZE      : integer;
@@ -82,16 +87,30 @@ begin
   end process;
 
   -- The precondition, in simulation only: a round ends only when no token
-  -- waits at `outs`, neither the zero owed nor the producer's own.
+  -- waits at `outs`, neither the zero owed nor the producer's own. And the
+  -- domain's promise: its rounds never overlap, so no two of its commits
+  -- transfer in one cycle (under reset every commit's kill is high).
   -- pragma translate_off
   process (clk) is
+    variable kills_high : integer;
   begin
-    if rising_edge(clk) and rst = '0' and kill_any = '1' and outs_ready = '0' then
-      assert owe = '0'
-        report "stand_in: a round ended (kill) while the zero it owes was offered and not taken"
-        severity failure;
-      assert ins_valid = '0'
-        report "stand_in: a round ended (kill) while the producer's token was offered and not taken"
+    if rising_edge(clk) and rst = '0' then
+      if kill_any = '1' and outs_ready = '0' then
+        assert owe = '0'
+          report "stand_in: a round ended (kill) while the zero it owes was offered and not taken"
+          severity failure;
+        assert ins_valid = '0'
+          report "stand_in: a round ended (kill) while the producer's token was offered and not taken"
+          severity failure;
+      end if;
+      kills_high := 0;
+      for i in kill'range loop
+        if kill(i) = '1' then
+          kills_high := kills_high + 1;
+        end if;
+      end loop;
+      assert kills_high <= 1
+        report "stand_in: two commits of its kill domain transferred in one cycle (the domain's rounds overlap)"
         severity failure;
     end if;
   end process;

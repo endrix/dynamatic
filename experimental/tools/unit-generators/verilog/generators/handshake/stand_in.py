@@ -4,10 +4,16 @@ def generate_stand_in(name, params):
     its token has not passed one zero is owed, offered from the next cycle
     until taken, `ins` waiting meanwhile. Two flip-flops, `sent` and `owe`.
 
-    `kill` has `size` bits, one a commit (a domain may have several): any of
-    them high ends ONE round, the unit otherwise the same whatever their
-    number. The commits of a domain never end two rounds in one cycle (the
-    decisions they sit on are exclusive in time): the producer's promise.
+    `kill` has `size` bits, the kills of all the commits of the producer's
+    domain (a domain may have several): any of them high ends ONE round, the
+    unit otherwise the same whatever their number. The rounds of a domain
+    never overlap -- a round of the domain starts only after the previous
+    commit of the domain has transferred -- so at most one bit is high in a
+    cycle, and it ends the round this unit is in. (Were state B's round to
+    start before state A's commit transferred, A's kill would wipe it with
+    A's round, and B's reader would wait for ever for this unit's token.) The
+    producer's promise, asserted in simulation ($fatal under `ifndef
+    SYNTHESIS`).
 
     The precondition: no kill while a token is offered at `outs` and not
     taken. A kill while the zero is owed and not taken would owe a second
@@ -95,4 +101,14 @@ def stand_in_body(w):
         $fatal(1, "stand_in %m: a round ended (kill) while the producer's token was offered and not taken");
     end
   // synthesis translate_on
+
+  // The domain's promise, in simulation only: its rounds never overlap, so no
+  // two of its commits transfer in one cycle (under reset every commit's kill
+  // is high). `kill & (kill - 1)` is `kill` less its lowest bit set: not zero
+  // when two or more are.
+`ifndef SYNTHESIS
+  always @(posedge clk)
+    if (!rst && (kill & (kill - 1'b1)) != 0)
+      $fatal(1, "stand_in %m: two commits of its kill domain transferred in one cycle (the domain's rounds overlap)");
+`endif
 """

@@ -776,18 +776,35 @@ def CommitOp : Handshake_Op<"commit", [
     their kills -- one gate, which the lowering adds -- so its units reset at
     the transfer of any of them. The OR is one kill: a cycle in which any of
     the domain's commits transfers ends one round of its units and of the
-    stand-ins on those kills. So the decisions a domain's commits sit on must
-    be exclusive in time, never two rounds ended in one cycle; the circuit's
-    producer guarantees it (an actor's states are exclusive: its one token is
-    in one of them) and the lowering does not check it. Every unit's domain
-    has a commit, and every commit's domain has a unit or a stand-in: the
-    lowering refuses the others.
+    stand-ins on those kills, and takes back whatever the units hold.
+
+    So the rounds of a domain never overlap: a round of the domain starts (a
+    token enters one of its units: a start, a latched argument, an address)
+    only after the previous commit of the domain has transferred. Then no two
+    of its commits transfer in one cycle, and a kill takes back only the work
+    of the round it ends. Decisions merely exclusive in time are not enough.
+    If state B's start enters the domain before state A's commit has
+    transferred, A's kill wipes it with A's round; the stand-in ends one
+    round, A's, and B's decision waits for ever for the domain's token. The
+    circuit's producer keeps the promise (an actor's states are exclusive,
+    and a sharing state's permit into the domain waits until the commit that
+    ends the domain's previous round, whichever it is, has transferred). The
+    lowering does not check it. The stand-in's VHDL and Verilog assert in
+    simulation that no two of its kills are high in one cycle, and the SMV
+    `kill_or` defines `many` (two or more of its inputs high) for an
+    observer to state it.
+
+    Every unit's domain has a commit, and every commit's domain has a unit or
+    a stand-in: the lowering refuses the others.
 
     A commit names ONE domain. A decision that stops two domains goes through
     two commits in series, the second's `ins` the first's `outs`: a commit is
     a wire, so the two see the same transfer in the same cycle, each its kill
-    at its own output, and stop their domains together. (Two commits of one
-    domain in series are redundant, not wrong: they transfer together.)
+    at its own output, and stop their domains together. Two commits of one
+    domain in series (directly or with other commits between) are refused:
+    they see one transfer and end one round, so the second is redundant, and
+    a stand-in on both would see two kills high in a cycle that ends one
+    round.
 
     `kill` is a raw wire, as an `unbundle`'s signals are: no token, nothing
     waits for it.
@@ -856,17 +873,21 @@ def StandInOp : Handshake_Op<"stand_in", [
     downstream receive exactly one token a round whether the producer
     answered or was stopped (`commit`).
 
-    `kills` are the kills of the commits whose rounds the producer answers
-    in, at least one, all commits of one domain, the producer's (a domain
-    may have several, `commit`). They are OR'd inside: a cycle in which any
-    of them is high ends ONE round, and the unit is otherwise the same
-    whatever their number. That is why the commits of a domain must never
-    end two rounds in one cycle. The kills may be some of the domain's
-    commits only, those that end rounds this stand-in answers for (a domain
-    spanning the rounds of several decisions); another commit of the domain
-    then resets the producer and owes nothing here, which is right only when
-    no round of this stand-in was open: the producer's promise, as is the
-    exclusivity.
+    `kills` are the kills of the commits of one domain, the producer's (a
+    domain may have several, `commit`), and the stand-in takes all of its
+    domain's commits, each once. The lowering refuses one that leaves a
+    commit out -- that commit's transfer would reset the producer with no
+    zero owed here, and the reader of the round it ends would wait for ever
+    -- and one that takes a kill twice (two bits high for one round). They
+    are OR'd inside: a cycle in which any of them is high ends ONE round, and
+    the unit is otherwise the same whatever their number. That is sound
+    because the rounds of a domain never overlap (`commit`): a round of the
+    domain starts only after the previous commit of the domain has
+    transferred, so at most one of the kills is high in a cycle and it ends
+    the round this stand-in is in. (A round started before the previous
+    commit transferred is wiped by that commit's kill, and its reader waits
+    for ever for this unit's token.) The VHDL and Verilog forms assert in
+    simulation that no two kills are high in one cycle outside reset.
 
     Two bits: the round's token has passed (a kill ends the round), a zero
     is owed. The zero is registered because a zero offered in the kill cycle

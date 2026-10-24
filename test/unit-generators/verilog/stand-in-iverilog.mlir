@@ -13,6 +13,10 @@
 // RUN: cd %t/gen2 && vvp -N sim 2>&1 | FileCheck %s --check-prefix=TWO
 // RUN: iverilog -g2012 -o %t/static2/sim %dynamatic_src_root/data/verilog/handshake/stand_in.v %S/Inputs/stand-in2-static-dut.v %S/Inputs/stand-in2-tb.v
 // RUN: cd %t/static2 && vvp -N sim 2>&1 | FileCheck %s --check-prefix=TWO
+// RUN: mkdir -p %t/gen2-both %t/static2-both
+// RUN: cp %S/Inputs/stand-in2-both-vectors.txt %t/gen2-both/stand-in2-vectors.txt && cp %S/Inputs/stand-in2-both-vectors.txt %t/static2-both/stand-in2-vectors.txt
+// RUN: cd %t/gen2-both && not vvp -N ../gen2/sim 2>&1 | FileCheck %s --check-prefix=PROMISE
+// RUN: cd %t/static2-both && not vvp -N ../static2/sim 2>&1 | FileCheck %s --check-prefix=PROMISE
 
 // handshake.stand_in simulated in Verilog, the verilog-beta generator's output
 // and the static module the Verilog configuration emits, against the VHDL's
@@ -29,6 +33,11 @@
 // domain 0's stand-in in the kill-domain bench, then random rounds ended by
 // either kill, never both in one cycle (the domain's promise). Either kill
 // ends the round as the one kill did.
+//
+// Then the promise broken (Inputs/stand-in2-both-vectors.txt): both kills
+// high in one cycle outside reset. The unit's simulation assertion ($fatal)
+// stops the run at that cycle (85 ns), and not before, at the reset with both
+// kills high.
 
 // CHECK: stand_in: 319 cycles as expected
 // CHECK-NOT: failure
@@ -39,3 +48,7 @@
 // TWO-NOT: failure
 // TWO-NOT: MISMATCH
 // TWO-NOT: FATAL
+
+// PROMISE: FATAL: {{.*}}two commits of its kill domain transferred in one cycle (the domain's rounds overlap)
+// PROMISE-NEXT: Time: 85000
+// PROMISE-NOT: cycles as expected

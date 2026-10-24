@@ -7,6 +7,12 @@ def generate_kill_or(name, params):
     domain's units as their reset (their KILL_RESET models take it as their
     last parameter). `size` inputs, `ins_0` ..., one output, `outs`;
     combinational. Not a Handshake unit: the lowering's own.
+
+    `many` is no output but an observer's handle on the domain's promise: two
+    or more of its commits transfer in this cycle. The rounds of a domain
+    never overlap (`handshake.commit`), so a model of the circuit's producer
+    can state `INVARSPEC !<domain's kill_or>.many`; the unit itself is the
+    same whatever it is.
     """
     size = params[ATTR_SIZE]
     if size < 2:
@@ -19,4 +25,7 @@ MODULE {name}({", ".join(ins)})
   -- output
   DEFINE
   outs := {" | ".join(ins)};
+  -- (an observer's: two or more of the domain's commits in this cycle, which
+  -- the domain's promise excludes)
+  many := count({", ".join(ins)}) > 1;
 """

@@ -8,11 +8,17 @@ def generate_stand_in(name, params):
     owed: offered from the cycle after the kill until taken, `ins` waiting
     meanwhile).
 
-    `size` kills, `kill_0` ..., one a commit (a domain may have several): any
-    of them high ends ONE round, `kill` their OR, the model otherwise the same
-    whatever their number. The commits of a domain never end two rounds in one
-    cycle (the decisions they sit on are exclusive in time): the producer's
-    promise, which an observer states as an assumption (verify-stand-in.py).
+    `size` kills, `kill_0` ..., the kills of all the commits of the
+    producer's domain (a domain may have several): any of them high ends ONE
+    round, `kill` their OR, the model otherwise the same whatever their
+    number. The rounds of a domain never overlap -- a round of the domain
+    starts only after the previous commit of the domain has transferred -- so
+    at most one kill is high in a cycle, and it ends the round this unit is
+    in. (Were state B's round to start before state A's commit transferred,
+    A's kill would wipe it with A's round, and B's reader would wait for ever
+    for this unit's token.) The producer's promise, which an observer states
+    as an assumption (verify-stand-in.py) or checks (`many` of the domain's
+    `kill_or`).
     """
     data_type = SmvScalarType(params[ATTR_BITWIDTH])
     size = params[ATTR_SIZE]
