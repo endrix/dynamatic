@@ -62,7 +62,7 @@ llvm_config.with_environment("PATH", config.llvm_tools_dir, append_path=True)
 
 tool_dirs = [config.dynamatic_tools_dir,
              config.mlir_tools_dir, config.llvm_tools_dir]
-tools = ["dynamatic-opt", "export-dot", "hls-fuzzer", "hls-fuzzer-check-bitwidth",
+tools = ["dynamatic-opt", "export-dot", "export-rtl", "hls-fuzzer", "hls-fuzzer-check-bitwidth",
          ToolSubst("%source-rewriter",
                    command=f"cp %s %t.c && {config.dynamatic_tools_dir}/source-rewriter %t.c --"),
          ToolSubst("%export-vhdl",

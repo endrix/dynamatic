@@ -11,8 +11,9 @@
 // hi decides alone the cycle it arrives, a late lo is absorbed, lo is held
 // until a zero hi answers it, a non-zero hi beats a lo that came first, a
 // stalled answer is kept, one round a cycle back to back, a zero hi and lo in
-// one cycle under a stall, the next round's hi refused while the round is
-// open. The same rounds drive the Verilog in ../verilog/priority-iverilog.mlir.
+// one cycle under a stall, the next round's hi refused while the round is open
+// and taken in the cycle it closes, the next round's hi taken and answered in
+// the cycle a late lo closes the round. The same rounds drive the Verilog in ../verilog/priority-iverilog.mlir.
 
-// CHECK: priority: 39 cycles as expected
+// CHECK: priority: 44 cycles as expected
 // CHECK-NOT: failure

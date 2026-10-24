@@ -678,6 +678,28 @@
     "generic": "$DYNAMATIC/data/vhdl/handshake/priority.vhd"
   },
   {
+    "name": "handshake.commit",
+    "parameters": [
+      { "name": "DATA_TYPE", "type": "dataflow", "data-eq": 0, "extra-eq": 0, "generic": false }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/dataless/commit.vhd",
+    "module-name": "commit_dataless"
+  },
+  {
+    "name": "handshake.commit",
+    "parameters": [
+      { "name": "DATA_TYPE", "type": "dataflow", "data-lb": 1, "extra-eq": 0 }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/commit.vhd"
+  },
+  {
+    "name": "handshake.stand_in",
+    "parameters": [
+      { "name": "DATA_TYPE", "type": "dataflow", "data-lb": 1, "extra-eq": 0 }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/stand_in.vhd"
+  },
+  {
     "name": "handshake.merge",
     "parameters": [
       { "name": "SIZE", "type": "unsigned", "lb": 1 },
@@ -746,6 +768,16 @@
       }
     ],
     "generator": "\"$DYNAMATIC/bin/generators/rtl-text-generator\" \"$DYNAMATIC/data/vhdl/handshake/constant.vhd\" \"$OUTPUT_DIR/$MODULE_NAME.vhd\" ENTITY_NAME $MODULE_NAME VALUE $VALUE"
+  },
+  {
+    "name": "handshake.load",
+    "parameters": [
+      { "name": "DATA_TYPE", "type": "dataflow", "data-lb": 1, "extra-eq": 0 },
+      { "name": "ADDR_TYPE", "type": "dataflow", "data-lb": 1, "extra-eq": 0 },
+      { "name": "KILL_DROP", "type": "unsigned", "eq": 1, "generic": false }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/load_kill_drop.vhd",
+    "dependencies": ["tehb"]
   },
   {
     "name": "handshake.load",

@@ -12,10 +12,147 @@ def generate_load(name, params):
     data_bitwidth = params["data_bitwidth"]
     extra_signals = params.get("extra_signals", None)
 
+    if params.get("kill_drop", 0):
+        if extra_signals:
+            raise ValueError(
+                "a load that drops on a kill carries no extra signals: its "
+                "words are counted, not tagged")
+        return _generate_load_kill_drop(name, data_bitwidth, addr_bitwidth)
     if extra_signals:
         return _generate_load_signal_manager(name, data_bitwidth, addr_bitwidth, extra_signals)
     else:
         return _generate_load(name, data_bitwidth, addr_bitwidth)
+
+
+def _generate_load_kill_drop(name, data_bitwidth, addr_bitwidth):
+    """A load whose requester a commit can stop (`handshake.kill_domain`).
+
+    The memory controller cannot forget a granted read -- it holds the word,
+    valid, until the load takes it -- and an address in the load's own slot
+    will be granted in its turn: neither can be withdrawn without breaking
+    the protocol. So the load is not reset with the units it serves. It
+    counts the words it owes them (addresses accepted, less words passed on)
+    and, on `kill`, every word owed after that cycle is a dead evaluation's:
+    `drop` of them are taken from the controller and thrown away, nothing
+    offered to the (reset) requester meanwhile. Words come back in the order
+    their addresses went, so the dropped ones are the first. At most three
+    are owed: the address slot, the controller's word register for this
+    port, the data slot -- two bits.
+    """
+    addr_one_slot_break_r_name = f"{name}_addr_one_slot_break_r"
+    data_one_slot_break_r_name = f"{name}_data_one_slot_break_r"
+
+    dependencies = \
+        generate_one_slot_break_r(addr_one_slot_break_r_name, {"bitwidth": addr_bitwidth}) + \
+        generate_one_slot_break_r(data_one_slot_break_r_name, {"bitwidth": data_bitwidth})
+
+    entity = f"""
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
+-- Entity of load (dropping on a kill)
+entity {name} is
+  port (
+    clk : in std_logic;
+    rst : in std_logic;
+    -- address from circuit channel
+    addrIn       : in  std_logic_vector({addr_bitwidth} - 1 downto 0);
+    addrIn_valid : in  std_logic;
+    addrIn_ready : out std_logic;
+    -- address to interface channel
+    addrOut       : out std_logic_vector({addr_bitwidth} - 1 downto 0);
+    addrOut_valid : out std_logic;
+    addrOut_ready : in  std_logic;
+    -- data from interface channel
+    dataFromMem       : in  std_logic_vector({data_bitwidth} - 1 downto 0);
+    dataFromMem_valid : in  std_logic;
+    dataFromMem_ready : out std_logic;
+    -- data from memory channel
+    dataOut       : out std_logic_vector({data_bitwidth} - 1 downto 0);
+    dataOut_valid : out std_logic;
+    dataOut_ready : in  std_logic;
+    -- the requester was stopped: what it is owed is dropped
+    kill : in std_logic
+  );
+end entity;
+"""
+
+    architecture = f"""
+-- Architecture of load (dropping on a kill)
+architecture arch of {name} is
+  signal addr_ready, word_valid, word_ready : std_logic;
+  signal accepted, passed, dropping         : std_logic;
+  signal owed, drop                         : unsigned(1 downto 0);
+begin
+  addr_one_slot_break_r : entity work.{addr_one_slot_break_r_name}(arch)
+    port map(
+      clk => clk,
+      rst => rst,
+      -- input channel
+      ins       => addrIn,
+      ins_valid => addrIn_valid,
+      ins_ready => addr_ready,
+      -- output channel
+      outs       => addrOut,
+      outs_valid => addrOut_valid,
+      outs_ready => addrOut_ready
+    );
+
+  data_one_slot_break_r : entity work.{data_one_slot_break_r_name}(arch)
+    port map(
+      clk => clk,
+      rst => rst,
+      -- input channel
+      ins       => dataFromMem,
+      ins_valid => dataFromMem_valid,
+      ins_ready => dataFromMem_ready,
+      -- output channel
+      outs       => dataOut,
+      outs_valid => word_valid,
+      outs_ready => word_ready
+    );
+
+  addrIn_ready  <= addr_ready;
+  -- A word owed to a stopped evaluation is taken and offered to nobody.
+  dropping      <= '1' when drop /= 0 else '0';
+  dataOut_valid <= word_valid and not dropping;
+  word_ready    <= dataOut_ready or dropping;
+
+  accepted <= addrIn_valid and addr_ready;
+  passed   <= word_valid and word_ready;
+
+  process (clk) is
+    variable owed_next : unsigned(1 downto 0);
+  begin
+    if rising_edge(clk) then
+      if rst = '1' then
+        owed <= (others => '0');
+        drop <= (others => '0');
+      else
+        owed_next := owed;
+        if accepted = '1' then
+          owed_next := owed_next + 1;
+        end if;
+        if passed = '1' then
+          owed_next := owed_next - 1;
+        end if;
+        owed <= owed_next;
+        -- Everything still owed after the kill cycle is the dead
+        -- evaluation's: an address accepted in it included, a word passed on
+        -- in it not.
+        if kill = '1' then
+          drop <= owed_next;
+        elsif dropping = '1' and passed = '1' then
+          drop <= drop - 1;
+        end if;
+      end if;
+    end if;
+  end process;
+end architecture;
+"""
+
+    return dependencies + entity + architecture
 
 
 def _generate_load(name, data_bitwidth, addr_bitwidth):

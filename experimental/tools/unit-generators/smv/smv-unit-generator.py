@@ -2,6 +2,7 @@ import argparse
 import sys
 import ast
 from generators.support.utils import *
+from generators.support.kill_reset import add_reset
 
 import generators.handshake.br as br
 import generators.handshake.buffer as buffer
@@ -11,6 +12,8 @@ import generators.handshake.control_merge as control_merge
 import generators.handshake.join as join
 import generators.handshake.first as first
 import generators.handshake.priority as priority
+import generators.handshake.commit as commit
+import generators.handshake.stand_in as stand_in
 import generators.handshake.fork as fork
 import generators.handshake.lazy_fork as lazy_fork
 import generators.handshake.load as load
@@ -75,6 +78,10 @@ def generate_code(name, mod_type, parameters):
             return first.generate_first(name, parameters)
         case "priority":
             return priority.generate_priority(name, parameters)
+        case "commit":
+            return commit.generate_commit(name, parameters)
+        case "stand_in":
+            return stand_in.generate_stand_in(name, parameters)
         case "fork":
             return fork.generate_fork(name, parameters)
         case "lazy_fork":
@@ -213,8 +220,13 @@ def main():
     # Printing parameters for diagnostic purposes
     header = f"-- {args.name} : {args.type}({args.parameters})\n\n"
 
+    code = generate_code(args.name, args.type, parameters)
+    # A unit a commit stops (KILL_RESET): the same model, reset by `rst`.
+    if parameters.get("kill_reset", 0):
+        code = add_reset(code)
+
     with open(args.output, "w") as file:
-        print(header + generate_code(args.name, args.type, parameters), file=file)
+        print(header + code, file=file)
 
 
 if __name__ == "__main__":

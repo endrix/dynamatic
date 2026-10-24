@@ -1617,6 +1617,47 @@
     "hdl": "verilog"
   },
   {
+    "name": "handshake.commit",
+    "parameters": [
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-eq": 0,
+        "extra-eq": 0,
+        "generic": false
+      }
+    ],
+    "generic": "$DYNAMATIC/data/verilog/handshake/dataless/commit.v",
+    "module-name": "commit_dataless",
+    "hdl": "verilog"
+  },
+  {
+    "name": "handshake.commit",
+    "parameters": [
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      }
+    ],
+    "generic": "$DYNAMATIC/data/verilog/handshake/commit.v",
+    "hdl": "verilog"
+  },
+  {
+    "name": "handshake.stand_in",
+    "parameters": [
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      }
+    ],
+    "generic": "$DYNAMATIC/data/verilog/handshake/stand_in.v",
+    "hdl": "verilog"
+  },
+  {
     "name": "handshake.br",
     "parameters": [
       {
@@ -1701,6 +1742,34 @@
       }
     ],
     "generator": "\"$DYNAMATIC/bin/generators/rtl-constant-generator-verilog\" \"$DYNAMATIC/data/verilog/handshake/constant.v\" \"$OUTPUT_DIR/$MODULE_NAME.v\" $MODULE_NAME $VALUE",
+    "hdl": "verilog"
+  },
+  {
+    "name": "handshake.load",
+    "parameters": [
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      },
+      {
+        "name": "ADDR_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      },
+      {
+        "name": "KILL_DROP",
+        "type": "unsigned",
+        "eq": 1,
+        "generic": false
+      }
+    ],
+    "generic": "$DYNAMATIC/data/verilog/handshake/load_kill_drop.v",
+    "dependencies": [
+      "tehb"
+    ],
     "hdl": "verilog"
   },
   {

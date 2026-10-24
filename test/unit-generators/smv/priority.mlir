@@ -5,14 +5,15 @@
 // export-rtl instantiates the priority with the ports in its order (each
 // input's data then its valid, then the output's ready) and the generator
 // answers with that interface: a non-zero `hi` decides alone, the cycle it
-// arrives; each input is ready while it has not given this round's token.
+// arrives; each input is ready while it has not given this round's token, and
+// again in the cycle the round completes (read from the other input alone).
 
 // CHECK: MODULE handshake_priority_0(hi, hi_valid, lo, lo_valid, outs_ready)
 // CHECK: held : unsigned word [3];
 // CHECK: hi_now_nz := take_hi & (hi != 0ud3_0);
 // CHECK: valid_i := !emitted & hi_here & (hi_nz | lo_here);
-// CHECK: hi_ready := !seen_hi;
-// CHECK: lo_ready := !seen_lo;
+// CHECK: hi_ready := !seen_hi | done_hi;
+// CHECK: lo_ready := !seen_lo | done_lo;
 
 // One bit: the payload is a boolean, compared as one.
 // BIT: held : boolean;

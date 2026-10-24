@@ -44,17 +44,27 @@ module {name}(
   output outs_valid,
   input  outs_ready
 );
+{priority_body(str(bitwidth))}
+endmodule
+"""
 
+
+def priority_body(w):
+    """The module's body, the width as text: a number here, the static
+    module's parameter in data/verilog/handshake/priority_merge.v."""
+    zero = f"{{{w}{{1'b0}}}}"
+    return f"""
   // Round state: which inputs have given their token, whether the answer has
   // been taken, whether a non-zero hi is in, and the answer so far.
   reg seen_hi, seen_lo, emitted, hi_nz_r;
-  reg [{bitwidth} - 1 : 0] held;
+  reg [{w} - 1 : 0] held;
 
   wire take_hi   = hi_valid & ~seen_hi;
   wire take_lo   = lo_valid & ~seen_lo;
   wire hi_here   = seen_hi | take_hi;
   wire lo_here   = seen_lo | take_lo;
-  wire hi_now_nz = take_hi & (hi != {{{bitwidth}{{1'b0}}}});
+  wire hi_is_nz  = (hi != {zero});
+  wire hi_now_nz = take_hi & hi_is_nz;
   wire hi_nz     = hi_nz_r | hi_now_nz;
 
   // hi decides alone when it is non-zero; otherwise lo once it is here.
@@ -62,13 +72,38 @@ module {name}(
   wire fire    = valid_i & outs_ready;
   wire done    = hi_here & lo_here & (emitted | fire);
 
+  // An input that has given its token is ready again the cycle the round
+  // completes, which it reads from the OTHER input alone (its own token is
+  // in): its ready never reads its own valid, and the output's valid never
+  // reads the output's ready. The next round's tokens it takes then; with
+  // the answer out earlier the output is free, and a non-zero hi among them
+  // goes now.
+  wire done_hi  = lo_here & (emitted | ((hi_nz_r | lo_here) & outs_ready));
+  wire done_lo  = hi_here & (emitted | outs_ready);
+  wire again_hi = hi_valid & seen_hi & done_hi;
+  wire again_lo = lo_valid & seen_lo & done_lo;
+  wire again_nz = again_hi & hi_is_nz;
+  wire early    = hi_valid & seen_hi & lo_here & emitted & hi_is_nz;
+
   always @(posedge clk) begin
-    if (rst || done) begin
+    if (rst) begin
       seen_hi <= 1'b0;
       seen_lo <= 1'b0;
       emitted <= 1'b0;
       hi_nz_r <= 1'b0;
-      held    <= {{{bitwidth}{{1'b0}}}};
+      held    <= {zero};
+    end else if (done) begin
+      // The next round, from what it gave in this cycle.
+      seen_hi <= again_hi;
+      seen_lo <= again_lo;
+      hi_nz_r <= again_nz;
+      emitted <= early & outs_ready;
+      if (again_nz)
+        held <= hi;
+      else if (again_lo)
+        held <= lo;
+      else
+        held <= {zero};
     end else begin
       seen_hi <= hi_here;
       seen_lo <= lo_here;
@@ -84,11 +119,9 @@ module {name}(
     end
   end
 
-  // Ready is a function of registers only.
-  assign hi_ready   = ~seen_hi;
-  assign lo_ready   = ~seen_lo;
-  assign outs       = hi_now_nz ? hi : ((hi_nz_r || !take_lo) ? held : lo);
-  assign outs_valid = valid_i;
-
-endmodule
+  // Ready reads the other input's valid and outs_ready.
+  assign hi_ready   = ~seen_hi | done_hi;
+  assign lo_ready   = ~seen_lo | done_lo;
+  assign outs       = (hi_now_nz | early) ? hi : ((hi_nz_r || !take_lo) ? held : lo);
+  assign outs_valid = valid_i | early;
 """

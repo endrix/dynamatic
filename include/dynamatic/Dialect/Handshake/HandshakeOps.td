@@ -615,6 +615,18 @@ def FirstOp : Handshake_Op<"first", [
     in OPERAND order, so a slow input early in that order stalls the whole unit
     even when it carries nothing. `first` waits only for a winner.
 
+    Each input gives one token a round and is then not ready until the round
+    completes -- and is ready again in the cycle it completes, to give the
+    next round's token at once. Whether the round completes this cycle is
+    the other inputs' arrivals and the answer's transfer, so each input's
+    `ready` reads the registers, the OTHER inputs' `valid` and the output's
+    `ready`, as a join's does; never its own `valid`. The valid and the data
+    out are combinational in the inputs (latency zero) and read no `ready`.
+    A unit whose `valid` reads a `ready` (a lazy fork) upstream of two inputs
+    of one `first` therefore closes a combinational loop through it,
+    valid -> ready -> valid, even where the logic masks it: static timing,
+    Verilator and NuSMV all see it.
+
     Example:
 
     ```mlir
@@ -675,11 +687,20 @@ def PriorityOp : Handshake_Op<"priority", [
     always -- declaring a priority is declaring that wait -- and `lo` never
     is when `hi` decides.
 
-    Both inputs' `ready` are functions of registers only, so the unit cannot
-    close a valid -> ready -> valid ring the way a lazy fork can; the valid
-    and the data out are combinational in the inputs (latency zero). A
-    dataless form would decide nothing (the payload is the answer), so the
-    channels carry data and no extra signals.
+    An input that has given its token is ready again in the cycle the round
+    completes, to give the next round's token at once; with the answer out
+    earlier, a non-zero `hi` among those is answered in that same cycle.
+    Whether the round completes this cycle is the other input's arrival and
+    the answer's transfer, so each input's `ready` reads the registers, the
+    OTHER input's `valid` and the output's `ready`, as a join's does; never
+    its own `valid`. The valid and the data out are combinational in the
+    inputs (latency zero) and read no `ready`. A unit whose `valid` reads a
+    `ready` (a lazy fork) upstream of both inputs therefore closes a
+    combinational loop through the unit, valid -> ready -> valid, even where
+    the logic masks it (a lazy fork into `hi` and `lo` makes them arrive
+    together): static timing, Verilator and NuSMV all see it. A dataless
+    form would decide nothing (the payload is the answer), so the channels
+    carry data and no extra signals.
 
     Example:
 
@@ -716,6 +737,159 @@ def PriorityOp : Handshake_Op<"priority", [
       return ::llvm::SmallVector<::mlir::NamedAttribute>{
         {::mlir::StringAttr::get(ctx, "BITWIDTH"),
          ::mlir::TypeAttr::get(getResult().getType())}
+      };
+    }
+  }];
+}
+
+def CommitOp : Handshake_Op<"commit", [
+  Pure,
+  AllTypesMatch<["ins", "outs"]>,
+  NamedIOInterface
+]> {
+  let summary = "a wire that says when its token has passed";
+  let description = [{
+    `outs` is `ins`, unchanged and with no register: valid, data and ready
+    pass straight through, latency zero. `kill` is high the cycle the token
+    transfers -- `ins` valid and `outs` ready -- and while the circuit is
+    under reset.
+
+    It is how a round stops what it no longer needs. Producers racing to a
+    decision (`first`, `priority`) that write no state and push nothing hold
+    nothing anyone outside them can see, so once the decision has gone
+    through the commit, the ones still working can be reset and nobody can
+    tell. Their units carry `handshake.kill_domain`, the commit's `domain`,
+    and the hardware lowering gives each of them `kill` as its reset --
+    synchronous, as every unit's is, so they are idle the cycle after the
+    decision. A `load` with the attribute is not reset (its address side
+    faces a memory controller, which cannot forget a granted request): it
+    drops the words it still owes the units that were, at most three, which
+    only a memory controller on its address bounds. A `stand_in` answers
+    for a stopped producer in the round it was stopped. A unit of a domain
+    holds nothing or is reset synchronously (a reset made by logic glitches);
+    the lowering refuses any other kind in one, and a commit, a stand-in, a
+    store, a memory interface or an end with the attribute.
+
+    `kill` is a raw wire, as an `unbundle`'s signals are: no token, nothing
+    waits for it.
+
+    Inside a domain the kill withdraws tokens, by design: a channel between
+    two units of a domain (the latch to the guard's body, a load's word to
+    the units it serves) may see `valid` fall at the kill edge with no
+    transfer, and its reader, reset in the same edge, never sees it. A
+    protocol monitor that checks every channel (`valid` held until `ready`,
+    a formal property on each channel) must exempt the channels inside a
+    kill domain. The channels out of one -- through a `stand_in`, or as a
+    load's address -- keep the protocol.
+
+    Example:
+
+    ```mlir
+    %decision, %kill = commit %choice {domain = 0 : ui32} : <i3>
+    ```
+  }];
+
+  let arguments = (ins HandshakeType:$ins,
+                       DefaultValuedAttr<UI32Attr, "0">:$domain);
+  let results = (outs HandshakeType:$outs, I1:$kill);
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    $ins attr-dict `:` custom<HandshakeType>(type($outs))
+  }];
+
+  let extraClassDeclaration = [{
+    std::string getOperandName(unsigned idx) {
+      assert(idx < 1 && "index too high");
+      return "ins";
+    }
+    std::string getResultName(unsigned idx) {
+      assert(idx < 2 && "index too high");
+      return idx == 0 ? "outs" : "kill";
+    }
+  }];
+
+  let extraClassDefinition = [{
+    ::mlir::FailureOr<::llvm::SmallVector<::mlir::NamedAttribute>>
+    CommitOp::getRTLParameters() {
+      ::mlir::MLIRContext *ctx = (*this)->getContext();
+      return ::llvm::SmallVector<::mlir::NamedAttribute>{
+        {::mlir::StringAttr::get(ctx, "BITWIDTH"),
+         ::mlir::TypeAttr::get(getOuts().getType())}
+      };
+    }
+  }];
+}
+
+def StandInOp : Handshake_Op<"stand_in", [
+  AllTypesMatch<["ins", "outs"]>,
+  NamedIOInterface
+]> {
+  let summary = "answers zero for a producer a commit stopped";
+  let description = [{
+    `outs` is `ins` while the producer answers. On `kill` (a `commit`'s), if
+    this round's token has not passed, the unit owes one: a zero, offered
+    the NEXT cycle; `ins` passes again once it has been taken. The units
+    downstream receive exactly one token a round whether the producer
+    answered or was stopped (`commit`).
+
+    Two bits: the round's token has passed (`kill` ends the round), a zero
+    is owed. The zero is registered because a zero offered in the kill cycle
+    would make `outs`'s valid depend on the decision's transfer, which
+    depends on the readies of the units this token feeds: a combinational
+    loop. While the zero is owed, `ins` is not ready (its producer has just
+    been reset and offers nothing).
+
+    A decision unit takes the zero for a late loser: a false flag reaching
+    a `first` of negated flags, a `priority` or a `select` after the answer
+    is absorbed like any late token, and changes nothing. The payload is an
+    integer, so that there is a zero; no extra signals.
+
+    The precondition: no `kill` while a token is offered at `outs` and not
+    taken. Not an owed zero -- two bits hold one, so a kill while it waits
+    would end two rounds with one zero, and the decision downstream would
+    wait for ever for the second -- and not the producer's own token, which
+    the reset would turn into a zero under `valid`, the data changing before
+    the transfer. "Exactly one token a round" holds only under it. So the
+    stand-in's one reader must take a token the cycle it arrives, as a
+    decision unit takes a token of the round it is in, with nothing between
+    them that can hold it back (an eager fork whose other reader stalls, a
+    join waiting for another input). The VHDL and Verilog forms assert it in
+    simulation; the hardware does not check it.
+
+    Example:
+
+    ```mlir
+    %flag = stand_in %raw, %kill : <i1>
+    ```
+  }];
+
+  let arguments = (ins HandshakeType:$ins, I1:$kill);
+  let results = (outs HandshakeType:$outs);
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    $ins `,` $kill attr-dict `:` custom<HandshakeType>(type($outs))
+  }];
+
+  let extraClassDeclaration = [{
+    std::string getOperandName(unsigned idx) {
+      assert(idx < 2 && "index too high");
+      return idx == 0 ? "ins" : "kill";
+    }
+    std::string getResultName(unsigned idx) {
+      assert(idx < 1 && "index too high");
+      return "outs";
+    }
+  }];
+
+  let extraClassDefinition = [{
+    ::mlir::FailureOr<::llvm::SmallVector<::mlir::NamedAttribute>>
+    StandInOp::getRTLParameters() {
+      ::mlir::MLIRContext *ctx = (*this)->getContext();
+      return ::llvm::SmallVector<::mlir::NamedAttribute>{
+        {::mlir::StringAttr::get(ctx, "BITWIDTH"),
+         ::mlir::TypeAttr::get(getOuts().getType())}
       };
     }
   }];

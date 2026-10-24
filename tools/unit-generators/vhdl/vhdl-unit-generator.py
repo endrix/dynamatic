@@ -109,6 +109,8 @@ if __name__ == "__main__":
     generators.add("handshake", "extf")
     generators.add("handshake", "first")
     generators.add("handshake", "priority")
+    generators.add("handshake", "commit")
+    generators.add("handshake", "stand_in")
     generators.add("handshake", "fork")
     generators.add("handshake", "lazy_fork")
     generators.add("handshake", "load")

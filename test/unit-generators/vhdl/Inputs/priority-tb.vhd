@@ -6,8 +6,10 @@
 -- came first; a zero hi waits for lo; a stalled sink keeps the answer while
 -- the late input is absorbed; two zeros answer zero; rounds back to back, one
 -- a cycle; a stalled answer from lo; a zero hi and lo in one cycle with the
--- sink stalled; the next round's hi offered while the round is open. Each
--- input is ready exactly while it has not given its round's token. Fails (severity failure) on the first thing
+-- sink stalled; the next round's hi offered while the round is open; a round
+-- closing in its last cycle with the next round's hi taken and answered then.
+-- Each input is ready while it has not given its round's token, and again in
+-- the cycle the round completes. Fails (severity failure) on the first thing
 -- wrong.
 library ieee;
 use ieee.std_logic_1164.all;
@@ -66,27 +68,27 @@ begin
     -- hi decides alone, lo absorbed later
     step('1', 4, '0', 0, '1', '1', 4, '1', '1');
     step('0', 0, '0', 0, '1', '0', 0, '0', '1');
-    step('0', 0, '1', 2, '1', '0', 0, '0', '1');
+    step('0', 0, '1', 2, '1', '0', 0, '1', '1');
     step('0', 0, '0', 0, '1', '0', 0, '1', '1');
     -- lo first, held; a zero hi answers it
     step('0', 0, '1', 2, '1', '0', 0, '1', '1');
     step('0', 0, '0', 0, '1', '0', 0, '1', '0');
-    step('1', 0, '0', 0, '1', '1', 2, '1', '0');
+    step('1', 0, '0', 0, '1', '1', 2, '1', '1');
     step('0', 0, '0', 0, '1', '0', 0, '1', '1');
     -- lo first; a non-zero hi beats it
     step('0', 0, '1', 2, '1', '0', 0, '1', '1');
-    step('1', 8, '0', 0, '1', '1', 8, '1', '0');
+    step('1', 8, '0', 0, '1', '1', 8, '1', '1');
     step('0', 0, '0', 0, '1', '0', 0, '1', '1');
     -- a zero hi waits for lo
     step('1', 0, '0', 0, '1', '0', 0, '1', '1');
     step('0', 0, '0', 0, '1', '0', 0, '0', '1');
-    step('0', 0, '1', 1, '1', '1', 1, '0', '1');
+    step('0', 0, '1', 1, '1', '1', 1, '1', '1');
     step('0', 0, '0', 0, '1', '0', 0, '1', '1');
     -- a stalled sink: the answer is kept while lo is absorbed
     step('1', 4, '0', 0, '0', '1', 4, '1', '1');
     step('0', 0, '1', 2, '0', '1', 4, '0', '1');
     step('0', 0, '0', 0, '0', '1', 4, '0', '0');
-    step('0', 0, '0', 0, '1', '1', 4, '0', '0');
+    step('0', 0, '0', 0, '1', '1', 4, '1', '1');
     step('0', 0, '0', 0, '1', '0', 0, '1', '1');
     -- two zeros answer zero
     step('1', 0, '1', 0, '1', '1', 0, '1', '1');
@@ -98,20 +100,30 @@ begin
     step('1', 0, '0', 0, '0', '0', 0, '1', '1');
     step('0', 0, '1', 8, '0', '1', 8, '0', '1');
     step('0', 0, '0', 0, '0', '1', 8, '0', '0');
-    step('0', 0, '0', 0, '1', '1', 8, '0', '0');
+    step('0', 0, '0', 0, '1', '1', 8, '1', '1');
     step('0', 0, '0', 0, '1', '0', 0, '1', '1');
     -- a zero hi and lo in the same cycle, the sink stalled: lo is held
     step('1', 0, '1', 5, '0', '1', 5, '1', '1');
     step('0', 0, '0', 0, '0', '1', 5, '0', '0');
-    step('0', 0, '0', 0, '1', '1', 5, '0', '0');
+    step('0', 0, '0', 0, '1', '1', 5, '1', '1');
     step('0', 0, '0', 0, '1', '0', 0, '1', '1');
     -- the next round's hi offered while the round is open: not taken, the
-    -- stalled answer unchanged; taken the cycle after the round closes
+    -- stalled answer unchanged; taken the cycle the round closes, and
+    -- answered the next (this round's answer goes in the closing cycle)
     step('1', 4, '0', 0, '0', '1', 4, '1', '1');
     step('1', 8, '0', 0, '0', '1', 4, '0', '1');
-    step('1', 8, '1', 2, '1', '1', 4, '0', '1');
-    step('1', 8, '0', 0, '1', '1', 8, '1', '1');
-    step('0', 0, '1', 0, '1', '0', 0, '0', '1');
+    step('1', 8, '1', 2, '1', '1', 4, '1', '1');
+    step('0', 0, '0', 0, '1', '1', 8, '0', '1');
+    step('0', 0, '1', 0, '1', '0', 0, '1', '1');
+    step('0', 0, '0', 0, '1', '0', 0, '1', '1');
+    -- THE ROUND CLOSES IN ITS LAST CYCLE: hi answers alone, and the late lo
+    -- that ends the round comes with the next round's hi, taken and answered
+    -- in that same cycle; then that round's own late lo, with a zero hi of
+    -- the round after, which waits for its lo
+    step('1', 4, '0', 0, '1', '1', 4, '1', '1');
+    step('1', 8, '1', 2, '1', '1', 8, '1', '1');
+    step('1', 0, '1', 1, '1', '0', 0, '1', '1');
+    step('0', 0, '1', 3, '1', '1', 3, '1', '1');
     step('0', 0, '0', 0, '1', '0', 0, '1', '1');
     report "priority: " & integer'image(cycle) & " cycles as expected";
     std.env.finish;

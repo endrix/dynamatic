@@ -248,6 +248,41 @@ LogicalResult PriorityOp::verify() {
   return success();
 }
 
+//===----------------------------------------------------------------------===//
+// CommitOp
+//===----------------------------------------------------------------------===//
+
+/// A wire of any width, dataless included; the RTL passes the valid, the
+/// ready and the payload, and nothing else.
+LogicalResult CommitOp::verify() {
+  if (auto channel = dyn_cast<ChannelType>(getIns().getType());
+      channel && !channel.getExtraSignals().empty())
+    return emitOpError() << "passes its payload alone; a channel with extra "
+                            "signals would lose them";
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// StandInOp
+//===----------------------------------------------------------------------===//
+
+/// What the unit sends for a stopped producer is the zero of the channel's
+/// type, so the type has one: an integer payload, held alone.
+LogicalResult StandInOp::verify() {
+  auto channel = dyn_cast<ChannelType>(getOuts().getType());
+  if (!channel)
+    return emitOpError()
+           << "answers zero for a stopped producer, so its channel carries "
+              "data; a dataless stand-in would send a token nobody asked for";
+  if (!isa<IntegerType>(channel.getDataType()))
+    return emitOpError() << "answers the zero of an integer, not of "
+                         << channel.getDataType();
+  if (!channel.getExtraSignals().empty())
+    return emitOpError() << "passes its payload alone; a channel with extra "
+                            "signals would lose them";
+  return success();
+}
+
 OpResult MergeOp::getDataResult() { return cast<OpResult>(getResult()); }
 
 //===----------------------------------------------------------------------===//
