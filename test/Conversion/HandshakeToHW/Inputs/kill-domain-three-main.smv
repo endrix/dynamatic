@@ -1,0 +1,83 @@
+-- The SMV export of kill-domain-three.mlir's @three under free inputs, for
+-- kill-domain-three-nusmv.mlir. Domain 3 has three commits, commit0 (on d0),
+-- commit2 (on d1) and commit4 (on d2); domain 4 has two, commit1 and commit3,
+-- each in series after domain 3's on d0 and d1. The step after any of a
+-- domain's commits transfers, its latch is empty; domain 4's latch, holding a
+-- token its reader did not take, keeps it across d2's commit, which is domain
+-- 3's alone. Each stand-in, on all its domain's kills, offers a zero the cycle
+-- after any of them ended a round in which its producer's token had not
+-- passed (the observer counts the rounds and the tokens itself). Each pair of
+-- commits in series transfers together, and each kill_or's `many` is two or
+-- more of its domain's commits in one cycle. No property needs the domains'
+-- promise (their rounds never overlap): it is not assumed.
+MODULE main
+  VAR
+  a3 : boolean;
+  a3_valid : boolean;
+  a4 : boolean;
+  a4_valid : boolean;
+  d0 : unsigned word [3];
+  d0_valid : boolean;
+  d1 : unsigned word [3];
+  d1_valid : boolean;
+  d2 : unsigned word [3];
+  d2_valid : boolean;
+  start_valid : boolean;
+  f3_ready : boolean;
+  f4_ready : boolean;
+  o0_ready : boolean;
+  o1_ready : boolean;
+  o2_ready : boolean;
+  end_ready : boolean;
+  u : three(self, a3, a3_valid, a4, a4_valid, d0, d0_valid, d1, d1_valid, d2, d2_valid,
+            start_valid, f3_ready, f4_ready, o0_ready, o1_ready, o2_ready, end_ready);
+  was_c0 : boolean;
+  was_c1 : boolean;
+  was_c2 : boolean;
+  was_c3 : boolean;
+  was_c4 : boolean;
+  held4 : boolean;
+  sent3 : boolean;
+  owed3 : boolean;
+  sent4 : boolean;
+  owed4 : boolean;
+  DEFINE
+  -- each domain's kill as the specification has it: any of its commits
+  k3 := u.commit0.kill | u.commit2.kill | u.commit4.kill;
+  k4 := u.commit1.kill | u.commit3.kill;
+  -- each stand-in's producer's token goes in
+  x3 := u.buffer0.outs_valid & u.stand_in0.ins_ready;
+  x4 := u.buffer1.outs_valid & u.stand_in1.ins_ready;
+  ASSIGN
+  init(was_c0) := FALSE;
+  next(was_c0) := u.commit0.kill;
+  init(was_c1) := FALSE;
+  next(was_c1) := u.commit1.kill;
+  init(was_c2) := FALSE;
+  next(was_c2) := u.commit2.kill;
+  init(was_c3) := FALSE;
+  next(was_c3) := u.commit3.kill;
+  init(was_c4) := FALSE;
+  next(was_c4) := u.commit4.kill;
+  init(held4) := FALSE;
+  next(held4) := u.buffer1.full & !u.stand_in1.ins_ready;
+  init(sent3) := FALSE;
+  next(sent3) := k3 ? FALSE : (sent3 | x3);
+  init(owed3) := FALSE;
+  next(owed3) := k3 & !(sent3 | x3);
+  init(sent4) := FALSE;
+  next(sent4) := k4 ? FALSE : (sent4 | x4);
+  init(owed4) := FALSE;
+  next(owed4) := k4 & !(sent4 | x4);
+  INVARSPEC NAME domain3_reset_by_d0 := was_c0 -> !u.buffer0.full
+  INVARSPEC NAME domain3_reset_by_d1 := was_c2 -> !u.buffer0.full
+  INVARSPEC NAME domain3_reset_by_d2 := was_c4 -> !u.buffer0.full
+  INVARSPEC NAME domain4_reset_by_d0 := was_c1 -> !u.buffer1.full
+  INVARSPEC NAME domain4_reset_by_d1 := was_c3 -> !u.buffer1.full
+  INVARSPEC NAME domain4_kept := (was_c4 & !was_c1 & !was_c3 & held4) -> u.buffer1.full
+  INVARSPEC NAME zero3_next := owed3 -> (u.stand_in0.outs_valid & u.stand_in0.outs = FALSE)
+  INVARSPEC NAME zero4_next := owed4 -> (u.stand_in1.outs_valid & u.stand_in1.outs = FALSE)
+  INVARSPEC NAME series_d0 := u.commit0.kill <-> u.commit1.kill
+  INVARSPEC NAME series_d1 := u.commit2.kill <-> u.commit3.kill
+  INVARSPEC NAME many3 := u.kill_domain3.many <-> ((u.commit0.kill & u.commit2.kill) | (u.commit0.kill & u.commit4.kill) | (u.commit2.kill & u.commit4.kill))
+  INVARSPEC NAME many4 := u.kill_domain4.many <-> (u.commit1.kill & u.commit3.kill)

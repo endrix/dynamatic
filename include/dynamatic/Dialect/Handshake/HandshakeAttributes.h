@@ -98,9 +98,10 @@ constexpr llvm::StringLiteral
     MEM_INTERFACES_FROM_DEPS_ATTR("handshake.mem_interfaces_from_deps");
 
 /// Set on a unit (a ui32, a `handshake.commit`'s `domain`) that the commit's
-/// transfer stops: the hardware lowering gives it the commit's `kill` as its
-/// reset. A `handshake.load` with it is not reset but drops the words it
-/// still owes the units that were (see `handshake.commit`).
+/// transfer stops: the hardware lowering gives it the domain's kill as its
+/// reset -- its commit's `kill`, or the OR of its commits' when it has several.
+/// A `handshake.load` with it is not reset but drops the words it still owes
+/// the units that were (see `handshake.commit`).
 constexpr llvm::StringLiteral KILL_DOMAIN_ATTR("handshake.kill_domain");
 
 } // namespace handshake

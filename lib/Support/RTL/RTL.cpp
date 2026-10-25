@@ -438,7 +438,10 @@ LogicalResult RTLMatch::registerBitwidthParameter(hw::HWModuleExternOp &modOp,
              handshakeOp == "handshake.extf" ||
              handshakeOp == "handshake.maximumf" ||
              handshakeOp == "handshake.minimumf" ||
-             handshakeOp == "handshake.join" || handshakeOp == "ii_monitor") {
+             handshakeOp == "handshake.join" || handshakeOp == "ii_monitor" ||
+             // the OR of a kill domain's commits, a lowering's own unit: its
+             // SIZE is its one parameter
+             handshakeOp == "kill_or") {
     // Skip
   } else if (handshakeOp == "handshake.ram") {
     // NOTE: this port order is currently hardcoded in HandshakeToHW.cpp
@@ -589,6 +592,8 @@ RTLMatch::registerExtraSignalParameters(hw::HWModuleExternOp &modOp,
       // clang-format off
       handshakeOp == "handshake.mem_controller" ||
       handshakeOp == "mem_to_bram" ||
+      // raw wires: the kills of a domain's commits and their OR
+      handshakeOp == "kill_or" ||
       handshakeOp == "handshake.lsq" ||
       handshakeOp == "handshake.sharing_wrapper" ||
       handshakeOp == "handshake.ram" ||

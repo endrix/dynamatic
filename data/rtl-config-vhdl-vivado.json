@@ -695,9 +695,17 @@
   {
     "name": "handshake.stand_in",
     "parameters": [
+      { "name": "SIZE", "type": "unsigned", "lb": 1 },
       { "name": "DATA_TYPE", "type": "dataflow", "data-lb": 1, "extra-eq": 0 }
     ],
     "generic": "$DYNAMATIC/data/vhdl/handshake/stand_in.vhd"
+  },
+  {
+    "name": "kill_or",
+    "parameters": [
+      { "name": "SIZE", "type": "unsigned", "lb": 2 }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/support/kill_or.vhd"
   },
   {
     "name": "handshake.merge",

@@ -7,7 +7,7 @@ module dut (
   input [1:0] ins, input ins_valid, output ins_ready, input kill,
   output [1:0] outs, output outs_valid, input outs_ready
 );
-  stand_in #(.DATA_TYPE(2)) s (
+  stand_in #(.SIZE(1), .DATA_TYPE(2)) s (
     .clk(clk), .rst(rst), .ins(ins), .ins_valid(ins_valid), .ins_ready(ins_ready),
     .kill(kill), .outs(outs), .outs_valid(outs_valid), .outs_ready(outs_ready));
 endmodule

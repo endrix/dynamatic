@@ -770,6 +770,42 @@ def CommitOp : Handshake_Op<"commit", [
     the lowering refuses any other kind in one, and a commit, a stand-in, a
     store, a memory interface or an end with the attribute.
 
+    A domain may have several commits: decisions taken on different channels
+    that stop the same units (the per-state decisions of an actor, each
+    stopping the guard its states share). The domain's kill is the OR of
+    their kills -- one gate, which the lowering adds -- so its units reset at
+    the transfer of any of them. The OR is one kill: a cycle in which any of
+    the domain's commits transfers ends one round of its units and of the
+    stand-ins on those kills, and takes back whatever the units hold.
+
+    So the rounds of a domain never overlap: a round of the domain starts (a
+    token enters one of its units: a start, a latched argument, an address)
+    only after the previous commit of the domain has transferred. Then no two
+    of its commits transfer in one cycle, and a kill takes back only the work
+    of the round it ends. Decisions merely exclusive in time are not enough.
+    If state B's start enters the domain before state A's commit has
+    transferred, A's kill wipes it with A's round; the stand-in ends one
+    round, A's, and B's decision waits for ever for the domain's token. The
+    circuit's producer keeps the promise (an actor's states are exclusive,
+    and a sharing state's permit into the domain waits until the commit that
+    ends the domain's previous round, whichever it is, has transferred). The
+    lowering does not check it. The stand-in's VHDL and Verilog assert in
+    simulation that no two of its kills are high in one cycle, and the SMV
+    `kill_or` defines `many` (two or more of its inputs high) for an
+    observer to state it.
+
+    Every unit's domain has a commit, and every commit's domain has a unit or
+    a stand-in: the lowering refuses the others.
+
+    A commit names ONE domain. A decision that stops two domains goes through
+    two commits in series, the second's `ins` the first's `outs`: a commit is
+    a wire, so the two see the same transfer in the same cycle, each its kill
+    at its own output, and stop their domains together. Two commits of one
+    domain in series (directly or with other commits between) are refused:
+    they see one transfer and end one round, so the second is redundant, and
+    a stand-in on both would see two kills high in a cycle that ends one
+    round.
+
     `kill` is a raw wire, as an `unbundle`'s signals are: no token, nothing
     waits for it.
 
@@ -786,6 +822,10 @@ def CommitOp : Handshake_Op<"commit", [
 
     ```mlir
     %decision, %kill = commit %choice {domain = 0 : ui32} : <i3>
+    // a decision that stops domains 1 and 2, the second shared with
+    // another decision's commit
+    %d1, %kill1 = commit %choice2 {domain = 1 : ui32} : <i3>
+    %d2, %kill2 = commit %d1 {domain = 2 : ui32} : <i3>
     ```
   }];
 
@@ -827,13 +867,29 @@ def StandInOp : Handshake_Op<"stand_in", [
 ]> {
   let summary = "answers zero for a producer a commit stopped";
   let description = [{
-    `outs` is `ins` while the producer answers. On `kill` (a `commit`'s), if
+    `outs` is `ins` while the producer answers. On a kill (a `commit`'s), if
     this round's token has not passed, the unit owes one: a zero, offered
     the NEXT cycle; `ins` passes again once it has been taken. The units
     downstream receive exactly one token a round whether the producer
     answered or was stopped (`commit`).
 
-    Two bits: the round's token has passed (`kill` ends the round), a zero
+    `kills` are the kills of the commits of one domain, the producer's (a
+    domain may have several, `commit`), and the stand-in takes all of its
+    domain's commits, each once. The lowering refuses one that leaves a
+    commit out -- that commit's transfer would reset the producer with no
+    zero owed here, and the reader of the round it ends would wait for ever
+    -- and one that takes a kill twice (two bits high for one round). They
+    are OR'd inside: a cycle in which any of them is high ends ONE round, and
+    the unit is otherwise the same whatever their number. That is sound
+    because the rounds of a domain never overlap (`commit`): a round of the
+    domain starts only after the previous commit of the domain has
+    transferred, so at most one of the kills is high in a cycle and it ends
+    the round this stand-in is in. (A round started before the previous
+    commit transferred is wiped by that commit's kill, and its reader waits
+    for ever for this unit's token.) The VHDL and Verilog forms assert in
+    simulation that no two kills are high in one cycle outside reset.
+
+    Two bits: the round's token has passed (a kill ends the round), a zero
     is owed. The zero is registered because a zero offered in the kill cycle
     would make `outs`'s valid depend on the decision's transfer, which
     depends on the readies of the units this token feeds: a combinational
@@ -845,7 +901,7 @@ def StandInOp : Handshake_Op<"stand_in", [
     is absorbed like any late token, and changes nothing. The payload is an
     integer, so that there is a zero; no extra signals.
 
-    The precondition: no `kill` while a token is offered at `outs` and not
+    The precondition: no kill while a token is offered at `outs` and not
     taken. Not an owed zero -- two bits hold one, so a kill while it waits
     would end two rounds with one zero, and the decision downstream would
     wait for ever for the second -- and not the producer's own token, which
@@ -861,25 +917,33 @@ def StandInOp : Handshake_Op<"stand_in", [
 
     ```mlir
     %flag = stand_in %raw, %kill : <i1>
+    %shared = stand_in %raw2, %kill1, %kill2 : <i1>
     ```
   }];
 
-  let arguments = (ins HandshakeType:$ins, I1:$kill);
+  let arguments = (ins HandshakeType:$ins, Variadic<I1>:$kills);
   let results = (outs HandshakeType:$outs);
   let hasVerifier = 1;
 
   let assemblyFormat = [{
-    $ins `,` $kill attr-dict `:` custom<HandshakeType>(type($outs))
+    $ins `,` $kills attr-dict `:` custom<HandshakeType>(type($outs))
   }];
 
   let extraClassDeclaration = [{
+    // The kills are one port of the RTL, `kill`, one bit a kill: `kill_0`,
+    // `kill_1`, ... whatever their number.
     std::string getOperandName(unsigned idx) {
-      assert(idx < 2 && "index too high");
-      return idx == 0 ? "ins" : "kill";
+      assert(idx < getNumOperands() && "index too high");
+      return idx == 0 ? "ins" : "kill_" + std::to_string(idx - 1);
     }
     std::string getResultName(unsigned idx) {
       assert(idx < 1 && "index too high");
       return "outs";
+    }
+    // The kill of a stand-in that takes one, null for one that takes
+    // several: what a reader that expects one commit compares.
+    ::mlir::Value getKill() {
+      return getKills().size() == 1 ? getKills().front() : ::mlir::Value();
     }
   }];
 
@@ -887,7 +951,10 @@ def StandInOp : Handshake_Op<"stand_in", [
     ::mlir::FailureOr<::llvm::SmallVector<::mlir::NamedAttribute>>
     StandInOp::getRTLParameters() {
       ::mlir::MLIRContext *ctx = (*this)->getContext();
+      ::mlir::Type ui32 = ::mlir::IntegerType::get(ctx, 32, ::mlir::IntegerType::Unsigned);
       return ::llvm::SmallVector<::mlir::NamedAttribute>{
+        {::mlir::StringAttr::get(ctx, "SIZE"),
+         ::mlir::IntegerAttr::get(ui32, (unsigned)getKills().size())},
         {::mlir::StringAttr::get(ctx, "BITWIDTH"),
          ::mlir::TypeAttr::get(getOuts().getType())}
       };
