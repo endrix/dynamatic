@@ -86,6 +86,8 @@ lowering_units = [
 payload_condition_units = [
     "handshake.first",
     "handshake.priority",
+    # its flags and tokens decide, through the candidates' terms
+    "handshake.race",
 ]
 
 # Units Vivado's characterization skips and a standard-cell one does not: the
@@ -339,6 +341,9 @@ class VhdlInterfaceInfo:
                 categorized_ports[port] = "kill"
             elif port in ("hi", "lo"):
                 # `handshake.priority`'s two inputs
+                categorized_ports[port] = "data"
+            elif port.startswith("tokens") or port.startswith("flags"):
+                # `handshake.race`'s inputs: a flag is a one-bit payload
                 categorized_ports[port] = "data"
             elif "lhs" in port or "rhs" in port or "trueValue" in port or "falseValue" in port or "ins" in port or "data" in port or "addrIn" in port:
                 categorized_ports[port] = "data"

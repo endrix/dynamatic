@@ -1,3 +1,10 @@
+// The race (`handshake.race`, a racing decision as one unit) is characterized
+// too, by its inputs (2 to 32, the maximum over the nests a lowering makes):
+// a priority over four tokens as three priority units in series no longer
+// fits 0.25 ns (about 0.11 ns of 8-bit data each), and the placer cuts the
+// chain; the same decision as one race of four (0.207 ns of data) does, and
+// keeps no buffer.
+//
 // The racing units are characterized in the shipped ASAP7 SLVT model, not
 // copied from other units: a first at every size of the sweep, a priority, a
 // commit with its kill's delays (VK, RK), a stand-in at every number of kills
@@ -18,6 +25,7 @@
 // RUN: FileCheck %s --check-prefix=LOADLAT --input-file=%dynamatic_src_root/data/components-asap7.json
 // RUN: dynamatic-opt %s --handshake-place-buffers="algorithm=fpga20 solver=cbc timeout=30 target-period=0.3 timing-models=%dynamatic_src_root/data/components-asap7.json spec-timing-models=%dynamatic_src_root/data/spec-timing.json" --remove-operation-names 2>/dev/null | FileCheck %s
 // RUN: dynamatic-opt %s --handshake-place-buffers="algorithm=fpga20 solver=cbc timeout=30 target-period=0.22 timing-models=%dynamatic_src_root/data/components-asap7.json spec-timing-models=%dynamatic_src_root/data/spec-timing.json" --remove-operation-names 2>/dev/null | FileCheck %s --check-prefix=TIGHT
+// RUN: dynamatic-opt %s --handshake-place-buffers="algorithm=fpga20 solver=cbc timeout=30 target-period=0.25 timing-models=%dynamatic_src_root/data/components-asap7.json spec-timing-models=%dynamatic_src_root/data/spec-timing.json" --remove-operation-names 2>/dev/null | FileCheck %s --check-prefix=RACE
 
 // ENTRIES-DAG: "handshake.first.size.2": {
 // ENTRIES-DAG: "handshake.first.size.3": {
@@ -50,6 +58,13 @@
 // ENTRIES-DAG: "kill_or.size.64": {
 // ENTRIES-DAG: "kill_or.size.128": {
 // ENTRIES-DAG: "kill_or.size.256": {
+// ENTRIES-DAG: "handshake.race": {
+// ENTRIES-DAG: "handshake.race.size.2": {
+// ENTRIES-DAG: "handshake.race.size.3": {
+// ENTRIES-DAG: "handshake.race.size.4": {
+// ENTRIES-DAG: "handshake.race.size.8": {
+// ENTRIES-DAG: "handshake.race.size.16": {
+// ENTRIES-DAG: "handshake.race.size.32": {
 
 // COMMIT:      "handshake.commit": {
 // COMMIT:        "VK":
@@ -85,4 +100,23 @@ handshake.func @eight_way_firsts(%a: !handshake.channel<i8>, %b: !handshake.chan
   %x = first %a, %b, %c, %d, %e, %f, %g, %h {handshake.bb = 0 : ui32} : <i8>
   %y = first %x, %i, %j, %k, %l, %m, %n, %o {handshake.bb = 0 : ui32} : <i8>
   end %y, %start : <i8>, <>
+}
+
+// RACE-LABEL: handshake.func @priority_chain
+// RACE:       priority
+// RACE:       buffer
+// RACE:       end
+// RACE-LABEL: handshake.func @race_of_four
+// RACE-NOT:   buffer
+// RACE:       end
+handshake.func @priority_chain(%a: !handshake.channel<i8>, %b: !handshake.channel<i8>, %c: !handshake.channel<i8>, %d: !handshake.channel<i8>, %start: !handshake.control<>, ...) -> (!handshake.channel<i8>, !handshake.control<>) attributes {argNames = ["a", "b", "c", "d", "start"], resNames = ["out", "end"], handshake.frequencies = []} {
+  %x = priority %c, %d {handshake.bb = 0 : ui32} : <i8>
+  %y = priority %b, %x {handshake.bb = 0 : ui32} : <i8>
+  %z = priority %a, %y {handshake.bb = 0 : ui32} : <i8>
+  end %z, %start : <i8>, <>
+}
+
+handshake.func @race_of_four(%a: !handshake.channel<i8>, %b: !handshake.channel<i8>, %c: !handshake.channel<i8>, %d: !handshake.channel<i8>, %start: !handshake.control<>, ...) -> (!handshake.channel<i8>, !handshake.control<>) attributes {argNames = ["a", "b", "c", "d", "start"], resNames = ["out", "end"], handshake.frequencies = []} {
+  %z = race [%a, %b, %c, %d] [] {candidates = [{token = 0 : i64}, {token = 1 : i64, after = array<i64: 0>}, {token = 2 : i64, after = array<i64: 0, 1>}, {token = 3 : i64, after = array<i64: 0, 1, 2>}], handshake.bb = 0 : ui32} : <i8>
+  end %z, %start : <i8>, <>
 }
