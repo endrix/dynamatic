@@ -68,6 +68,26 @@ skipping_units_generated = [
     "handshake.unbundle",
 ]
 
+# Units outside `handshake.` that the lowering builds itself and that a
+# timing model has an entry for, under the name the generator config gives
+# them: `kill_or`, the OR of a kill domain's commits, which HandshakeToHW puts
+# beside a domain that several commits stop. No op is timed by its entry; a
+# consumer that times the domain's reset reads it by name.
+lowering_units = [
+    "kill_or",
+]
+
+# The units whose payload is also their condition, the zero-detect that
+# decides: a `handshake.first` emits on the first non-zero input, a
+# `handshake.priority` on a non-zero `hi`. Their valid out and their inputs'
+# ready read the data, a path no other unit has (a mux's select, a branch's
+# condition are ports of their own, "condition"); it is measured as the data
+# into valid and ready and written as their CV and CR.
+payload_condition_units = [
+    "handshake.first",
+    "handshake.priority",
+]
+
 # Units Vivado's characterization skips and a standard-cell one does not: the
 # dividers are pipelined (their port-to-port delays are zero and their
 # latency comes from the reference), but their VHDL is self-contained and
@@ -179,6 +199,9 @@ narrow_units = [
     "handshake.fork",
     "handshake.lazy_fork",
     "handshake.cond_br",
+    # A commit's data is a wire too; its one gate, the kill, is one bit
+    # whatever the width.
+    "handshake.commit",
     # A float is 32 or 64 bits; absf, which clears the sign bit, is a wire
     # as well.
     "handshake.absf",
@@ -200,8 +223,17 @@ narrow_units = [
 ]
 
 
+# The units of a generator config whose ports carry no data: their generator
+# takes no width, so they are written once per size, at one width.
+dataless_units = [
+    "kill_or",
+]
+
+
 def unit_widths(unit_name):
     """The data widths a unit of a generator config is characterized at."""
+    if unit_name in dataless_units:
+        return [1]
     widths = parameters_ranges["DATA_TYPE"]
     if unit_name in narrow_units:
         return widths
@@ -299,6 +331,15 @@ class VhdlInterfaceInfo:
                 categorized_ports[port] = "ready"
             elif "condition" in port or "index" in port:
                 categorized_ports[port] = "condition"
+            elif port == "kill":
+                # A commit's transfer out (`handshake.commit`), or the kills
+                # in of a unit a commit stops that is not reset by them (a
+                # stand-in, a drop-counting load): one bit a commit, neither
+                # data nor a handshake.
+                categorized_ports[port] = "kill"
+            elif port in ("hi", "lo"):
+                # `handshake.priority`'s two inputs
+                categorized_ports[port] = "data"
             elif "lhs" in port or "rhs" in port or "trueValue" in port or "falseValue" in port or "ins" in port or "data" in port or "addrIn" in port:
                 categorized_ports[port] = "data"
             elif "result" in port or "outs" in port or "trueOut" in port or "falseOut" in port or "addrOut" in port or "dataOut" in port:
@@ -328,7 +369,7 @@ class VhdlInterfaceInfo:
         Returns:
             List[str]: List of input ports of the specified type.
         """
-        assert port_type in ["valid", "ready", "data", "condition"], f"Invalid port type: {port_type}. Valid types are 'valid', 'ready', 'data', 'condition'."
+        assert port_type in ["valid", "ready", "data", "condition", "kill"], f"Invalid port type: {port_type}. Valid types are 'valid', 'ready', 'data', 'condition', 'kill'."
         # Return ports that match the specified type
         return [port for port, ptype in self.ins_per_type.items() if ptype == port_type]
 
@@ -342,7 +383,7 @@ class VhdlInterfaceInfo:
         Returns:
             List[str]: List of output ports of the specified type.
         """
-        assert port_type in ["valid", "ready", "data", "condition"], f"Invalid port type: {port_type}. Valid types are 'valid', 'ready', 'data', 'condition'."
+        assert port_type in ["valid", "ready", "data", "condition", "kill"], f"Invalid port type: {port_type}. Valid types are 'valid', 'ready', 'data', 'condition', 'kill'."
         # Return ports that match the specified type
         return [port for port, ptype in self.outs_per_type.items() if ptype == port_type]
 
@@ -426,7 +467,16 @@ class UnitCharacterization:
     # Each tuple contains the input and output port types to be characterized in this exact order
     list_delay_types = [("data", "data"), ("valid", "valid"), ("ready", "ready"),
                         ("valid", "ready"), ("condition", "valid"), ("condition", "ready"),
-                        ("valid", "condition"), ("valid", "data")]
+                        ("valid", "condition"), ("valid", "data"),
+                        # a commit's kill, the AND of its valid in and its
+                        # ready out (the model's VK and RK); no other unit
+                        # has a kill out
+                        ("valid", "kill"), ("ready", "kill")]
+
+    # The payload's zero-detect into valid and ready, for the units whose
+    # payload is their condition (payload_condition_units); the model's CV
+    # and CR.
+    payload_condition_types = [("data", "valid"), ("data", "ready")]
 
     # The unit's registers, for a standard-cell backend: from them to each
     # class of output port (the outport delays) and from each class of input
@@ -436,7 +486,10 @@ class UnitCharacterization:
     register_delay_types = [(REGISTER, "data"), (REGISTER, "valid"), (REGISTER, "ready"),
                             (REGISTER, "condition"),
                             ("data", REGISTER), ("valid", REGISTER), ("ready", REGISTER),
-                            ("condition", REGISTER)]
+                            ("condition", REGISTER),
+                            # the kills a stand-in or a drop-counting load
+                            # takes, into the registers they end a round in
+                            ("kill", REGISTER)]
 
     def __init__(self, unit_name: str, top_entity_name: str, params: dict, hdl_files: List[str], vhdl_interface_info: VhdlInterfaceInfo, unique_id: int):
         """
@@ -483,7 +536,10 @@ class UnitCharacterization:
                     f"_top_{self.unique_id}.{suffix}")
         # Create a map to hold input and output ports for each report file
         map_rpt_to_ports = {}
-        for delay_type in self.list_delay_types:
+        delay_types = list(self.list_delay_types)
+        if self.unit_name in payload_condition_units:
+            delay_types += self.payload_condition_types
+        for delay_type in delay_types:
             # Obtain name of the report file for this delay type
             delay_type_str = f"{delay_type[0]}_{delay_type[1]}"
             rpt_timing = f"{rpt_dir}/rpt_timing_{self.top_entity_name}_top_{self.unique_id}_{delay_type_str}.txt"

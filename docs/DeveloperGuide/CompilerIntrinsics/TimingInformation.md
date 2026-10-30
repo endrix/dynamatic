@@ -617,7 +617,8 @@ the RTL's `SIZE`:
 
 - fork and lazy_fork: their results;
 - mux and control_merge: their data operands;
-- merge, first, join and blocker: their operands.
+- merge, first, join and blocker: their operands;
+- stand_in: its kills (the racing units below).
 
 It then returns the entry for the smallest size at or above it, a bound from
 above, as for a width. Past the largest size, it returns the largest, with a
@@ -671,6 +672,109 @@ among the valid inputs, which a prefix structure would make logarithmic
 and a loop does not. A unit's own delay is not one a placer can cut, so on
 ASAP7 SLVT a mux of more than about a hundred inputs does not fit a 1 ns
 period whatever the buffers.
+
+### The racing units
+
+The units of a round that races its guards and stops the losers
+(`handshake.first`, `handshake.priority`, `handshake.commit`,
+`handshake.stand_in`, the drop-counting `handshake.load`, and the lowering's
+`kill_or`) are measured like every other generated unit, on their
+generators' RTL. Until they were, their entries were copies of other units'
+(first's of its phase-3 RTL, with VR and ready from control_merge and mux;
+priority's of first's; commit's of lazy_fork's; stand_in's of a slot's), and
+a full run of the script could not finish: priority's ports `hi` and `lo`,
+and the `kill` of a commit, a stand-in and a dropping load, had no port
+class, the load's `KILL_DROP` had no values to sweep, and a stand-in's one
+kill is below the sizes a sized unit was swept at.
+
+What the characterization measures of them, beside the classes every unit
+has:
+
+- `first` and `priority` decide on their payload: an input wins when it is
+  non-zero, so their valid out (and a first's inputs' ready) reads the data
+  through a zero-detect (`utils.payload_condition_units`). That path, data
+  into valid and into ready, is written as their `CV` and `CR`, the delay of
+  a condition, which is what the payload is to them. A first is sized by its
+  inputs (2 to 256); a priority has two, `hi` and `lo`.
+- `commit` is a wire on its channel (valid, ready and data measure 0), and
+  its kill, the AND of its valid in and its ready out, is a port of its own
+  class, `kill`: `VK` (valid in to kill) and `RK` (the ready of its output,
+  `outs_ready`, a signal into the unit, to kill), keys beside `VR`..`VD` that
+  only a commit's entry has.
+- `stand_in` passes its flag through a multiplexer and an OR, and its kills
+  end in its two registers (`sent`, `owe`): the kills into the registers are
+  its port model's `inport` `kill`, at every width. It is sized by its kills
+  (`handshake.stand_in.size.<N>`, from 1: `generated_units.base_size` takes a
+  unit's base size from its SIZE's lower bound), and getModel reads the
+  stand-in's number of kills as HandshakeToHW writes its `SIZE`.
+- `load` with `KILL_DROP` (a load in a kill domain, which counts the words it
+  owes and drops them on a kill) is another circuit, and its own entry,
+  `handshake.load.kill_drop` (`generated_units.VARIANT_KEYS`); the base
+  entry stays the plain load's. getModel reads it for a load that carries
+  `handshake.kill_domain`.
+- `kill_or`, the OR of a kill domain's commits, is not an operation: the
+  lowering puts it beside a domain that several commits stop. It is written
+  under the generator config's name, `kill_or.size.<N>` (2 to 256 inputs,
+  one width: `utils.dataless_units`), and its data delay is the OR. No op is
+  timed by it; a consumer that times a domain's reset reads it by name.
+
+A run of some units writes them into an existing model and leaves every
+other entry as it is there (`--units`, `--update`):
+
+```sh
+python3 main.py --synth-tool asap7 --dynamatic-dir "$DYN" \
+  --json-input "$DYN/data/rtl-config-vhdl.json" \
+  --json-output "$DYN/data/components-asap7.json" --clock-period 1.0 \
+  --units handshake.first,handshake.priority,handshake.commit,handshake.stand_in,kill_or,handshake.load \
+  --update
+```
+
+An entry the run writes replaces the one of the same key in place, a new one
+follows its unit's last entry, and the `.stages.json` beside the model is
+updated the same way. The plain load, measured again in that run, came out
+byte-identical to its entry, and a second run of the same units wrote the
+same file. A run starts from an empty `tmp/reports`: OpenSTA appends to a
+report file, and a report a previous run left would be read with the run's
+own, as the larger of the two.
+
+ASAP7 SLVT at 1 ns, in ns (the width-independent delays are the largest at 1
+to 64 bits, as for every unit; the stage is the `.stages.json` largest):
+
+| entry | valid | ready | VR | CV | VD | VK, RK | data at 8 bits (kill_or: its one bit) | kill into registers | stage |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| handshake.first.size.2 | 0.103 | 0.046 | 0.058 | 0.159 | 0.140 | - | 0.128 | - | 0.241 |
+| handshake.first.size.3 | 0.121 | 0.078 | 0.064 | 0.167 | 0.168 | - | 0.144 | - | 0.212 |
+| handshake.first.size.4 | 0.134 | 0.078 | 0.064 | 0.175 | 0.207 | - | 0.147 | - | 0.260 |
+| handshake.first.size.8 | 0.180 | 0.087 | 0.114 | 0.201 | 0.247 | - | 0.195 | - | 0.323 |
+| handshake.first.size.16 | 0.255 | 0.109 | 0.183 | 0.286 | 0.325 | - | 0.294 | - | 0.393 |
+| handshake.first.size.64 | 0.818 | 0.173 | 0.282 | 0.754 | 0.840 | - | 0.776 | - | 1.022 |
+| handshake.first.size.256 | 2.919 | 0.467 | 0.615 | 2.872 | 2.959 | - | 2.788 | - | 2.992 |
+| handshake.priority | 0.087 | 0.047 | 0.066 | 0.144 | 0.147 | - | 0.113 | - | 0.219 |
+| handshake.commit | 0 | 0 | 0 | 0 | 0 | 0.010, 0.009 | 0 | - | - |
+| handshake.stand_in.size.1 | 0.009 | 0.010 | 0 | 0 | 0 | - | 0.010 | 0.039 | 0.095 |
+| handshake.stand_in.size.2 | 0.009 | 0.010 | 0 | 0 | 0 | - | 0.010 | 0.042 | 0.089 |
+| handshake.stand_in.size.3 | 0.009 | 0.012 | 0 | 0 | 0 | - | 0.010 | 0.042 | 0.096 |
+| handshake.load | 0.037 | 0 | 0 | 0 | 0 | - | 0.010 | - | 0.152 |
+| handshake.load.kill_drop | 0.029 | 0 | 0 | 0 | 0 | - | 0.010 | 0.047 | 0.188 |
+| kill_or.size.2 | - | - | - | - | - | - | 0.012 | - | - |
+| kill_or.size.3 | - | - | - | - | - | - | 0.015 | - | - |
+| kill_or.size.4 | - | - | - | - | - | - | 0.020 | - | - |
+| kill_or.size.8 | - | - | - | - | - | - | 0.047 | - | - |
+
+A first grows with its inputs faster than any other sized unit: each input's
+ready in the cycle the round completes reads every other input (the
+completing-round term), a loop over the inputs inside a loop over them, and
+synthesis keeps both chains. At 64 inputs it no longer fits a 1 ns period by
+itself; the racing rounds the compiler builds have two to four.
+
+The width-independent delays are the largest over 1 to 64 bits, and for
+these units that is the zero-detect of a 64-bit payload: a priority's `CV`
+is 0.062 ns at 1 bit and 0.144 at 64, a first's (two inputs) 0.060 and 0.159.
+A round's payloads are flags and action indices of one to three bits, so
+the model times its racing units as wider than they are.
+
+The sky130 and ASAP7 LVT and RVT models keep their copied entries: a run of
+first's sizes 128 and 256 takes more than an hour on ASAP7 alone.
 
 ### The widths past 64 bits
 
@@ -925,7 +1029,7 @@ The TimingDatabase provides several core methods:
 
 2. **[TimingModel* getModel(OperationName opName)](https://github.com/EPFL-LAP/dynamatic/blob/main/lib/Support/TimingModels.cpp#L183)**: returns the TimingModel of operation with name `opName`.
 
-3. **[TimingModel* getModel(Operation* op)](https://github.com/EPFL-LAP/dynamatic/blob/main/lib/Support/TimingModels.cpp#L183)**: returns the TimingModel of operation `op`: the entry for its implementation (`<name>.<IMPL>.<STEP>`, `<name>.<IMPL>`), or for its size (`<name>.size.<N>`, the smallest size at or above the op's), or its name's.
+3. **[TimingModel* getModel(Operation* op)](https://github.com/EPFL-LAP/dynamatic/blob/main/lib/Support/TimingModels.cpp#L183)**: returns the TimingModel of operation `op`: the entry for its implementation (`<name>.<IMPL>.<STEP>`, `<name>.<IMPL>`), or for its size (`<name>.size.<N>`, the smallest size at or above the op's), or, for a load in a kill domain, `handshake.load.kill_drop`, or its name's.
 
 4.  **[LogicalResult getLatency(Operation *op, SignalType signalType, double &latency)](https://github.com/EPFL-LAP/dynamatic/blob/main/lib/Support/TimingModels.cpp#L114)**: queries the latency of a certain operation `op` for output port of type `signalType` and it saves the latency as unsigned cycle count in the `latency` variable.
 
