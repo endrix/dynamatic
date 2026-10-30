@@ -3,15 +3,21 @@
 // commit with its kill's delays (VK, RK), a stand-in at every number of kills
 // from one, the load that drops on a kill, and the lowering's kill_or at every
 // size; no entry of theirs is a copy (the copies said why in a `stand_in`
-// note). And the sized entries are what a placer reads: two first units of
-// two inputs in a row fit 0.3 ns (0.128 ns of 8-bit data each), two of eight
-// (0.195 ns each) do not, and the placer cuts between them.
+// note); the dropping load has the load's latency (one cycle: the same two
+// slots), not the default's zero, which a placer would read as a wire. And
+// the sized entries are what a placer reads, at their measured values: two
+// first units of two inputs in a row fit 0.3 ns (0.128 ns of 8-bit data
+// each), two of eight (0.195 ns each) do not, and the placer cuts between
+// them; at 0.22 ns the two of two inputs no longer fit (the copied entry's
+// 0.090 would have, twice), and the placer cuts between those too.
 //
 // REQUIRES: cbc
 // RUN: FileCheck %s --check-prefix=ENTRIES --input-file=%dynamatic_src_root/data/components-asap7.json
 // RUN: FileCheck %s --check-prefix=COMMIT --input-file=%dynamatic_src_root/data/components-asap7.json
 // RUN: FileCheck %s --check-prefix=MEASURED --input-file=%dynamatic_src_root/data/components-asap7.json
+// RUN: FileCheck %s --check-prefix=LOADLAT --input-file=%dynamatic_src_root/data/components-asap7.json
 // RUN: dynamatic-opt %s --handshake-place-buffers="algorithm=fpga20 solver=cbc timeout=30 target-period=0.3 timing-models=%dynamatic_src_root/data/components-asap7.json spec-timing-models=%dynamatic_src_root/data/spec-timing.json" --remove-operation-names 2>/dev/null | FileCheck %s
+// RUN: dynamatic-opt %s --handshake-place-buffers="algorithm=fpga20 solver=cbc timeout=30 target-period=0.22 timing-models=%dynamatic_src_root/data/components-asap7.json spec-timing-models=%dynamatic_src_root/data/spec-timing.json" --remove-operation-names 2>/dev/null | FileCheck %s --check-prefix=TIGHT
 
 // ENTRIES-DAG: "handshake.first.size.2": {
 // ENTRIES-DAG: "handshake.first.size.3": {
@@ -52,9 +58,19 @@
 
 // MEASURED-NOT: {{^ *}}"stand_in": "
 
+// LOADLAT:      "handshake.load.kill_drop": {
+// LOADLAT-NEXT:   "latency": {
+// LOADLAT-NEXT:     "0": {
+// LOADLAT-NEXT:       "64": {
+// LOADLAT-NEXT:         "1.0": 1.0
+
 // CHECK-LABEL: handshake.func @two_way_firsts
 // CHECK-NOT:   buffer
 // CHECK:       end
+// TIGHT-LABEL: handshake.func @two_way_firsts
+// TIGHT:       first
+// TIGHT-NEXT:  buffer
+// TIGHT-NEXT:  first
 handshake.func @two_way_firsts(%a: !handshake.channel<i8>, %b: !handshake.channel<i8>, %c: !handshake.channel<i8>, %start: !handshake.control<>, ...) -> (!handshake.channel<i8>, !handshake.control<>) attributes {argNames = ["a", "b", "c", "start"], resNames = ["out", "end"], handshake.frequencies = []} {
   %x = first %a, %b {handshake.bb = 0 : ui32} : <i8>
   %y = first %x, %c {handshake.bb = 0 : ui32} : <i8>

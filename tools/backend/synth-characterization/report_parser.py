@@ -341,10 +341,12 @@ def extract_rpt_data(map_unit_to_list_unit_chars, json_output,
                 bitwidth: {f"{stages[unit_name][bitwidth]:.6f}": cycles}
                 for bitwidth, cycles in measured_latency[unit_name].items()}}
         else:
-            # An entry at one size of a unit (`handshake.fork.size.8`) has
-            # the unit's latency: a size adds channels, not stages.
+            # An entry at one size of a unit (`handshake.fork.size.8`) or a
+            # variant of it (`handshake.load.kill_drop`) has the unit's
+            # latency: a size adds channels, not stages, and the dropping
+            # load is the load's two slots with a counter beside them.
             latency_table = latencies.get(
-                unit_name, latencies.get(base_unit(type_base(unit_name)), DEFAULT_LATENCY))
+                unit_name, latencies.get(unit_of_key(unit_name), DEFAULT_LATENCY))
 
         output_data[unit_name] = {"latency": latency_table,
                                   "delay": {"data": dataDict,
@@ -455,35 +457,35 @@ def unit_of_key(key):
 def merge_entries(old, new):
     """
     The model `old` with the units of `new` measured again: an entry of
-    `new` replaces the one of the same key where it is, one `old` has not
-    comes after the last entry of its unit (at the end for a unit `old` has
-    not), and an entry of a unit `new` measures that `new` has not is
-    dropped. Every other entry is `old`'s, where it was.
+    `new` replaces the one of the same key where it is, and one `old` has
+    not comes after the last entry of its unit (at the end for a unit `old`
+    has not). Every other entry is `old`'s, where it was: an entry of a unit
+    `new` measures that `new` has not (a size whose run left no report) is
+    kept, not dropped, since a lookup that misses a size falls to the one
+    below it, and reported, so that the run is seen to be partial.
 
     Returns:
-        (dict, list): the model, and the keys dropped.
+        (dict, list): the model, and the keys of the measured units kept
+        from `old` because `new` has not measured them.
     """
     units = {unit_of_key(key) for key in new}
-    dropped = [key for key in old if unit_of_key(key) in units and key not in new]
+    stale = [key for key in old if unit_of_key(key) in units and key not in new]
     last = {}
     for key in old:
-        if key not in dropped:
-            last[unit_of_key(key)] = key
+        last[unit_of_key(key)] = key
     added = {}
     for key in new:
         if key not in old:
             added.setdefault(last.get(unit_of_key(key)), []).append(key)
     merged = {}
     for key, entry in old.items():
-        if key in dropped:
-            continue
         merged[key] = new.get(key, entry)
         if last.get(unit_of_key(key)) == key:
             for extra in added.pop(key, []):
                 merged[extra] = new[extra]
     for extra in added.pop(None, []):
         merged[extra] = new[extra]
-    return merged, dropped
+    return merged, stale
 
 
 def update_model(output_data, stages, json_output):
@@ -499,12 +501,13 @@ def update_model(output_data, stages, json_output):
     """
     with open(json_output, 'r') as f:
         old = json.load(f)
-    merged, dropped = merge_entries(old, output_data)
+    merged, stale = merge_entries(old, output_data)
     with open(json_output, 'w') as f:
         json.dump(merged, f, indent=2)
     print(f"Updated {json_output}: {len(output_data)} entries written, "
-          f"{sum(1 for key in output_data if key not in old)} of them new"
-          + (f"; dropped, not measured again: {', '.join(dropped)}" if dropped else ""))
+          f"{sum(1 for key in output_data if key not in old)} of them new")
+    if stale:
+        print("\033[93m" + f"[WARNING] Kept as they were, not measured by this run: {', '.join(stale)}" + "\033[0m")
     path = os.path.splitext(json_output)[0] + ".stages.json"
     old_stages = {}
     if os.path.exists(path):

@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import shutil
 import generated_units
 from report_parser import extract_rpt_data, read_reference_latencies
 from hdl_manager import get_hdl_files
@@ -197,7 +198,7 @@ def run_characterization(json_input, json_output, dynamatic_dir, synth_tool, clo
     # two: a run reads its own reports only.
     rpt_dir = f"{tmp_dir}/reports"
     if os.path.exists(rpt_dir):
-        os.system(f"rm -rf {rpt_dir}")
+        shutil.rmtree(rpt_dir)
     os.makedirs(rpt_dir)
     # Generate logs directory
     log_dir = f"{tmp_dir}/logs"
@@ -366,5 +367,15 @@ if __name__ == "__main__":
     if not reference_json:
         reference_json = f"{dynamatic_dir}/data/components.json"
     units = set(args.units.split(",")) if args.units else None
+    if units is not None:
+        if not args.update:
+            parser.error("--units measures some units only, so it needs --update: without it the "
+                         "other entries would be the reference model's, not this PDK's")
+        with open(json_input, 'r') as f:
+            known = ({unit.get("name") for unit in json.load(f)} | set(lowering_units)
+                     | {variant["name"] for variant in impl_variants})
+        unknown = sorted(units - known)
+        if unknown:
+            parser.error(f"--units names no unit of {json_input}: {', '.join(unknown)}")
     run_characterization(json_input, json_output, dynamatic_dir, synth_tool, clock_period, reference_json,
                          units=units, update=args.update)

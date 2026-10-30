@@ -698,8 +698,9 @@ has:
   inputs (2 to 256); a priority has two, `hi` and `lo`.
 - `commit` is a wire on its channel (valid, ready and data measure 0), and
   its kill, the AND of its valid in and its ready out, is a port of its own
-  class, `kill`: `VK` (valid in to kill) and `RK` (ready out to kill), keys
-  beside `VR`..`VD` that only a commit's entry has.
+  class, `kill`: `VK` (valid in to kill) and `RK` (the ready of its output,
+  `outs_ready`, a signal into the unit, to kill), keys beside `VR`..`VD` that
+  only a commit's entry has.
 - `stand_in` passes its flag through a multiplexer and an OR, and its kills
   end in its two registers (`sent`, `owe`): the kills into the registers are
   its port model's `inport` `kill`, at every width. It is sized by its kills
@@ -739,7 +740,7 @@ own, as the larger of the two.
 ASAP7 SLVT at 1 ns, in ns (the width-independent delays are the largest at 1
 to 64 bits, as for every unit; the stage is the `.stages.json` largest):
 
-| entry | valid | ready | VR | CV | VD | VK, RK | data at 8 bits | kill into registers | stage |
+| entry | valid | ready | VR | CV | VD | VK, RK | data at 8 bits (kill_or: its one bit) | kill into registers | stage |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | handshake.first.size.2 | 0.103 | 0.046 | 0.058 | 0.159 | 0.140 | - | 0.128 | - | 0.241 |
 | handshake.first.size.3 | 0.121 | 0.078 | 0.064 | 0.167 | 0.168 | - | 0.144 | - | 0.212 |
