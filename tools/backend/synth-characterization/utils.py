@@ -90,6 +90,17 @@ payload_condition_units = [
     "handshake.race",
 ]
 
+# Of those, the units whose readies read no data: a race's input is ready
+# when it has not given its round's token, or when the round completes (the
+# other inputs' arrivals, from their valids, and the output's ready), whatever
+# any payload is. Their data into ready is not measured, and their CR is 0:
+# a path a timer finds there runs through cells the mapper shared between
+# the decision and the readies, a false path (a race of four tokens at 64
+# bits once gave 0.234 ns, through ORs ABC shared with the zero-detect).
+ready_reads_no_data_units = [
+    "handshake.race",
+]
+
 # Units Vivado's characterization skips and a standard-cell one does not: the
 # dividers are pipelined (their port-to-port delays are zero and their
 # latency comes from the reference), but their VHDL is self-contained and
@@ -543,7 +554,9 @@ class UnitCharacterization:
         map_rpt_to_ports = {}
         delay_types = list(self.list_delay_types)
         if self.unit_name in payload_condition_units:
-            delay_types += self.payload_condition_types
+            delay_types += [t for t in self.payload_condition_types
+                            if not (t == ("data", "ready") and
+                                    self.unit_name in ready_reads_no_data_units)]
         for delay_type in delay_types:
             # Obtain name of the report file for this delay type
             delay_type_str = f"{delay_type[0]}_{delay_type[1]}"

@@ -1,5 +1,7 @@
 // The race (`handshake.race`, a racing decision as one unit) is characterized
-// too, by its inputs (2 to 32, the maximum over the nests a lowering makes):
+// too, by its inputs (2 to 128, the maximum over the nests a lowering makes;
+// its CR is 0, since its readies read no data, where a false path once gave
+// 0.234 ns):
 // a priority over four tokens as three priority units in series no longer
 // fits 0.25 ns (about 0.11 ns of 8-bit data each), and the placer cuts the
 // chain; the same decision as one race of four (0.207 ns of data) does, and
@@ -23,6 +25,7 @@
 // RUN: FileCheck %s --check-prefix=COMMIT --input-file=%dynamatic_src_root/data/components-asap7.json
 // RUN: FileCheck %s --check-prefix=MEASURED --input-file=%dynamatic_src_root/data/components-asap7.json
 // RUN: FileCheck %s --check-prefix=LOADLAT --input-file=%dynamatic_src_root/data/components-asap7.json
+// RUN: FileCheck %s --check-prefix=RACECR --input-file=%dynamatic_src_root/data/components-asap7.json
 // RUN: dynamatic-opt %s --handshake-place-buffers="algorithm=fpga20 solver=cbc timeout=30 target-period=0.3 timing-models=%dynamatic_src_root/data/components-asap7.json spec-timing-models=%dynamatic_src_root/data/spec-timing.json" --remove-operation-names 2>/dev/null | FileCheck %s
 // RUN: dynamatic-opt %s --handshake-place-buffers="algorithm=fpga20 solver=cbc timeout=30 target-period=0.22 timing-models=%dynamatic_src_root/data/components-asap7.json spec-timing-models=%dynamatic_src_root/data/spec-timing.json" --remove-operation-names 2>/dev/null | FileCheck %s --check-prefix=TIGHT
 // RUN: dynamatic-opt %s --handshake-place-buffers="algorithm=fpga20 solver=cbc timeout=30 target-period=0.25 timing-models=%dynamatic_src_root/data/components-asap7.json spec-timing-models=%dynamatic_src_root/data/spec-timing.json" --remove-operation-names 2>/dev/null | FileCheck %s --check-prefix=RACE
@@ -65,6 +68,24 @@
 // ENTRIES-DAG: "handshake.race.size.8": {
 // ENTRIES-DAG: "handshake.race.size.16": {
 // ENTRIES-DAG: "handshake.race.size.32": {
+// ENTRIES-DAG: "handshake.race.size.64": {
+// ENTRIES-DAG: "handshake.race.size.128": {
+
+// A race's readies read no data (done_wo: the other inputs' arrivals and the
+// output's ready), so the characterization does not measure data into ready
+// for it and every entry's CR is 0.
+// RACECR:      "handshake.race": {
+// RACECR-NOT:  "handshake.
+// RACECR:        "CR": 0{{(\.0)?}},
+// RACECR:      "handshake.race.size.4": {
+// RACECR-NOT:  "handshake.
+// RACECR:        "CR": 0{{(\.0)?}},
+// RACECR:      "handshake.race.size.32": {
+// RACECR-NOT:  "handshake.
+// RACECR:        "CR": 0{{(\.0)?}},
+// RACECR:      "handshake.race.size.128": {
+// RACECR-NOT:  "handshake.
+// RACECR:        "CR": 0{{(\.0)?}},
 
 // COMMIT:      "handshake.commit": {
 // COMMIT:        "VK":
