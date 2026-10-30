@@ -117,10 +117,21 @@ handshake.func @noflag(%a: !handshake.channel<i1>, ...) -> !handshake.channel<i2
 
 // -----
 
-handshake.func @contradiction(%a: !handshake.channel<i1>, ...) -> !handshake.channel<i2>
+// A list names a flag once (the same flag in `flags` and `unless` is
+// allowed: race.mlir's @dead).
+handshake.func @flagtwice(%a: !handshake.channel<i1>, ...) -> !handshake.channel<i2>
     attributes {argNames = ["a"], resNames = ["out0"]} {
-  // expected-error @below {{requires flag 0 both true and false}}
-  %0 = race [] [%a] {candidates = [{payload = 1 : ui2, flags = array<i64: 0>, unless = array<i64: 0>}]} : <i2>
+  // expected-error @below {{candidate 0 lists flag 0 twice in its flags}}
+  %0 = race [] [%a] {candidates = [{payload = 1 : ui2, flags = array<i64: 0, 0>}]} : <i2>
+  end %0 : <i2>
+}
+
+// -----
+
+handshake.func @unlesstwice(%a: !handshake.channel<i1>, ...) -> !handshake.channel<i2>
+    attributes {argNames = ["a"], resNames = ["out0"]} {
+  // expected-error @below {{candidate 0 lists flag 0 twice in its unless}}
+  %0 = race [] [%a] {candidates = [{payload = 1 : ui2, flags = array<i64: 0>, unless = array<i64: 0, 0>}]} : <i2>
   end %0 : <i2>
 }
 
@@ -130,6 +141,16 @@ handshake.func @unconditional(%a: !handshake.channel<i1>, ...) -> !handshake.cha
     attributes {argNames = ["a"], resNames = ["out0"]} {
   // expected-error @below {{candidate 1 reads no input}}
   %0 = race [] [%a] {candidates = [{payload = 1 : ui2, flags = array<i64: 0>}, {payload = 2 : ui2, after = array<i64: 0>}]} : <i2>
+  end %0 : <i2>
+}
+
+// -----
+
+// A token's index is read unsigned (race.mlir's @narrow): -1 is no input's.
+handshake.func @negtoken(%t: !handshake.channel<i2>, %a: !handshake.channel<i1>, ...) -> !handshake.channel<i2>
+    attributes {argNames = ["t", "a"], resNames = ["out0"]} {
+  // expected-error @below {{candidate 0's token is not an input's index}}
+  %0 = race [%t] [%a] {candidates = [{token = -1 : i64}, {payload = 1 : ui2, flags = array<i64: 0>}]} : <i2>
   end %0 : <i2>
 }
 

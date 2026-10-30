@@ -312,8 +312,10 @@ decodeRaceCandidates(ArrayAttr attr, unsigned width,
         continue;
       }
       if (key == kRaceToken) {
+        // An index, read unsigned whatever the attribute's type (`1 : i1` is
+        // input 1); one past 32 bits is no input's.
         auto value = dyn_cast<IntegerAttr>(field.getValue());
-        if (!value || value.getValue().isNegative())
+        if (!value || value.getValue().getActiveBits() > 32)
           return emit() << "candidate " << k
                         << "'s token is not an input's index",
                  failure();
@@ -393,7 +395,9 @@ ArrayAttr dynamatic::handshake::getRaceCandidatesAttr(
 /// acyclic). Every candidate reads an input -- one that reads none would win
 /// before anything of its round arrived, in a round the unit cannot see
 /// start -- and a race of one candidate has a flag (one token alone is a
-/// wire).
+/// wire). A candidate's `flags` name a flag once, and its `unless` too; a
+/// flag in both is allowed: the candidate is never enabled and is refused
+/// once the flag arrives, as a nest's guard over P and not P.
 LogicalResult RaceOp::verify() {
   auto channel = cast<ChannelType>(getResult().getType());
   auto data = dyn_cast<IntegerType>(channel.getDataType());
@@ -442,25 +446,20 @@ LogicalResult RaceOp::verify() {
                            << " is another candidate's: a payload names one "
                               "candidate";
     }
-    DenseSet<unsigned> required;
-    for (unsigned f : cand.flags) {
-      if (f >= numFlags)
-        return emitOpError() << "candidate " << k << " reads flag " << f
-                             << " of " << numFlags;
-      if (!required.insert(f).second)
-        return emitOpError()
-               << "candidate " << k << " lists flag " << f << " twice";
-      ++flagUses[f];
-    }
-    for (unsigned f : cand.unless) {
-      if (f >= numFlags)
-        return emitOpError() << "candidate " << k << " reads flag " << f
-                             << " of " << numFlags;
-      if (!required.insert(f).second)
-        return emitOpError()
-               << "candidate " << k << " requires flag " << f
-               << " both true and false, or twice: it could never win";
-      ++flagUses[f];
+    // A list names a flag once (a repeat would change no term). The same
+    // flag in both lists is not refused: that candidate is never enabled.
+    for (auto [list, name] : {std::make_pair(&cand.flags, kRaceFlags),
+                              std::make_pair(&cand.unless, kRaceUnless)}) {
+      DenseSet<unsigned> listed;
+      for (unsigned f : *list) {
+        if (f >= numFlags)
+          return emitOpError() << "candidate " << k << " reads flag " << f
+                               << " of " << numFlags;
+        if (!listed.insert(f).second)
+          return emitOpError() << "candidate " << k << " lists flag " << f
+                               << " twice in its " << name;
+        ++flagUses[f];
+      }
     }
     if (!cand.isToken() && cand.flags.empty() && cand.unless.empty())
       return emitOpError() << "candidate " << k

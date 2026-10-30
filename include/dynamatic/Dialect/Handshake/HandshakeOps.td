@@ -750,10 +750,10 @@ def RaceOp : Handshake_Op<"race", [
   let summary = "a whole racing decision in one unit";
   let description = [{
     A decision among CANDIDATES, each answered the cycle the inputs that have
-    arrived determine it -- what a nest of `first` and `priority` units over
-    guards decides, in one unit whose depth is logarithmic where the nest's is
-    the nest's. A payload of `0` is the reserved "nothing selected", as for
-    `first` and `priority`.
+    arrived determine it -- a decision a nest of `first` and `priority` units
+    over guards may make (how the two differ is below), in one unit whose
+    depth is logarithmic where the nest's is the nest's. A payload of `0` is
+    the reserved "nothing selected", as for `first` and `priority`.
 
     The inputs are `tokens`, channels of the result's type (a one-hot-or-zero
     decision computed elsewhere), and `flags`, one-bit channels. Each input
@@ -785,10 +785,36 @@ def RaceOp : Handshake_Op<"race", [
     Once every input has arrived some candidate has won or all are refused,
     so a round always answers.
 
-    That is the meaning of a nest of `esa.f` and `esa.p` over guards: F adds
+    A list names a flag once, but a flag may be both among a candidate's
+    `flags` and among its `unless` -- a guard over P and not P, which is
+    what formation makes of an action with both predicates (it shares one
+    flag between them). Such a candidate is never enabled and is refused the
+    cycle that flag arrives: the nest's guard that can never pass.
+
+    That is what a nest of `esa.f` and `esa.p` over guards may answer: F adds
     no predecessor, P(hi, lo) puts every candidate of `hi` in the `after` of
     every candidate of `lo`; a guard over flags is a candidate with its flags,
-    a negated flag one of its `unless`; a settled subnetwork, a token.
+    a negated flag one of its `unless`; a settled subnetwork, a token. The
+    race differs from the nest in two ways, both within the specification's
+    freedom. It keeps ONE round for all its inputs, where each unit of a nest
+    closes its own: no input gives round n+1's token before every input has
+    given round n's, so without abort-losers a next round can wait for a
+    late input of the previous one (P(a, P(b, c)) with c late: a nest's P
+    answers the next round from a while the unit under its lo still waits
+    for c; the race answers it once c is in). Under abort-losers, which has
+    every late input in by the next round's start, the race is never later
+    than the nest. And among candidates released in the same cycle it takes
+    the lowest index, where a nest's F has kept the first to arrive
+    (P(a, F(b, c)) with c before b, both released by a's refusal: the race
+    answers b, the nest c). At full rate the two are the same cycle for
+    cycle.
+
+    Unlike `first`, a race is not MergeLike, on purpose: it merges no
+    control-flow paths, and buffer placement gives a MergeLike unit a
+    transparent and an opaque slot on its output and takes it for a
+    backedge's destination, which a decision inside one round does not need.
+    The chain of firsts it replaces gets both; the race is not to be made
+    MergeLike for parity with it.
 
     The round, as `first`'s: an answer found while the output is stalled is
     held; once answered, the unit absorbs the late inputs. An input that has

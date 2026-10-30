@@ -589,7 +589,9 @@ struct RaceCandidate {
   llvm::APInt payload;
   /// The token input the candidate is, for a token candidate.
   std::optional<unsigned> token;
-  /// Flag inputs required true, and required false.
+  /// Flag inputs required true, and required false. Each list names a flag
+  /// once; a flag in both makes a candidate that is never enabled (refused
+  /// once that flag arrives).
   llvm::SmallVector<unsigned> flags, unless;
   /// The candidates that must be refused before this one may win: every
   /// candidate with priority over it, transitively.
