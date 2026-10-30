@@ -577,6 +577,32 @@ FuncMemoryPorts getMemoryPorts(dynamatic::handshake::MemoryOpInterface memOp);
 /// giving up. Returns `nullptr` if no memory interface could be found.
 handshake::MemoryOpInterface findMemInterface(Value val);
 
+namespace handshake {
+/// One candidate of a `handshake.race` (an entry of its `candidates`
+/// attribute): what it answers when it wins -- a payload of its own, or the
+/// payload of a token input when that is not zero -- and when it wins: every
+/// flag of `flags` arrived true, every flag of `unless` arrived false (and its
+/// token arrived not zero), and every candidate of `after` refused.
+struct RaceCandidate {
+  /// The payload, non-zero, as wide as the race; unused for a token
+  /// candidate.
+  llvm::APInt payload;
+  /// The token input the candidate is, for a token candidate.
+  std::optional<unsigned> token;
+  /// Flag inputs required true, and required false.
+  llvm::SmallVector<unsigned> flags, unless;
+  /// The candidates that must be refused before this one may win: every
+  /// candidate with priority over it, transitively.
+  llvm::SmallVector<unsigned> after;
+
+  bool isToken() const { return token.has_value(); }
+};
+
+/// The `candidates` attribute of a race `width` bits wide.
+mlir::ArrayAttr getRaceCandidatesAttr(mlir::MLIRContext *ctx, unsigned width,
+                                      llvm::ArrayRef<RaceCandidate> candidates);
+} // namespace handshake
+
 } // namespace dynamatic
 
 // Structs to enable LLVM-style RTTI for the memory port hierarchy.

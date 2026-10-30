@@ -203,6 +203,25 @@
     "hdl": "verilog"
   },
   {
+    "name": "handshake.race",
+    "parameters": [
+      {
+        "name": "SIZE_TOKENS",
+        "type": "unsigned"
+      },
+      {
+        "name": "SIZE_FLAGS",
+        "type": "unsigned"
+      },
+      {
+        "name": "CANDIDATES",
+        "type": "string"
+      }
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/verilog/verilog-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.v -t race -p size_tokens=$SIZE_TOKENS size_flags=$SIZE_FLAGS bitwidth=$BITWIDTH candidates=\"'$CANDIDATES'\" extra_signals=$EXTRA_SIGNALS",
+    "hdl": "verilog"
+  },
+  {
     "name": "handshake.commit",
     "generator": "python $DYNAMATIC/experimental/tools/unit-generators/verilog/verilog-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.v -t commit -p bitwidth=$BITWIDTH extra_signals=$EXTRA_SIGNALS",
     "hdl": "verilog"

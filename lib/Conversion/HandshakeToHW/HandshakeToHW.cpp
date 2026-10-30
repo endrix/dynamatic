@@ -631,6 +631,14 @@ ModuleDiscriminator::ModuleDiscriminator(Operation *op) {
         // Two inputs always, `hi` and `lo`: the bitwidth alone
         addType("DATA_TYPE", op->getResult(0));
       })
+      .Case<handshake::RaceOp>([&](handshake::RaceOp race) {
+        // The inputs of each kind, the bitwidth, and the decision's
+        // structure, which the generators read (RaceOp::getCandidatesEncoding)
+        addUnsigned("SIZE_TOKENS", race.getTokens().size());
+        addUnsigned("SIZE_FLAGS", race.getFlags().size());
+        addType("DATA_TYPE", race.getResult());
+        addString("CANDIDATES", race.getCandidatesEncoding());
+      })
       .Case<handshake::CommitOp>([&](auto) {
         // A wire and its transfer: the bitwidth alone
         addType("DATA_TYPE", op->getOperand(0));
@@ -3007,7 +3015,7 @@ static LogicalResult closeKillDomains(handshake::FuncOp funcOp) {
     if (isa<handshake::BufferOp, handshake::ForkOp, handshake::MergeOp,
             handshake::MuxOp, handshake::ControlMergeOp, handshake::InitOp,
             handshake::InstanceOp, handshake::SelectOp, handshake::FirstOp,
-            handshake::PriorityOp, handshake::QueueOp>(op))
+            handshake::PriorityOp, handshake::RaceOp, handshake::QueueOp>(op))
       return KillReset::State;
     // A pipelined operator: its stages are Dynamatic's delay buffer, reset
     // synchronously.
@@ -3541,6 +3549,7 @@ public:
         ConvertToHWInstance<handshake::MergeOp>,
         ConvertToHWInstance<handshake::FirstOp>,
         ConvertToHWInstance<handshake::PriorityOp>,
+        ConvertToHWInstance<handshake::RaceOp>,
         ConvertToHWInstance<handshake::CommitOp>,
         ConvertToHWInstance<handshake::StandInOp>,
         ConvertToHWInstance<handshake::ControlMergeOp>,
