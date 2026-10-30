@@ -75,6 +75,7 @@ def variant_key(unit_name, variables):
             return f"{unit_name}.{suffix}"
     return None
 
+
 # The sizes a unit with a SIZE attribute is characterized at, each an entry
 # `<name>.size.<N>` of its own: a fork's ready is an AND over its outputs and
 # a mux's data a select over its inputs, so the delays grow with the
