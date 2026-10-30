@@ -109,7 +109,7 @@ def _terms(terms, op, empty):
     return f" {op} ".join(terms) if terms else empty
 
 
-def _decision(prefix, cands, size_tokens, bitwidth, tval):
+def _decision(prefix, cands, bitwidth, tval):
     """The candidates' decision over one view of the inputs, as concurrent
     assignments: `{prefix}en`, `{prefix}rf`, `{prefix}win` a bit a candidate,
     `{prefix}any_win`, `{prefix}all_ref` and `{prefix}pay`, the lowest-index
@@ -126,8 +126,10 @@ def _decision(prefix, cands, size_tokens, bitwidth, tval):
         if c["token"] is not None:
             en.append(f"{prefix}car({c['token']})")
             rf.append(f"{prefix}emp({c['token']})")
-        lines.append(f"{prefix}en({k}) <= {_terms(en, 'and', chr(39) + '1' + chr(39))};")
-        lines.append(f"{prefix}rf({k}) <= {_terms(rf, 'or', chr(39) + '0' + chr(39))};")
+        enabled = _terms(en, "and", "'1'")
+        refused = _terms(rf, "or", "'0'")
+        lines.append(f"{prefix}en({k}) <= {enabled};")
+        lines.append(f"{prefix}rf({k}) <= {refused};")
         win = [f"{prefix}en({k})"] + [f"{prefix}rf({j})" for j in c["after"]]
         lines.append(f"{prefix}win({k}) <= {_terms(win, 'and', '')};")
     lines.append(f"{prefix}any_win <= '1' when {prefix}win /= (0 to {n} - 1 => '0') else '0';")
@@ -227,7 +229,7 @@ end entity;
         body.append(f"fv({f}) <= fval({f}) when seen({i}) = '1' else flags({f})(0);")
         body.append(f"lt({f}) <= arr({i}) and fv({f});")
         body.append(f"lf({f}) <= arr({i}) and not fv({f});")
-    body.append(_decision("", cands, nt, w, lambda t: f"tv{t}"))
+    body.append(_decision("", cands, w, lambda t: f"tv{t}"))
     # the next round's view, in this round's completing cycle with the answer
     # out: the inputs that gave this round's token and give the next one's
     body.append("e_arr <= iv and seen and others_in and (others_in'range => emitted);")
@@ -238,7 +240,7 @@ end entity;
         i = nt + f
         body.append(f"e_lt({f}) <= e_arr({i}) and flags({f})(0);")
         body.append(f"e_lf({f}) <= e_arr({i}) and not flags({f})(0);")
-    body.append(_decision("e_", cands, nt, w, lambda t: f"tokens({t})"))
+    body.append(_decision("e_", cands, w, lambda t: f"tokens({t})"))
 
     body_text = "\n  ".join("\n".join(body).split("\n"))
     tregs_reset = "\n        tval    <= (others => (others => '0'));" if nt else ""
