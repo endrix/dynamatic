@@ -139,7 +139,8 @@ const TimingModel *TimingDatabase::getModel(StringRef timingModelKey) const {
 /// The number of channels a unit joins or splits, as its RTL's SIZE parameter
 /// counts them (HandshakeToHW sets it the same way), for the units whose
 /// handshake grows with it: a fork's ready is an AND over its outputs, a
-/// mux's data a select tree over its inputs. 0 for every other unit.
+/// mux's data a select tree over its inputs; and a stand-in's kills, an OR
+/// into its registers. 0 for every other unit.
 static unsigned getUnitSize(Operation *op) {
   return llvm::TypeSwitch<Operation *, unsigned>(op)
       .Case<handshake::ForkOp, handshake::LazyForkOp>(
@@ -152,6 +153,9 @@ static unsigned getUnitSize(Operation *op) {
       .Case<handshake::MergeOp, handshake::FirstOp, handshake::JoinOp,
             handshake::BlockerOp>(
           [](auto joinOp) { return joinOp->getNumOperands(); })
+      .Case<handshake::StandInOp>([](handshake::StandInOp standIn) {
+        return static_cast<unsigned>(standIn.getKills().size());
+      })
       .Default([](Operation *) { return 0u; });
 }
 
@@ -168,6 +172,16 @@ const TimingModel *TimingDatabase::getModel(Operation *op) const {
         (baseName + "." + handshake::stringifyEnum(bufferOp.getBufferType()))
             .str();
     if (const TimingModel *model = getModel(StringRef(typeKey)))
+      return model;
+  }
+
+  // A load a commit stops (`handshake.kill_domain`) is another circuit, one
+  // that counts the words it owes and drops them on a kill (HandshakeToHW's
+  // KILL_DROP): its own entry, `handshake.load.kill_drop`, where the model
+  // has one; the base entry, the plain load's, otherwise.
+  if (isa<handshake::LoadOp>(op) && op->hasAttr(handshake::KILL_DOMAIN_ATTR)) {
+    if (const TimingModel *model =
+            getModel(StringRef((baseName + ".kill_drop").str())))
       return model;
   }
 

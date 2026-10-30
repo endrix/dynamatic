@@ -18,7 +18,7 @@
 import math
 import re
 
-from utils import parameters_ranges
+from utils import parameters_ranges, dataless_units
 
 # The variables a command names that are not the unit's: where to write it.
 PATH_VARIABLES = ("DYNAMATIC", "OUTPUT_DIR", "MODULE_NAME")
@@ -44,6 +44,11 @@ NO_EXTRA_SIGNALS = "'{}'"
 #              (utils.impl_variants), and an entry that asks for IMPL
 #              "sequential" is theirs.
 #   STEP       unused by a pipelined multiplier.
+#   KILL_DROP  a load with and without the count of the words it drops on a
+#              kill: another circuit (HandshakeToHW sets it on a load in a
+#              kill domain), an entry of its own (VARIANT_KEYS), not reduced
+#              into the base entry, which stays the plain load every other
+#              design has.
 ATTRIBUTE_VALUES = {
     "SIZE": parameters_ranges["SIZE"],
     "PREDICATE": ["eq", "ne", "ult", "ule", "ugt", "uge",
@@ -51,7 +56,24 @@ ATTRIBUTE_VALUES = {
     "TEHB": [0, 1],
     "IMPL": ["pipelined"],
     "STEP": [1],
+    "KILL_DROP": [0, 1],
 }
+
+# The attributes that, set, make a point another circuit with an entry of its
+# own, `<name>.<suffix>`, rather than one more instance the base entry
+# reduces over: attribute -> suffix.
+VARIANT_KEYS = {
+    "KILL_DROP": "kill_drop",
+}
+
+
+def variant_key(unit_name, variables):
+    """The model key of a point that VARIANT_KEYS sends to an entry of its
+    own, or None for a point of the base entry."""
+    for name, suffix in VARIANT_KEYS.items():
+        if int(variables.get(name, 0) or 0):
+            return f"{unit_name}.{suffix}"
+    return None
 
 # The sizes a unit with a SIZE attribute is characterized at, each an entry
 # `<name>.size.<N>` of its own: a fork's ready is an AND over its outputs and
@@ -68,6 +90,28 @@ SIZED_WIDTHS = [1, 8, 32, 64]
 def size_key(unit_name, size):
     """The model key of a unit's entry at one size."""
     return f"{unit_name}.size.{size}"
+
+
+def base_size(entries):
+    """
+    The size a sized unit's base entry is characterized at, with every width:
+    parameters_ranges' (2), or the smallest the unit has when its entry says
+    a smaller one is legal (`lb`): a stand-in takes one kill or more, and one
+    is what most have.
+    """
+    size = ATTRIBUTE_VALUES["SIZE"][0]
+    for entry in entries:
+        for param in entry.get("parameters", []):
+            if param["name"] == "SIZE" and "lb" in param:
+                size = min(size, int(param["lb"]))
+    return size
+
+
+def sizes_of(entries):
+    """The sizes a sized unit is characterized at: its base size, then every
+    larger one of SIZES."""
+    base = base_size(entries)
+    return [base] + [size for size in SIZES if size > base]
 
 
 def base_unit(key):
@@ -173,7 +217,9 @@ def bakes_types(entry):
     """
     if "generic" in entry or "bitwidths" in entry or not entry.get("generator"):
         return False
-    return bool(command_variables(entry["generator"]) & TYPE_VARIABLES)
+    # A unit with no data takes its size alone (`kill_or`): its generator
+    # writes it at that size all the same.
+    return bool(command_variables(entry["generator"]) & (TYPE_VARIABLES | {"SIZE"}))
 
 
 def reference_latency(latency_table):
@@ -216,8 +262,8 @@ def points(entries, widths, latency_table=None, sizes=None):
         latency_table (dict): the unit's latency in the reference model, for
             a unit with a LATENCY attribute.
         sizes (list): the sizes to write a unit with a SIZE attribute at;
-            the base size alone when None. Past the base size, the widths
-            are SIZED_WIDTHS.
+            the base size alone when None. Past the base size (base_size),
+            the widths are SIZED_WIDTHS.
 
     Returns:
         list: (entry, variables, width) per instance; `variables` fills the
@@ -242,6 +288,8 @@ def points(entries, widths, latency_table=None, sizes=None):
             values = [reference_latency(latency_table)]
         elif name == "SIZE" and sizes:
             values = sizes
+        elif name == "SIZE":
+            values = [base_size(entries)]
         else:
             assert name in ATTRIBUTE_VALUES, \
                 f"{unit_name}: no values to sweep its attribute {name} over"
@@ -254,8 +302,11 @@ def points(entries, widths, latency_table=None, sizes=None):
         entry = next((e for e in entries if entry_matches(e, attributes)), None)
         if entry is None:
             continue
-        size = int(attributes.get("SIZE", ATTRIBUTE_VALUES["SIZE"][0]))
-        point_widths = widths if size in ATTRIBUTE_VALUES["SIZE"] else SIZED_WIDTHS
+        size = int(attributes.get("SIZE", base_size(entries)))
+        point_widths = widths if size == base_size(entries) else SIZED_WIDTHS
+        if unit_name in dataless_units:
+            # no data: one width at every size
+            point_widths = widths
         for width in point_widths:
             variables = dict(attributes)
             variables.update(type_variables(

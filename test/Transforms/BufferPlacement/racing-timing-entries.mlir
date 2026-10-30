@@ -1,0 +1,72 @@
+// The racing units are characterized in the shipped ASAP7 SLVT model, not
+// copied from other units: a first at every size of the sweep, a priority, a
+// commit with its kill's delays (VK, RK), a stand-in at every number of kills
+// from one, the load that drops on a kill, and the lowering's kill_or at every
+// size; no entry of theirs is a copy (the copies said why in a `stand_in`
+// note). And the sized entries are what a placer reads: two first units of
+// two inputs in a row fit 0.3 ns (0.128 ns of 8-bit data each), two of eight
+// (0.195 ns each) do not, and the placer cuts between them.
+//
+// REQUIRES: cbc
+// RUN: FileCheck %s --check-prefix=ENTRIES --input-file=%dynamatic_src_root/data/components-asap7.json
+// RUN: FileCheck %s --check-prefix=COMMIT --input-file=%dynamatic_src_root/data/components-asap7.json
+// RUN: FileCheck %s --check-prefix=MEASURED --input-file=%dynamatic_src_root/data/components-asap7.json
+// RUN: dynamatic-opt %s --handshake-place-buffers="algorithm=fpga20 solver=cbc timeout=30 target-period=0.3 timing-models=%dynamatic_src_root/data/components-asap7.json spec-timing-models=%dynamatic_src_root/data/spec-timing.json" --remove-operation-names 2>/dev/null | FileCheck %s
+
+// ENTRIES-DAG: "handshake.first.size.2": {
+// ENTRIES-DAG: "handshake.first.size.3": {
+// ENTRIES-DAG: "handshake.first.size.4": {
+// ENTRIES-DAG: "handshake.first.size.8": {
+// ENTRIES-DAG: "handshake.first.size.16": {
+// ENTRIES-DAG: "handshake.first.size.32": {
+// ENTRIES-DAG: "handshake.first.size.64": {
+// ENTRIES-DAG: "handshake.first.size.128": {
+// ENTRIES-DAG: "handshake.first.size.256": {
+// ENTRIES-DAG: "handshake.priority": {
+// ENTRIES-DAG: "handshake.commit": {
+// ENTRIES-DAG: "handshake.stand_in.size.1": {
+// ENTRIES-DAG: "handshake.stand_in.size.2": {
+// ENTRIES-DAG: "handshake.stand_in.size.3": {
+// ENTRIES-DAG: "handshake.stand_in.size.4": {
+// ENTRIES-DAG: "handshake.stand_in.size.8": {
+// ENTRIES-DAG: "handshake.stand_in.size.16": {
+// ENTRIES-DAG: "handshake.stand_in.size.32": {
+// ENTRIES-DAG: "handshake.stand_in.size.64": {
+// ENTRIES-DAG: "handshake.stand_in.size.128": {
+// ENTRIES-DAG: "handshake.stand_in.size.256": {
+// ENTRIES-DAG: "handshake.load.kill_drop": {
+// ENTRIES-DAG: "kill_or.size.2": {
+// ENTRIES-DAG: "kill_or.size.3": {
+// ENTRIES-DAG: "kill_or.size.4": {
+// ENTRIES-DAG: "kill_or.size.8": {
+// ENTRIES-DAG: "kill_or.size.16": {
+// ENTRIES-DAG: "kill_or.size.32": {
+// ENTRIES-DAG: "kill_or.size.64": {
+// ENTRIES-DAG: "kill_or.size.128": {
+// ENTRIES-DAG: "kill_or.size.256": {
+
+// COMMIT:      "handshake.commit": {
+// COMMIT:        "VK":
+// COMMIT-NEXT:   "RK":
+// COMMIT:        "inport":
+
+// MEASURED-NOT: {{^ *}}"stand_in": "
+
+// CHECK-LABEL: handshake.func @two_way_firsts
+// CHECK-NOT:   buffer
+// CHECK:       end
+handshake.func @two_way_firsts(%a: !handshake.channel<i8>, %b: !handshake.channel<i8>, %c: !handshake.channel<i8>, %start: !handshake.control<>, ...) -> (!handshake.channel<i8>, !handshake.control<>) attributes {argNames = ["a", "b", "c", "start"], resNames = ["out", "end"], handshake.frequencies = []} {
+  %x = first %a, %b {handshake.bb = 0 : ui32} : <i8>
+  %y = first %x, %c {handshake.bb = 0 : ui32} : <i8>
+  end %y, %start : <i8>, <>
+}
+
+// CHECK-LABEL: handshake.func @eight_way_firsts
+// CHECK:       first
+// CHECK-NEXT:  buffer
+// CHECK-NEXT:  first
+handshake.func @eight_way_firsts(%a: !handshake.channel<i8>, %b: !handshake.channel<i8>, %c: !handshake.channel<i8>, %d: !handshake.channel<i8>, %e: !handshake.channel<i8>, %f: !handshake.channel<i8>, %g: !handshake.channel<i8>, %h: !handshake.channel<i8>, %i: !handshake.channel<i8>, %j: !handshake.channel<i8>, %k: !handshake.channel<i8>, %l: !handshake.channel<i8>, %m: !handshake.channel<i8>, %n: !handshake.channel<i8>, %o: !handshake.channel<i8>, %start: !handshake.control<>, ...) -> (!handshake.channel<i8>, !handshake.control<>) attributes {argNames = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "start"], resNames = ["out", "end"], handshake.frequencies = []} {
+  %x = first %a, %b, %c, %d, %e, %f, %g, %h {handshake.bb = 0 : ui32} : <i8>
+  %y = first %x, %i, %j, %k, %l, %m, %n, %o {handshake.bb = 0 : ui32} : <i8>
+  end %y, %start : <i8>, <>
+}

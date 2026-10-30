@@ -3,7 +3,7 @@ import os
 import re
 import json
 
-from generated_units import base_unit, type_base
+from generated_units import base_unit, type_base, VARIANT_KEYS
 from pdk_backend import is_pdk, units_per_ns
 from utils import WIDE_WIDTHS, UnitCharacterization
 
@@ -49,7 +49,15 @@ ZERO_PORT_MODEL = {"delay": {"data": {"64": 0},
 # valid and ready delays grow with it too -- and the deserializer reads the
 # valid and ready ones at "1", which is always written. A condition port (a
 # select, an index) is a data channel and goes to the data delays.
-PORT_SIGNALS = {"data": "data", "condition": "data", "valid": "valid", "ready": "ready"}
+PORT_SIGNALS = {"data": "data", "condition": "data", "valid": "valid", "ready": "ready",
+                "kill": "kill"}
+
+# A commit's kill out (`handshake.commit`): the transfer, the AND of its valid
+# in and its ready out, from each of them. Written only for a unit that has
+# a kill out, under keys of their own beside VR..VD; the deserializer reads
+# none of them (no Dynamatic consumer times a kill), a consumer that times the
+# kill arc reads them by name.
+KILL_DELAYS = {("valid", "kill"): "VK", ("ready", "kill"): "RK"}
 RE_SLACK_OPENSTA = re.compile(r'^\s+(-?[\d.]+)\s+slack \((MET|VIOLATED)\)\s*$')
 
 # This function extracts the delay from a line in the report file.
@@ -159,7 +167,10 @@ def port_model(by_signal):
     if not any(v > 0.0 for widths in by_signal.values() for v in widths.values()):
         return ZERO_PORT_MODEL
     delay = {"VR": 0, "CV": 0, "CR": 0, "VC": 0, "VD": 0}
-    for signal in ("data", "valid", "ready"):
+    # the kills into the registers (a stand-in's, a drop-counting load's)
+    # only where the unit takes kills: no other entry changes
+    signals = ("data", "valid", "ready") + (("kill",) if "kill" in by_signal else ())
+    for signal in signals:
         widths = dict(sorted(by_signal.get(signal, {}).items(), key=lambda kv: int(kv[0])))
         if signal != "data" and widths and "1" not in widths:
             # the deserializer reads valid and ready at "1": the narrowest
@@ -194,7 +205,7 @@ def read_reference_latencies(reference_json):
 
 
 def extract_rpt_data(map_unit_to_list_unit_chars, json_output,
-                     synth_tool="vivado", reference_json=None):
+                     synth_tool="vivado", reference_json=None, update=False):
     """
     Extract the data from the map_unit_to_list_unit_chars dictionary and save it to a JSON file.
     IMPORTANT: For now we assume that only DATA_TYPE is the only parameter that can be used to characterize the unit.
@@ -204,6 +215,8 @@ def extract_rpt_data(map_unit_to_list_unit_chars, json_output,
         json_output (str): Path to the output JSON file.
         synth_tool (str): Value of --synth-tool, which decides the report format.
         reference_json (str): Timing model to take latency tables from, or None.
+        update (bool): Write the entries into the model already at
+            json_output (update_model), not a model of their own.
     """
     latencies = read_reference_latencies(reference_json)
     # Create the output data structure
@@ -229,6 +242,8 @@ def extract_rpt_data(map_unit_to_list_unit_chars, json_output,
         CRDelayFinal = 0.0
         VCDelayFinal = 0.0
         VDDelayFinal = 0.0
+        # a kill out's (KILL_DELAYS), only for a unit that has one
+        killDelays = {}
         # the port models: "in"/"out" -> signal -> bitwidth -> ns
         ports = {"in": {}, "out": {}}
         traversedUnitOnce = False
@@ -297,6 +312,16 @@ def extract_rpt_data(map_unit_to_list_unit_chars, json_output,
                     VCDelayFinal = max(VCDelayFinal, delay)
                 elif delay_type == ("valid", "data"):
                     VDDelayFinal = max(VDDelayFinal, delay)
+                # The payload's zero-detect (utils.payload_condition_units):
+                # the payload is the unit's condition, so the path from it is
+                # the condition's.
+                elif delay_type == ("data", "valid"):
+                    CVDelayFinal = max(CVDelayFinal, delay)
+                elif delay_type == ("data", "ready"):
+                    CRDelayFinal = max(CRDelayFinal, delay)
+                elif delay_type in KILL_DELAYS:
+                    name = KILL_DELAYS[delay_type]
+                    killDelays[name] = max(killDelays.get(name, 0.0), delay)
                 else:
                     print("\033[91m" + f"[ERROR] Unknown delay type {delay_type} in report file {rpt_filename} for unit {unit_name}. Skipping." + "\033[0m")
                     continue
@@ -329,11 +354,16 @@ def extract_rpt_data(map_unit_to_list_unit_chars, json_output,
                                             "CV": CVDelayFinal,
                                             "CR": CRDelayFinal,
                                             "VC": VCDelayFinal,
-                                            "VD": VDDelayFinal},
+                                            "VD": VDDelayFinal,
+                                            **killDelays},
                                   "inport": port_model(ports["in"]),
                                   "outport": port_model(ports["out"])}
 
     bound_sizes(output_data)
+
+    if update:
+        update_model(output_data, stages, json_output)
+        return
 
     # A unit this run did not characterize -- one on the skipping list (a
     # unit with no data path, one another script measures, the dividers
@@ -388,8 +418,9 @@ def bound_sizes(output_data):
                 for signal in ("valid", "ready"):
                     delay[signal]["1"] = max(delay[signal]["1"],
                                              bound[signal]["1"])
-                for name in ("VR", "CV", "CR", "VC", "VD"):
-                    delay[name] = max(delay[name], bound[name])
+                for name in ("VR", "CV", "CR", "VC", "VD") + tuple(KILL_DELAYS.values()):
+                    if name in delay and name in bound:
+                        delay[name] = max(delay[name], bound[name])
                 # the port models, per signal and width
                 for port in ("inport", "outport"):
                     mine = output_data[key][port]
@@ -399,13 +430,91 @@ def bound_sizes(output_data):
                     if mine is ZERO_PORT_MODEL:
                         mine = output_data[key][port] = json.loads(json.dumps(theirs))
                         continue
-                    for signal in ("data", "valid", "ready"):
+                    for signal in ("data", "valid", "ready", "kill"):
+                        if signal not in theirs["delay"] or signal not in mine["delay"]:
+                            continue
                         for width, d in theirs["delay"][signal].items():
                             mine["delay"][signal][width] = max(
                                 mine["delay"][signal].get(width, d), d)
             bound = delay
             bound_ports = {port: output_data[key][port]
                            for port in ("inport", "outport")}
+
+
+def unit_of_key(key):
+    """The unit a model key is an entry of: `handshake.fork.size.8`'s,
+    `handshake.buffer.ONE_SLOT_BREAK_R`'s and `handshake.load.kill_drop`'s are
+    `handshake.fork`, `handshake.buffer` and `handshake.load`."""
+    key = base_unit(type_base(key))
+    for suffix in VARIANT_KEYS.values():
+        if key.endswith("." + suffix):
+            return key[:-len(suffix) - 1]
+    return key
+
+
+def merge_entries(old, new):
+    """
+    The model `old` with the units of `new` measured again: an entry of
+    `new` replaces the one of the same key where it is, one `old` has not
+    comes after the last entry of its unit (at the end for a unit `old` has
+    not), and an entry of a unit `new` measures that `new` has not is
+    dropped. Every other entry is `old`'s, where it was.
+
+    Returns:
+        (dict, list): the model, and the keys dropped.
+    """
+    units = {unit_of_key(key) for key in new}
+    dropped = [key for key in old if unit_of_key(key) in units and key not in new]
+    last = {}
+    for key in old:
+        if key not in dropped:
+            last[unit_of_key(key)] = key
+    added = {}
+    for key in new:
+        if key not in old:
+            added.setdefault(last.get(unit_of_key(key)), []).append(key)
+    merged = {}
+    for key, entry in old.items():
+        if key in dropped:
+            continue
+        merged[key] = new.get(key, entry)
+        if last.get(unit_of_key(key)) == key:
+            for extra in added.pop(key, []):
+                merged[extra] = new[extra]
+    for extra in added.pop(None, []):
+        merged[extra] = new[extra]
+    return merged, dropped
+
+
+def update_model(output_data, stages, json_output):
+    """
+    Write a run's entries into the model at json_output and their stages
+    into its .stages.json (merge_entries), every other entry and stage as it
+    is there: a run of some units moves no other row.
+
+    Args:
+        output_data (dict): the run's entries, key -> entry.
+        stages (dict): the run's stages, key -> bitwidth -> ns.
+        json_output (str): the model to update.
+    """
+    with open(json_output, 'r') as f:
+        old = json.load(f)
+    merged, dropped = merge_entries(old, output_data)
+    with open(json_output, 'w') as f:
+        json.dump(merged, f, indent=2)
+    print(f"Updated {json_output}: {len(output_data)} entries written, "
+          f"{sum(1 for key in output_data if key not in old)} of them new"
+          + (f"; dropped, not measured again: {', '.join(dropped)}" if dropped else ""))
+    path = os.path.splitext(json_output)[0] + ".stages.json"
+    old_stages = {}
+    if os.path.exists(path):
+        with open(path, 'r') as f:
+            old_stages = json.load(f)
+    units = {unit_of_key(key) for key in output_data}
+    kept = {key: widths for key, widths in old_stages.items()
+            if unit_of_key(key) not in units}
+    if stages or len(kept) != len(old_stages):
+        write_stages({**kept, **stages}, json_output)
 
 
 def write_stages(stages, json_output):

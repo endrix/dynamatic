@@ -7,7 +7,7 @@ from report_parser import extract_rpt_data, read_reference_latencies
 from hdl_manager import get_hdl_files
 from pdk_backend import is_pdk
 from run_synthesis import run_synthesis
-from utils import VhdlInterfaceInfo, skipping_units, skipping_units_vivado, skipping_units_generated, impl_variants, unit_widths
+from utils import VhdlInterfaceInfo, skipping_units, skipping_units_vivado, skipping_units_generated, impl_variants, unit_widths, lowering_units
 from unit_characterization import run_unit_characterization
 
 
@@ -111,8 +111,10 @@ def characterize_generated(unit_name, entries, dirs, dynamatic_dir,
 
     Returns:
         dict: model key -> List[UnitCharacterization]. A unit with a SIZE
-            attribute has an entry per size (generated_units.SIZES), and its
-            base entry is the base size's; any other unit has its base entry.
+            attribute has an entry per size (generated_units.sizes_of), and
+            its base entry is the base size's; any other unit has its base
+            entry. A point generated_units.VARIANT_KEYS names (a load that
+            drops on a kill) goes to its own entry instead.
     """
     os.system(f"rm -rf {dirs['hdl']}/*")
     os.system(f"rm -rf {dirs['tcl']}/*")
@@ -121,10 +123,11 @@ def characterize_generated(unit_name, entries, dirs, dynamatic_dir,
     module_name = unit_name.replace(".", "_")
     sized = any(param["name"] == "SIZE"
                 for entry in entries for param in entry.get("parameters", []))
+    base = generated_units.base_size(entries)
     keyed, scripts = {}, []
     for i, (entry, variables, width) in enumerate(generated_units.points(
             entries, unit_widths(unit_name), latency_table,
-            generated_units.SIZES if sized else None)):
+            generated_units.sizes_of(entries) if sized else None)):
         point_dir = f"{dirs['hdl']}/{i}"
         os.makedirs(point_dir, exist_ok=True)
         top_def_file = get_hdl_files(
@@ -140,8 +143,11 @@ def characterize_generated(unit_name, entries, dirs, dynamatic_dir,
         if sized:
             size = int(variables["SIZE"])
             keys = [generated_units.size_key(unit_name, size)]
-            if size in generated_units.ATTRIBUTE_VALUES["SIZE"]:
+            if size == base:
                 keys.append(unit_name)
+        variant = generated_units.variant_key(unit_name, variables)
+        if variant:
+            keys = [variant]
         if "BUFFER_TYPE" in variables:
             # a slot type's own entry beside the base one, which reduces over
             # all six
@@ -153,7 +159,7 @@ def characterize_generated(unit_name, entries, dirs, dynamatic_dir,
     return keyed
 
 
-def run_characterization(json_input, json_output, dynamatic_dir, synth_tool, clock_period, reference_json):
+def run_characterization(json_input, json_output, dynamatic_dir, synth_tool, clock_period, reference_json, units=None, update=False):
     """
     Run characterization of dataflow units based on the provided JSON input.
 
@@ -164,6 +170,11 @@ def run_characterization(json_input, json_output, dynamatic_dir, synth_tool, clo
         synth_tool (str): Synthesis tool to use for characterization ('vivado' or 'asap7').
         clock_period (float): Clock period in nanoseconds to synthesize against.
         reference_json (str): Timing model to take latency tables from, or None.
+        units (set): The units to characterize, by the config's names; all
+            of them when None.
+        update (bool): Write the units' entries into the model at
+            json_output (and its stages beside it), every other entry as it
+            is there, instead of writing a model of its own.
     """
     # Load the input JSON file
     with open(json_input, 'r') as f:
@@ -181,10 +192,13 @@ def run_characterization(json_input, json_output, dynamatic_dir, synth_tool, clo
     tcl_dir = f"{tmp_dir}/tcl"
     if not os.path.exists(tcl_dir):
         os.makedirs(tcl_dir)
-    # Generate report directory
+    # Generate report directory. OpenSTA appends to a report file, so one a
+    # previous run left would be read with this run's, as the larger of the
+    # two: a run reads its own reports only.
     rpt_dir = f"{tmp_dir}/reports"
-    if not os.path.exists(rpt_dir):
-        os.makedirs(rpt_dir)
+    if os.path.exists(rpt_dir):
+        os.system(f"rm -rf {rpt_dir}")
+    os.makedirs(rpt_dir)
     # Generate logs directory
     log_dir = f"{tmp_dir}/logs"
     if not os.path.exists(log_dir):
@@ -206,10 +220,13 @@ def run_characterization(json_input, json_output, dynamatic_dir, synth_tool, clo
         if unit_name == None:
             print("Skipping unit with no name.")
             continue
+        if units is not None and unit_name not in units:
+            continue
         if unit_name in skipping_units or (unit_name in skipping_units_vivado and not is_pdk(synth_tool)):
             print(f"Skipping unit {unit_name} as it is in the skipping list.")
             continue
-        if unit_name in skipping_units_generated or not unit_name.startswith("handshake."):
+        if unit_name in skipping_units_generated or not (
+                unit_name.startswith("handshake.") or unit_name in lowering_units):
             print(f"Skipping unit {unit_name}: no model entry for it yet.")
             continue
         # A unit a generator writes at its port types: all the config's
@@ -280,7 +297,8 @@ def run_characterization(json_input, json_output, dynamatic_dir, synth_tool, clo
         map_unit_to_list_unit_chars.setdefault(unit_name, []).extend(list_unit_chars)
 
     # Save the results to the output JSON file
-    extract_rpt_data(map_unit_to_list_unit_chars, json_output, synth_tool, reference_json)
+    extract_rpt_data(map_unit_to_list_unit_chars, json_output, synth_tool, reference_json,
+                     update=update)
 
 
 if __name__ == "__main__":
@@ -316,6 +334,17 @@ if __name__ == "__main__":
         help="Timing model to carry latency tables over from, since this script measures delays only (if unspecified, $DYNAMATIC_DIR/data/components.json)",
     )
     parser.add_argument(
+        "--units",
+        type=str,
+        default=None,
+        help="Comma-separated units to characterize, by the names the RTL config gives them (handshake.first,kill_or); every unit when unspecified",
+    )
+    parser.add_argument(
+        "--update",
+        action="store_true",
+        help="Write the characterized units' entries into the model --json-output names (and its .stages.json), keeping every other entry as it is there, instead of writing a whole model (with --units: a run of some units that moves no other row)",
+    )
+    parser.add_argument(
         "--clock-period",
         type=float,
         default=4.0,
@@ -336,4 +365,6 @@ if __name__ == "__main__":
         json_input = f"{dynamatic_dir}/data/{config}"
     if not reference_json:
         reference_json = f"{dynamatic_dir}/data/components.json"
-    run_characterization(json_input, json_output, dynamatic_dir, synth_tool, clock_period, reference_json)
+    units = set(args.units.split(",")) if args.units else None
+    run_characterization(json_input, json_output, dynamatic_dir, synth_tool, clock_period, reference_json,
+                         units=units, update=args.update)
