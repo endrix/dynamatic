@@ -3,17 +3,20 @@
 op's description (not from the unit), and a vector file of random rounds for
 race-ghdl.mlir and race-iverilog.mlir.
 
-The shape: P(t, F(g1(a, not b), P(g2(c), g3(d, b)))) over one token t and
-four flags a b c d, a 4-bit decision:
-  candidate 0  the token t                            after -
+The shape: P(t, F(g1(a, not b), P(g2(c), P(g0(a, not a), g3(d, b))))) over
+one token t and four flags a b c d, a 5-bit decision:
+  candidate 0  the token t (0 or 8)                   after -
   candidate 1  payload 1, a true and b false          after 0
   candidate 2  payload 2, c true                      after 0
-  candidate 3  payload 4, d true and b true           after 0, 2
-CANDIDATES "t0/p1:f0:u1:a0/p2:f2:a0/p4:f3,1:a0,2". Candidates 1 and 2 are
-incomparable (F), so a tie between them goes to 1; 3 waits for 2's refusal and
-t's; flag b is read by two candidates, once negated.
+  candidate 3  payload 16, a true and a false         after 0, 2
+  candidate 4  payload 4, d true and b true           after 0, 2, 3
+CANDIDATES "t0/p1:f0:u1:a0/p2:f2:a0/p16:f0:u0:a0,2/p4:f3,1:a0,2,3".
+Candidates 1 and 2 are incomparable (F), so a tie between them goes to 1; 4
+waits for the refusals of 0, 2 and 3; flag b is read by two candidates, once
+negated. Candidate 3 is a guard over P and not P (formation's shared flag
+both ways): never enabled, refused once a arrives, so 4 waits for a too.
 
-Usage: race_spec.py [cycles] > race-vectors.txt
+Usage: race_spec.py [cycles [seed]] > race-vectors.txt
 """
 import random
 import sys
@@ -22,20 +25,25 @@ CANDS = [
     {"token": 0, "flags": [], "unless": [], "after": []},
     {"payload": 1, "flags": [0], "unless": [1], "after": [0]},
     {"payload": 2, "flags": [2], "unless": [], "after": [0]},
-    {"payload": 4, "flags": [3, 1], "unless": [], "after": [0, 2]},
+    {"payload": 16, "flags": [0], "unless": [0], "after": [0, 2]},
+    {"payload": 4, "flags": [3, 1], "unless": [], "after": [0, 2, 3]},
 ]
-NT, NF, W = 1, 4, 4
-ENCODING = "t0/p1:f0:u1:a0/p2:f2:a0/p4:f3,1:a0,2"
+NT, NF, W = 1, 4, 5
+ENCODING = "t0/p1:f0:u1:a0/p2:f2:a0/p16:f0:u0:a0,2/p4:f3,1:a0,2,3"
+# the guard over a and not a
+DEAD = 3
+# the seed of the checked-in vectors: one whose stalls change an answer
+# (the "held" count), so that a unit without the hold fails them
+SEED = 5
 
 
 TIES = [0]
 
 
-def decide(arrived, value):
-    """The answer the arrived inputs determine: a payload (the lowest-index
-    winner's), 0 (every candidate refused), or None (not yet). Inputs are
-    numbered tokens first, then flags; `value` a token's payload or a flag's
-    bit."""
+def terms(arrived, value):
+    """Each candidate's ENABLED and REFUSED over the arrived inputs: every
+    literal of it true, or one false. Inputs are numbered tokens first, then
+    flags; `value` a token's payload or a flag's bit."""
     def flag(f):
         i = NT + f
         return None if not arrived[i] else bool(value[i])
@@ -49,6 +57,23 @@ def decide(arrived, value):
             lits.append(None if not arrived[t] else value[t] != 0)
         enabled.append(all(l is True for l in lits))
         refused.append(any(l is False for l in lits))
+    return enabled, refused
+
+
+def waits_on_dead(arrived, value):
+    """A candidate after the dead guard waits for it alone: enabled, every
+    other predecessor refused, the dead guard not yet (its flag not in)."""
+    enabled, refused = terms(arrived, value)
+    return not refused[DEAD] and any(
+        enabled[k] and DEAD in c["after"] and
+        all(refused[j] for j in c["after"] if j != DEAD)
+        for k, c in enumerate(CANDS))
+
+
+def decide(arrived, value):
+    """The answer the arrived inputs determine: a payload (the lowest-index
+    winner's), 0 (every candidate refused), or None (not yet)."""
+    enabled, refused = terms(arrived, value)
     winners = [k for k, c in enumerate(CANDS)
                if enabled[k] and all(refused[j] for j in c["after"])]
     if winners:
@@ -79,6 +104,9 @@ class Spec:
         TIES[0] = False
         decided = decide(arrived, value)
         tie = TIES[0]
+        # the hold matters: the answer offered under a stall is not what the
+        # record decides now (a winner of lower index came in since)
+        held = s.held is not None and decided != s.held
         answer = s.held if s.held is not None else decided
         valid_n = (not s.answered) and answer is not None
         closes = allin and (s.answered or (valid_n and rdy))
@@ -108,7 +136,9 @@ class Spec:
                                    "early_next": early, "stall": ov and not rdy,
                                    "zero_early": valid_n and answer == 0 and not allin,
                                    "dominated": valid_n and answer in (1, 2, 4),
-                                   "tie": valid_n and s.held is None and tie}
+                                   "tie": valid_n and s.held is None and tie,
+                                   "held": held,
+                                   "dead_waits": waits_on_dead(arrived, value)}
 
 
 def vectors(cycles, seed):
@@ -138,8 +168,9 @@ def vectors(cycles, seed):
 
 if __name__ == "__main__":
     cycles = int(sys.argv[1]) if len(sys.argv) > 1 else 600
-    lines, seen = vectors(cycles, 7)
-    print(f"# handshake.race {ENCODING}: one token (4 bits) and four flags,")
+    seed = int(sys.argv[2]) if len(sys.argv) > 2 else SEED
+    lines, seen = vectors(cycles, seed)
+    print(f"# handshake.race {ENCODING}: one token (5 bits) and four flags,")
     print("# random rounds, one a line, expected from the requirement")
     print("# (race_spec.py). Columns: the five valids (token, then flags a b c d),")
     print("# the five values, outs_ready, then the expected outs_valid, outs")

@@ -15,8 +15,9 @@ Usage:
     python3 verify-race.py --shape NAME [--checker PATH]
 
 The shapes are the nests a lowering makes: a chain of priorities, an F of
-incomparable guards, a guard alone over flags and a negated flag, and a
-mixed nest with a token (the GHDL bench's). `--checker` defaults to $NUSMV,
+incomparable guards, a guard alone over flags and a negated flag, a mixed
+nest with a token (the GHDL bench's), and a guard over a flag and its
+negation (formation's P and not P) in an F under a priority. `--checker` defaults to $NUSMV,
 then NuSMV, then nuXmv on PATH (see verify-first.py for a build).
 """
 import argparse
@@ -40,7 +41,12 @@ SHAPES = {
     # a guard alone over a, b and not c, at one bit
     "guard": (0, 3, 1, "p1:f0,1:u2"),
     # P(t, F(g1(a, not b), P(g2(c), g3(d, b)))): the GHDL bench's nest
+    # without its dead guard
     "mixed": (1, 4, 3, "t0/p1:f0:u1:a0/p2:f2:a0/p4:f3,1:a0,2"),
+    # P(F(g0(s, a, not a), g1(b)), g2(a)): g0 a guard over P and not P (one
+    # flag both ways), never enabled and refused once a arrives; g2 waits
+    # for that and for g1's refusal
+    "dead": (0, 3, 2, "p1:f1,0:u0/p2:f2/p3:f0:a0,1"),
 }
 
 

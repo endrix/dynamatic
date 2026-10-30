@@ -1,18 +1,18 @@
 `timescale 1ns/1ps
 // A testbench for handshake.race, used by race-iverilog.mlir: the unit under
-// test is `dut`, generated with CANDIDATES "t0/p1:f0:u1:a0/p2:f2:a0/p4:f3,1:a0,2"
-// (one 4-bit token, four flags), driven by the rounds of race-vectors.txt
-// (the VHDL testbench's), one a cycle: the inputs are set, the combinational
-// outputs checked, the clock ticks. Prints a MISMATCH line for each wrong
-// cycle.
+// test is `dut`, generated with CANDIDATES
+// "t0/p1:f0:u1:a0/p2:f2:a0/p16:f0:u0:a0,2/p4:f3,1:a0,2,3" (one 5-bit token,
+// four flags), driven by the rounds of race-vectors.txt (the VHDL
+// testbench's), one a cycle: the inputs are set, the combinational outputs
+// checked, the clock ticks. Prints a MISMATCH line for each wrong cycle.
 module tb;
   reg clk = 0, rst = 1;
   always #5 clk = ~clk;
-  reg [3:0] tokens = 0;
+  reg [4:0] tokens = 0;
   reg [0:0] tv = 0;
   reg [3:0] flags = 0, fv = 0;
   reg rdy = 0;
-  wire [3:0] outs;
+  wire [4:0] outs;
   wire [0:0] tr;
   wire [3:0] fr;
   wire ov;
@@ -41,7 +41,7 @@ module tb;
         end
         rdy = e[10];
         #1;
-        if (ov !== e[11][0] || (e[11] == 1 && outs !== e[12][3:0])
+        if (ov !== e[11][0] || (e[11] == 1 && outs !== e[12][4:0])
             || tr[0] !== e[13][0] || fr[0] !== e[14][0] || fr[1] !== e[15][0]
             || fr[2] !== e[16][0] || fr[3] !== e[17][0]) begin
           errs = errs + 1;

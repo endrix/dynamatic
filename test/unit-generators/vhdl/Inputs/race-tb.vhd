@@ -1,16 +1,17 @@
 -- A testbench for handshake.race, used by race-ghdl.mlir: the unit under test
--- is named dut, generated with CANDIDATES "t0/p1:f0:u1:a0/p2:f2:a0/p4:f3,1:a0,2"
--- (P(t, F(g1(a, not b), P(g2(c), g3(d, b)))), one 4-bit token and four
--- flags), driven by the rounds of race-vectors.txt one a cycle -- the inputs
--- set, the combinational outputs checked against the requirement's, the clock
--- ticks. Random rounds, each input's token held until taken, the sink
--- stalling at random: a candidate wins once its flags arrived as it needs
--- them and every candidate before it refused, the lowest-index winner of a
--- cycle wins, zero once every candidate is refused, an answer is held while
--- stalled, an input that gave its token is ready again in the cycle the
--- round completes and gives the next round's then, which is answered then
--- when it decides and the output is free. Fails (severity failure) on the
--- first thing wrong.
+-- is named dut, generated with CANDIDATES
+-- "t0/p1:f0:u1:a0/p2:f2:a0/p16:f0:u0:a0,2/p4:f3,1:a0,2,3"
+-- (P(t, F(g1(a, not b), P(g2(c), P(g0(a, not a), g3(d, b))))), one 5-bit
+-- token and four flags, g0 a guard that can never pass), driven by the
+-- rounds of race-vectors.txt one a cycle -- the inputs set, the
+-- combinational outputs checked against the requirement's, the clock ticks.
+-- Random rounds, each input's token held until taken, the sink stalling at
+-- random: a candidate wins once its flags arrived as it needs them and every
+-- candidate before it refused, the lowest-index winner of a cycle wins, zero
+-- once every candidate is refused, an answer is held while stalled, an input
+-- that gave its token is ready again in the cycle the round completes and
+-- gives the next round's then, which is answered then when it decides and
+-- the output is free. Fails (severity failure) on the first thing wrong.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -22,11 +23,11 @@ end entity;
 
 architecture sim of tb is
   signal clk, rst : std_logic := '1';
-  signal tokens : data_array(0 downto 0)(3 downto 0) := (others => (others => '0'));
+  signal tokens : data_array(0 downto 0)(4 downto 0) := (others => (others => '0'));
   signal tokens_valid, tokens_ready : std_logic_vector(0 downto 0) := (others => '0');
   signal flags : data_array(3 downto 0)(0 downto 0) := (others => (others => '0'));
   signal flags_valid, flags_ready : std_logic_vector(3 downto 0) := (others => '0');
-  signal outs : std_logic_vector(3 downto 0);
+  signal outs : std_logic_vector(4 downto 0);
   signal outs_valid, outs_ready : std_logic := '0';
 begin
   clk <= not clk after 5 ns;
@@ -56,7 +57,7 @@ begin
         end loop;
         -- input 0 the token, 1 to 4 the flags
         tokens_valid(0) <= '1' when e(0) = 1 else '0';
-        tokens(0) <= std_logic_vector(to_unsigned(e(5), 4));
+        tokens(0) <= std_logic_vector(to_unsigned(e(5), 5));
         for k in 0 to 3 loop
           flags_valid(k) <= '1' when e(1 + k) = 1 else '0';
           flags(k)(0) <= '1' when e(6 + k) = 1 else '0';
