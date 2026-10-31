@@ -1630,9 +1630,45 @@
       {
         "name": "CANDIDATES",
         "type": "string"
+      },
+      {
+        "name": "REOPEN_AFTER_TAKEN",
+        "type": "unsigned",
+        "eq": 1
+      }
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/verilog/verilog-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.v -t race -p size_tokens=$SIZE_TOKENS size_flags=$SIZE_FLAGS bitwidth=$BITWIDTH candidates=\"'$CANDIDATES'\" extra_signals=$EXTRA_SIGNALS reopen_after_taken=$REOPEN_AFTER_TAKEN",
+    "hdl": "verilog"
+  },
+  {
+    "name": "handshake.race",
+    "parameters": [
+      {
+        "name": "SIZE_TOKENS",
+        "type": "unsigned"
+      },
+      {
+        "name": "SIZE_FLAGS",
+        "type": "unsigned"
+      },
+      {
+        "name": "CANDIDATES",
+        "type": "string"
       }
     ],
     "generator": "python $DYNAMATIC/experimental/tools/unit-generators/verilog/verilog-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.v -t race -p size_tokens=$SIZE_TOKENS size_flags=$SIZE_FLAGS bitwidth=$BITWIDTH candidates=\"'$CANDIDATES'\" extra_signals=$EXTRA_SIGNALS",
+    "hdl": "verilog"
+  },
+  {
+    "name": "handshake.commit",
+    "parameters": [
+      {
+        "name": "KILL_AT_VALID",
+        "type": "unsigned",
+        "eq": 1
+      }
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/verilog/verilog-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.v -t commit -p bitwidth=$BITWIDTH extra_signals=$EXTRA_SIGNALS kill_at_valid=$KILL_AT_VALID",
     "hdl": "verilog"
   },
   {

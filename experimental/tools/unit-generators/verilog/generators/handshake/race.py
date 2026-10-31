@@ -53,6 +53,11 @@ def generate_race(name, params):
     output is free (`e_`). The output's valid reads no ready. Alternatives
     (candidates of one payload, or of one token) are terms like any other:
     those that win together carry the same payload.
+
+    `reopen_after_taken` (1): an input that gave its token is ready again
+    only with the answer taken in an earlier cycle (`emitted`), as the
+    VHDL's: `done_wo` reads no `outs_ready`. It is per input, so a race's
+    alternatives do not change it.
     """
     nt = params["size_tokens"]
     nf = params["size_flags"]
@@ -67,11 +72,17 @@ def generate_race(name, params):
             "signals would lose them (the op's verifier refuses it)")
     if nt + nf == 0:
         raise ValueError("handshake.race has no input")
+    reopen_after_taken = int(params.get("reopen_after_taken", 0))
+    if reopen_after_taken not in (0, 1):
+        raise ValueError("handshake.race: reopen_after_taken is 0 or 1, not "
+                         f"{reopen_after_taken}")
     cands = parse_candidates(params["candidates"], nt, nf, w)
-    return _generate_race(name, nt, nf, w, cands, params["candidates"])
+    return _generate_race(name, nt, nf, w, cands, params["candidates"],
+                          reopen_after_taken)
 
 
-def _generate_race(name, nt, nf, w, cands, encoding):
+def _generate_race(name, nt, nf, w, cands, encoding, reopen_after_taken=0):
+    reopen = "emitted" if reopen_after_taken else "emitted | outs_ready"
     n = nt + nf
     c = len(cands)
 
@@ -211,7 +222,7 @@ module {name}(
   // An input that gave its token is ready again the cycle the round
   // completes, read from the OTHER inputs alone; what it gives then is the
   // next round's, answered now when it decides and the output is free.
-  wire [{n} - 1 : 0] done_wo = others_in & {{{n}{{emitted | outs_ready}}}};
+  wire [{n} - 1 : 0] done_wo = others_in & {{{n}{{{reopen}}}}};
   wire [{n} - 1 : 0] again   = iv & seen & done_wo;
   wire early = emitted & closing & (e_any_win | e_all_ref);
   {nl.join(readies)}

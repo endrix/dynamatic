@@ -150,7 +150,13 @@ def characterize_generated(unit_name, entries, dirs, dynamatic_dir,
             if size == base:
                 keys.append(unit_name)
         variant = generated_units.variant_key(unit_name, variables)
-        if variant:
+        if variant and (sized or raced):
+            # another circuit of a sized unit: its own entries at its sizes
+            size = int(variables["SIZE"])
+            keys = [generated_units.size_key(variant, size)]
+            if size == base:
+                keys.append(variant)
+        elif variant:
             keys = [variant]
         if "BUFFER_TYPE" in variables:
             # a slot type's own entry beside the base one, which reduces over

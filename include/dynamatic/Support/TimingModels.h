@@ -296,6 +296,12 @@ public:
   double validToCond = 0.0;
   /// Combinational delay from any valid input to any data output.
   double validToData = 0.0;
+  /// A commit's kill (`handshake.commit`, "VK" and "RK"): the combinational
+  /// delay from its valid in, and from its ready out, to its kill. Zero in a
+  /// model without them, and for every unit with no kill out. A commit whose
+  /// kill comes when its token is first offered has no ready-to-kill path.
+  double validToKill = 0.0;
+  double readyToKill = 0.0;
 
   /// Computes the total data delay (input + internal + output delays) for a
   /// specific bitwidth. Fails if the provided bitwidth exceeds the highest data

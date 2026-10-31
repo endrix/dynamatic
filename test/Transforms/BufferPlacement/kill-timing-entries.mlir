@@ -1,10 +1,16 @@
 // The units a commit stops have entries of their own: a stand-in is timed by
 // the entry for its number of kills, `handshake.stand_in.size.<N>` (as
 // HandshakeToHW writes its SIZE), and a load in a kill domain, which counts
-// and drops the words it owes, by `handshake.load.kill_drop`. The model in
-// Inputs gives the one-kill stand-in and the plain load a 0.001 ns data path
-// and the two-kill stand-in and the dropping load a 1.5 ns one, so at a
-// 2.0 ns period the placer cuts only where the longer entry is read.
+// and drops the words it owes, by `handshake.load.kill_drop`; a commit
+// whose kill comes when its token is first offered (`kill_at_valid`) by
+// `handshake.commit.at_valid`; and a race whose inputs reopen only after its
+// answer was taken (`reopen_after_taken`) by its own sized entries,
+// `handshake.race.reopen_after_taken.size.<N>`, where the plain race reads
+// `handshake.race.size.<N>`. The model in Inputs gives the one-kill
+// stand-in, the plain load, the transfer's commit and the plain race a
+// 0.001 ns (or no) data path and the two-kill stand-in, the dropping load,
+// the at-valid commit and the reopening race a 1.5 ns one, so at a 2.0 ns
+// period the placer cuts only where the longer entry is read.
 //
 // REQUIRES: cbc
 // RUN: dynamatic-opt %s --handshake-place-buffers="algorithm=fpga20 solver=cbc timeout=30 target-period=2.0 timing-models=%S/Inputs/kill-timing-models.json spec-timing-models=%dynamatic_src_root/data/spec-timing.json" --remove-operation-names 2>/dev/null | FileCheck %s
@@ -59,4 +65,55 @@ handshake.func @dropping_load(%addr: !handshake.channel<i2>, %mem: memref<4xi8>,
   %memData, %memEnd = mem_controller [%mem : memref<4xi8>] %memStart (%ldAddr) %ctrlEnd {connectedBlocks = [0 : i32]} : (!handshake.channel<i2>) -> !handshake.channel<i8>
   %c = trunci %ldData {handshake.bb = 0 : ui32} : <i8> to <i1>
   end %c, %memEnd, %start : <i1>, <>, <>
+}
+
+// Two transfer's commits in a row (two domains stopped by one decision): no
+// data path, nothing is placed.
+// CHECK-LABEL: handshake.func @transfer_commits
+// CHECK-NOT:   buffer
+// CHECK:       end
+handshake.func @transfer_commits(%d: !handshake.channel<i3>, %f: !handshake.channel<i8>, %start: !handshake.control<>, ...) -> (!handshake.channel<i3>, !handshake.channel<i8>, !handshake.channel<i8>, !handshake.control<>) attributes {argNames = ["d", "f", "start"], resNames = ["d_out", "f_out", "g_out", "end"], handshake.frequencies = []} {
+  %o1, %k1 = commit %d {handshake.bb = 0 : ui32} : <i3>
+  %o2, %k2 = commit %o1 {domain = 1 : ui32, handshake.bb = 0 : ui32} : <i3>
+  %ff:2 = fork [2] %f {handshake.bb = 0 : ui32} : <i8>
+  %a = stand_in %ff#0, %k1 {handshake.bb = 0 : ui32} : <i8>
+  %b = stand_in %ff#1, %k2 {handshake.bb = 0 : ui32} : <i8>
+  end %o2, %a, %b, %start : <i3>, <i8>, <i8>, <>
+}
+
+// The same two with `kill_at_valid`: their entry's 1.5 ns twice does not fit
+// in 2.0 ns, and the placer cuts between them.
+// CHECK-LABEL: handshake.func @at_valid_commits
+// CHECK:       commit
+// CHECK-NEXT:  buffer
+// CHECK-NEXT:  commit
+handshake.func @at_valid_commits(%d: !handshake.channel<i3>, %f: !handshake.channel<i8>, %start: !handshake.control<>, ...) -> (!handshake.channel<i3>, !handshake.channel<i8>, !handshake.channel<i8>, !handshake.control<>) attributes {argNames = ["d", "f", "start"], resNames = ["d_out", "f_out", "g_out", "end"], handshake.frequencies = []} {
+  %o1, %k1 = commit %d {handshake.bb = 0 : ui32, kill_at_valid} : <i3>
+  %o2, %k2 = commit %o1 {domain = 1 : ui32, handshake.bb = 0 : ui32, kill_at_valid} : <i3>
+  %ff:2 = fork [2] %f {handshake.bb = 0 : ui32} : <i8>
+  %a = stand_in %ff#0, %k1 {handshake.bb = 0 : ui32} : <i8>
+  %b = stand_in %ff#1, %k2 {handshake.bb = 0 : ui32} : <i8>
+  end %o2, %a, %b, %start : <i3>, <i8>, <i8>, <>
+}
+
+// Two plain races of two tokens in a row: 0.001 ns twice, nothing placed.
+// CHECK-LABEL: handshake.func @plain_races
+// CHECK-NOT:   buffer
+// CHECK:       end
+handshake.func @plain_races(%a: !handshake.channel<i2>, %b: !handshake.channel<i2>, %c: !handshake.channel<i2>, %start: !handshake.control<>, ...) -> (!handshake.channel<i2>, !handshake.control<>) attributes {argNames = ["a", "b", "c", "start"], resNames = ["out", "end"], handshake.frequencies = []} {
+  %x = race [%a, %b] [] {candidates = [{token = 0 : i64}, {token = 1 : i64, after = array<i64: 0>}], handshake.bb = 0 : ui32} : <i2>
+  %y = race [%x, %c] [] {candidates = [{token = 0 : i64}, {token = 1 : i64, after = array<i64: 0>}], handshake.bb = 0 : ui32} : <i2>
+  end %y, %start : <i2>, <>
+}
+
+// The same two reopening only after their answer was taken: their own
+// entry's 1.5 ns twice does not fit, and the placer cuts between them.
+// CHECK-LABEL: handshake.func @reopening_races
+// CHECK:       race
+// CHECK-NEXT:  buffer
+// CHECK-NEXT:  race
+handshake.func @reopening_races(%a: !handshake.channel<i2>, %b: !handshake.channel<i2>, %c: !handshake.channel<i2>, %start: !handshake.control<>, ...) -> (!handshake.channel<i2>, !handshake.control<>) attributes {argNames = ["a", "b", "c", "start"], resNames = ["out", "end"], handshake.frequencies = []} {
+  %x = race [%a, %b] [] {candidates = [{token = 0 : i64}, {token = 1 : i64, after = array<i64: 0>}], handshake.bb = 0 : ui32, reopen_after_taken} : <i2>
+  %y = race [%x, %c] [] {candidates = [{token = 0 : i64}, {token = 1 : i64, after = array<i64: 0>}], handshake.bb = 0 : ui32, reopen_after_taken} : <i2>
+  end %y, %start : <i2>, <>
 }

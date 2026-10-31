@@ -31,3 +31,16 @@ handshake.func @commit(%d: !handshake.channel<i3>, %f: !handshake.channel<i1>,
   %2 = stand_in %h, %ckill, %ekill1 : <i1>
   end %out, %0, %ctrl, %1, %e1, %2 : <i3>, <i1>, <>, <i2>, <i3>, <i1>
 }
+
+// A commit whose kill comes when its token is first offered prints its
+// `kill_at_valid` and parses back.
+// CHECK-LABEL: handshake.func @at_valid
+// CHECK: %[[O:.*]], %[[K:.*]] = commit %arg0 {domain = 3 : ui32, kill_at_valid} : <i3>
+// CHECK: %[[S:.*]] = stand_in %arg1, %[[K]] : <i1>
+handshake.func @at_valid(%d: !handshake.channel<i3>, %f: !handshake.channel<i1>, ...)
+    -> (!handshake.channel<i3>, !handshake.channel<i1>)
+    attributes {argNames = ["d", "f"], resNames = ["d_out", "f_out"]} {
+  %out, %kill = commit %d {domain = 3 : ui32, kill_at_valid} : <i3>
+  %0 = stand_in %f, %kill : <i1>
+  end %out, %0 : <i3>, <i1>
+}

@@ -49,6 +49,10 @@ NO_EXTRA_SIGNALS = "'{}'"
 #              kill domain), an entry of its own (VARIANT_KEYS), not reduced
 #              into the base entry, which stays the plain load every other
 #              design has.
+#   KILL_AT_VALID  a commit whose kill comes when its token is first offered
+#              (a flip-flop more, the kill from the valid alone) and the
+#              transfer's: another circuit, an entry of its own as KILL_DROP's
+#              (`handshake.commit.at_valid`).
 ATTRIBUTE_VALUES = {
     "SIZE": parameters_ranges["SIZE"],
     "PREDICATE": ["eq", "ne", "ult", "ule", "ugt", "uge",
@@ -57,6 +61,7 @@ ATTRIBUTE_VALUES = {
     "IMPL": ["pipelined"],
     "STEP": [1],
     "KILL_DROP": [0, 1],
+    "KILL_AT_VALID": [0, 1],
 }
 
 # The attributes that, set, make a point another circuit with an entry of its
@@ -64,6 +69,10 @@ ATTRIBUTE_VALUES = {
 # reduces over: attribute -> suffix.
 VARIANT_KEYS = {
     "KILL_DROP": "kill_drop",
+    "KILL_AT_VALID": "at_valid",
+    # a race whose inputs reopen only after its answer was taken: its own
+    # entries, sized as the plain race's (`<name>.reopen_after_taken.size.<N>`)
+    "REOPEN_AFTER_TAKEN": "reopen_after_taken",
 }
 
 
@@ -178,23 +187,31 @@ def race_encoding(cands, width):
 def race_points(entries, widths, sizes):
     """Every race the sweep characterizes: (entry, variables, width) per
     shape, size and width, `SIZE` its inputs (which keys its entry), `SHAPE`
-    the nest's name (which the command does not read)."""
-    entry = entries[0]
+    the nest's name (which the command does not read). Every form the
+    configuration has is written at each point -- an entry that constrains
+    a parameter with `eq` at that value: REOPEN_AFTER_TAKEN, a race whose
+    inputs reopen only after its answer was taken, which VARIANT_KEYS sends
+    to entries of its own, sized as the plain race's."""
     result = []
-    for size in sizes:
-        point_widths = widths if size == sizes[0] else SIZED_WIDTHS
-        for name, (nt, nf, cands) in race_shapes(size).items():
-            for width in point_widths:
-                encoding = race_encoding(cands, width)
-                if encoding is None:
-                    continue
-                variables = {"SIZE": size, "SHAPE": name, "SIZE_TOKENS": nt,
-                             "SIZE_FLAGS": nf, "CANDIDATES": encoding,
-                             "BITWIDTH": width,
-                             "EXTRA_SIGNALS": NO_EXTRA_SIGNALS}
-                missing = command_variables(entry["generator"]) - set(variables)
-                assert not missing, f"{RACE_UNIT}: nothing fills {sorted(missing)}"
-                result.append((entry, variables, width))
+    for entry in entries:
+        fixed = {param["name"]: param["eq"]
+                 for param in entry.get("parameters", []) if "eq" in param}
+        for size in sizes:
+            point_widths = widths if size == sizes[0] else SIZED_WIDTHS
+            for name, (nt, nf, cands) in race_shapes(size).items():
+                for width in point_widths:
+                    encoding = race_encoding(cands, width)
+                    if encoding is None:
+                        continue
+                    variables = dict(fixed)
+                    variables.update({"SIZE": size, "SHAPE": name,
+                                      "SIZE_TOKENS": nt, "SIZE_FLAGS": nf,
+                                      "CANDIDATES": encoding,
+                                      "BITWIDTH": width,
+                                      "EXTRA_SIGNALS": NO_EXTRA_SIGNALS})
+                    missing = command_variables(entry["generator"]) - set(variables)
+                    assert not missing, f"{RACE_UNIT}: nothing fills {sorted(missing)}"
+                    result.append((entry, variables, width))
     return result
 
 

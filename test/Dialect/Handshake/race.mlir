@@ -109,3 +109,17 @@ handshake.func @sets(%a: !handshake.channel<i1>, %b: !handshake.channel<i1>,
        ]} : <i3>
   end %0 : <i3>
 }
+
+// A race whose inputs reopen only after its answer was taken prints its
+// `reopen_after_taken` and parses back.
+// CHECK-LABEL: handshake.func @reopen
+// CHECK: race [] [%arg0, %arg1] {candidates = [{flags = array<i64: 0>, payload = 1 : ui2}, {after = array<i64: 0>, flags = array<i64: 1>, payload = 2 : ui2}], reopen_after_taken} : <i2>
+handshake.func @reopen(%a: !handshake.channel<i1>, %b: !handshake.channel<i1>, ...)
+    -> !handshake.channel<i2>
+    attributes {argNames = ["a", "b"], resNames = ["out0"]} {
+  %0 = race [] [%a, %b] {candidates = [
+         {payload = 1 : ui2, flags = array<i64: 0>},
+         {payload = 2 : ui2, flags = array<i64: 1>, after = array<i64: 0>}
+       ], reopen_after_taken} : <i2>
+  end %0 : <i2>
+}

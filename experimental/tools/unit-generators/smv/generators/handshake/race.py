@@ -66,6 +66,10 @@ def generate_race(name, params):
     The parameters: the tokens' payloads, their valids, the flags, their
     valids, the output's ready -- export-rtl's order for the arrays `tokens`
     and `flags`.
+
+    `reopen_after_taken` (1): an input that gave its token is ready again
+    only with the answer taken in an earlier cycle (`emitted`), as the RTL's:
+    `done_wo_<i>` reads no `outs_ready`.
     """
     nt = params["size_tokens"]
     nf = params["size_flags"]
@@ -77,11 +81,17 @@ def generate_race(name, params):
             "and zero is 'nothing selected'.")
     if nt + nf == 0:
         raise ValueError("handshake.race has no input")
+    reopen_after_taken = int(params.get("reopen_after_taken", 0))
+    if reopen_after_taken not in (0, 1):
+        raise ValueError("handshake.race: reopen_after_taken is 0 or 1, not "
+                         f"{reopen_after_taken}")
     cands = parse_candidates(params["candidates"], nt, nf, w)
-    return _generate_race(name, nt, nf, data_type, cands, params["candidates"])
+    return _generate_race(name, nt, nf, data_type, cands, params["candidates"],
+                          reopen_after_taken)
 
 
-def _generate_race(name, nt, nf, data_type, cands, encoding):
+def _generate_race(name, nt, nf, data_type, cands, encoding, reopen_after_taken=0):
+    reopen = "emitted" if reopen_after_taken else "(emitted | outs_ready)"
     n = nt + nf
     w = data_type.bitwidth
     zero = data_type.format_constant(0)
@@ -148,7 +158,7 @@ def _generate_race(name, nt, nf, data_type, cands, encoding):
     d.append("fire := valid_i & outs_ready;")
     d.append("done := closing & (emitted | fire);")
     for i in range(n):
-        d.append(f"done_wo_{i} := others_in_{i} & (emitted | outs_ready);")
+        d.append(f"done_wo_{i} := others_in_{i} & {reopen};")
         d.append(f"again_{i} := {iname(i)}_valid & seen_{i} & done_wo_{i};")
         d.append(f"e_arr_{i} := {iname(i)}_valid & seen_{i} & others_in_{i} & emitted;")
     for t in range(nt):

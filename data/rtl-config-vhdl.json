@@ -460,12 +460,49 @@
       {
         "name": "CANDIDATES",
         "type": "string"
+      },
+      {
+        "name": "REOPEN_AFTER_TAKEN",
+        "type": "unsigned",
+        "eq": 1
+      }
+    ],
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t race -p size_tokens=$SIZE_TOKENS size_flags=$SIZE_FLAGS bitwidth=$BITWIDTH candidates=\"'$CANDIDATES'\" extra_signals=$EXTRA_SIGNALS reopen_after_taken=$REOPEN_AFTER_TAKEN",
+    "dependencies": [
+      "types"
+    ]
+  },
+  {
+    "name": "handshake.race",
+    "parameters": [
+      {
+        "name": "SIZE_TOKENS",
+        "type": "unsigned"
+      },
+      {
+        "name": "SIZE_FLAGS",
+        "type": "unsigned"
+      },
+      {
+        "name": "CANDIDATES",
+        "type": "string"
       }
     ],
     "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t race -p size_tokens=$SIZE_TOKENS size_flags=$SIZE_FLAGS bitwidth=$BITWIDTH candidates=\"'$CANDIDATES'\" extra_signals=$EXTRA_SIGNALS",
     "dependencies": [
       "types"
     ]
+  },
+  {
+    "name": "handshake.commit",
+    "parameters": [
+      {
+        "name": "KILL_AT_VALID",
+        "type": "unsigned",
+        "eq": 1
+      }
+    ],
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t commit -p bitwidth=$BITWIDTH extra_signals=$EXTRA_SIGNALS kill_at_valid=$KILL_AT_VALID"
   },
   {
     "name": "handshake.commit",

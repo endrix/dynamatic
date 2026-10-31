@@ -12,7 +12,7 @@ answer what the record says, the cycle it says. Nothing here reads the
 unit's registers.
 
 Usage:
-    python3 verify-race.py --shape NAME [--checker PATH]
+    python3 verify-race.py --shape NAME [--reopen-after-taken] [--checker PATH]
 
 The shapes are the nests a lowering makes: a chain of priorities, an F of
 incomparable guards, a guard alone over flags and a negated flag, a mixed
@@ -21,6 +21,12 @@ negation (formation's P and not P) in an F under a priority, and a shared
 subtree taken in under two sets of predecessors (alternatives: one token
 read by two candidates, one payload two). `--checker` defaults to $NUSMV,
 then NuSMV, then nuXmv on PATH (see verify-first.py for a build).
+
+With --reopen-after-taken the unit is the race whose inputs reopen only after
+its answer was taken (`reopen_after_taken`): an input that gave its token is
+taken again only in a closing cycle whose answer was out BEFORE it, never in
+the cycle the answer is taken; and, structurally, no input's ready reads the
+output's ready.
 """
 import argparse
 import os
@@ -57,7 +63,7 @@ SHAPES = {
 }
 
 
-def observer(name, nt, nf, w, cands):
+def observer(name, nt, nf, w, cands, reopen_after_taken=False):
     """The specification, and the free environment that exercises it."""
     ty = SmvScalarType(w)
     Z = ty.format_constant(0)
@@ -153,6 +159,9 @@ MODULE main
   -- the round closes once every input gave its token and the answer was
   -- taken
   closes := all_in & (answered | x_out);
+  -- an input that gave its token is ready again: in the cycle the round
+  -- closes{" with its answer out before it" if reopen_after_taken else ""}
+  reopens := {"all_in & answered" if reopen_after_taken else "closes"};
 
   ASSIGN
 {nl.join(f"  init(got{i}) := FALSE;{nl}  next(got{i}) := closes ? nxt{i} : in{i};" for i in range(n))}
@@ -188,8 +197,8 @@ MODULE main
   INVARSPEC NAME next_decides_now := (closes & answered & n_decided) -> dut.outs_valid
   -- CONSUMPTION ON ARRIVAL: an input that has not given this round's token
   -- is taken the cycle it is offered; one that has, only in the cycle the
-  -- round closes, and that token is the next round's.
-{nl.join(f"  INVARSPEC NAME on_arrival_{i} := dut.{iname(i)}_ready <-> (!got{i} | closes)" for i in range(n))}
+  -- round closes (reopens), and that token is the next round's.
+{nl.join(f"  INVARSPEC NAME on_arrival_{i} := dut.{iname(i)}_ready <-> (!got{i} | reopens)" for i in range(n))}
   -- the answer, once offered, stays offered and unchanged until taken
   INVARSPEC NAME held := was_offered -> (dut.outs_valid & dut.outs = was_outs)
   -- NO DEADLOCK: an answer stays reachable from every reachable state.
@@ -207,6 +216,7 @@ def find_checker(explicit):
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--shape", choices=sorted(SHAPES), required=True)
+    ap.add_argument("--reopen-after-taken", action="store_true")
     ap.add_argument("--checker", default=None)
     args = ap.parse_args()
 
@@ -214,9 +224,10 @@ def main() -> int:
     name = f"race_{args.shape}"
     model = race_gen.generate_race(name, {
         "size_tokens": nt, "size_flags": nf, ATTR_BITWIDTH: w,
-        "candidates": encoding})
+        "candidates": encoding,
+        "reopen_after_taken": int(args.reopen_after_taken)})
     cands = race_gen.parse_candidates(encoding, nt, nf, w)
-    text = model + observer(name, nt, nf, w, cands)
+    text = model + observer(name, nt, nf, w, cands, args.reopen_after_taken)
 
     checker = find_checker(args.checker)
     if not checker:
@@ -246,10 +257,17 @@ def main() -> int:
         specs.append(f"-- structure {port}_ready reads not {port}_valid  is {'false' if own else 'true'}")
     loop = "outs_ready" in reads["outs_valid"]
     specs.append(f"-- structure outs_valid reads not outs_ready  is {'false' if loop else 'true'}")
+    # REOPEN AFTER TAKEN: no input's ready reads the output's ready
+    if args.reopen_after_taken:
+        for i in range(nt + nf):
+            port = f"tokens_{i}" if i < nt else f"flags_{i - nt}"
+            back = "outs_ready" in reads[f"{port}_ready"]
+            specs.append(f"-- structure {port}_ready reads not outs_ready  is {'false' if back else 'true'}")
     bad = [l for l in specs if "is false" in l]
     for l in specs:
         print(("  FAIL " if "is false" in l else "  ok   ") + l[3:])
-    print(f"\n  shape {args.shape} ({encoding}): "
+    form = ", reopen after taken" if args.reopen_after_taken else ""
+    print(f"\n  shape {args.shape}{form} ({encoding}): "
           f"{len(specs) - len(bad)} of {len(specs)} properties hold")
     if len(specs) <= nt + nf + 1:
         print(out, file=sys.stderr)

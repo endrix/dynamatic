@@ -31,7 +31,16 @@ S's answer wins once h OR k is refused: candidates 4 and 5 are the
 ALTERNATIVES of 1 and 2 (the same answer after other candidates), and win
 alone when k is refused before h is decided (`later_alternative`).
 
-Usage: race_spec.py [cycles [seed [shape]]] > race-vectors.txt
+Usage: race_spec.py [--reopen-after-taken] [cycles [seed [shape]]]
+       > race-vectors.txt
+
+--reopen-after-taken: the race whose inputs reopen only after its answer was
+taken (`reopen_after_taken`): an input that gave its token is ready again
+only in a closing cycle whose answer was out BEFORE it, not in the cycle the
+answer is taken (race-vectors-reopen.txt; `taking` counts the cycles the two
+forms tell apart: a closing cycle that takes its answer while an input that
+gave its token offers the next round's). It is per input, so it composes with
+any shape, `alt` included.
 """
 import random
 import sys
@@ -90,6 +99,7 @@ TIES = [0]
 # the lowest-index winner an alternative of an earlier candidate (which does
 # not win), and two alternatives of one answer winning together
 ALTS = [False, False]
+REOPEN_AFTER_TAKEN = [False]
 
 
 def same_answer(c, d):
@@ -172,8 +182,12 @@ class Spec:
         answer = s.held if s.held is not None else decided
         valid_n = (not s.answered) and answer is not None
         closes = allin and (s.answered or (valid_n and rdy))
-        ready = [(not s.got[i]) or closes for i in range(n)]
-        nxt = [v[i] and s.got[i] and closes for i in range(n)]
+        # an input that gave its token is ready again in the closing cycle;
+        # reopening after the answer was taken, only once it was, before
+        reopens = (allin and s.answered) if REOPEN_AFTER_TAKEN[0] else closes
+        taking = closes and not s.answered and any(v[i] and s.got[i] for i in range(n))
+        ready = [(not s.got[i]) or reopens for i in range(n)]
+        nxt = [v[i] and s.got[i] and reopens for i in range(n)]
         early_answer = decide(nxt, d) if s.answered and closes else None
         early = early_answer is not None
         ov = valid_n or early
@@ -199,7 +213,9 @@ class Spec:
                   "zero_early": valid_n and answer == 0 and not allin,
                   "dominated": valid_n and answer in SHAPE["dominated"],
                   "tie": valid_n and s.held is None and tie,
-                  "held": held}
+                  "held": held,
+                  # the cycles the two reopening forms tell apart
+                  "taking": taking}
         if DEAD is not None:
             events["dead_waits"] = waits_on_dead(arrived, value)
         if any(same_answer(c, d) for k, c in enumerate(CANDS) for d in CANDS[:k]):
@@ -235,12 +251,17 @@ def vectors(cycles, seed):
 
 
 if __name__ == "__main__":
-    cycles = int(sys.argv[1]) if len(sys.argv) > 1 else 600
-    if len(sys.argv) > 3:
-        use(sys.argv[3])
-    seed = int(sys.argv[2]) if len(sys.argv) > 2 else SHAPE["seed"]
+    argv = sys.argv[1:]
+    if argv and argv[0] == "--reopen-after-taken":
+        REOPEN_AFTER_TAKEN[0] = True
+        argv = argv[1:]
+    cycles = int(argv[0]) if len(argv) > 0 else 600
+    if len(argv) > 2:
+        use(argv[2])
+    seed = int(argv[1]) if len(argv) > 1 else SHAPE["seed"]
     lines, seen = vectors(cycles, seed)
-    print(f"# handshake.race {ENCODING}: one token (5 bits) and four flags,")
+    form = ", reopening after its answer was taken" if REOPEN_AFTER_TAKEN[0] else ""
+    print(f"# handshake.race {ENCODING}{form}: one token (5 bits) and four flags,")
     print("# random rounds, one a line, expected from the requirement")
     print("# (race_spec.py). Columns: the five valids (token, then flags a b c d),")
     print("# the five values, outs_ready, then the expected outs_valid, outs")
