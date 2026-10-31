@@ -586,7 +586,7 @@ namespace handshake {
 struct RaceCandidate {
   /// The payload, non-zero, as wide as the race; unused for a token
   /// candidate. Candidates of one payload are alternatives of it (they
-  /// differ in `after`).
+  /// read the same flags and differ in `after`).
   llvm::APInt payload;
   /// The token input the candidate is, for a token candidate; several
   /// candidates may be one token, alternatives as for a payload.

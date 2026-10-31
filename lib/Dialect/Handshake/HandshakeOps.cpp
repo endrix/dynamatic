@@ -392,7 +392,8 @@ ArrayAttr dynamatic::handshake::getRaceCandidatesAttr(
 /// candidates name inputs that exist, each input at least once, and their
 /// priorities are a strict partial order written out in full (`after`
 /// transitively closed and irreflexive, hence acyclic). Candidates of one
-/// payload, or of one token input, are alternatives and differ in `after`.
+/// payload, or of one token input, are alternatives: they read the same
+/// flags and differ in `after`.
 /// Every candidate reads an input -- one that reads none would win before
 /// anything of its round arrived, in a round the unit cannot see start -- and a
 /// race of one candidate has a flag (one token alone is a wire). A candidate's
@@ -478,33 +479,49 @@ LogicalResult RaceOp::verify() {
   for (auto [f, uses] : llvm::enumerate(flagUses))
     if (uses == 0)
       return emitOpError() << "flag " << f << " is read by no candidate";
-  // ALTERNATIVES: candidates of one payload, or of one token input, are each
-  // a way for that answer to win -- a subtree of the nest the race took in
-  // under two sets of predecessors -- and differ in `after`: two of one
-  // answer after the same candidates would be one way written twice.
+  // ALTERNATIVES: candidates of one payload, or of one token input, are one
+  // candidate under other predecessors -- a subtree of the nest the race
+  // took in at two places -- so they read the same flags and differ in
+  // `after`, each list compared as a set. Two over other flags would be two
+  // guards of one answer, which no nest makes; two after the same
+  // candidates, one candidate written twice.
   auto sameAnswer = [](const RaceCandidate &a, const RaceCandidate &b) {
     if (a.isToken() || b.isToken())
       return a.token == b.token;
     return a.payload == b.payload;
   };
-  SmallVector<SmallVector<unsigned>> sortedAfter;
+  auto asSet = [](ArrayRef<unsigned> list) {
+    SmallVector<unsigned> set(list.begin(), list.end());
+    llvm::sort(set);
+    return set;
+  };
+  SmallVector<SmallVector<unsigned>> sortedFlags, sortedUnless, sortedAfter;
   for (const RaceCandidate &cand : cands) {
-    sortedAfter.emplace_back(cand.after.begin(), cand.after.end());
-    llvm::sort(sortedAfter.back());
+    sortedFlags.push_back(asSet(cand.flags));
+    sortedUnless.push_back(asSet(cand.unless));
+    sortedAfter.push_back(asSet(cand.after));
   }
   for (unsigned k = 0; k < n; ++k)
-    for (unsigned j = 0; j < k; ++j)
-      if (sameAnswer(cands[j], cands[k]) && sortedAfter[j] == sortedAfter[k]) {
-        InFlightDiagnostic diag = emitOpError() << "candidates " << j << " and "
-                                                << k << " are ";
-        if (cands[k].isToken())
-          diag << "token " << *cands[k].token;
-        else
-          diag << "payload "
-               << llvm::toString(cands[k].payload, 10, /*Signed=*/false);
-        return diag << " after the same candidates: the alternatives of one "
-                       "answer differ in their `after`";
-      }
+    for (unsigned j = 0; j < k; ++j) {
+      if (!sameAnswer(cands[j], cands[k]))
+        continue;
+      bool sameFlags = sortedFlags[j] == sortedFlags[k] &&
+                       sortedUnless[j] == sortedUnless[k];
+      if (sameFlags && sortedAfter[j] != sortedAfter[k])
+        continue;
+      InFlightDiagnostic diag = emitOpError() << "candidates " << j << " and "
+                                              << k << " are ";
+      if (cands[k].isToken())
+        diag << "token " << *cands[k].token;
+      else
+        diag << "payload "
+             << llvm::toString(cands[k].payload, 10, /*Signed=*/false);
+      if (!sameFlags)
+        return diag << " over other flags: the alternatives of one answer "
+                       "read the same flags";
+      return diag << " after the same candidates: the alternatives of one "
+                     "answer differ in their `after`";
+    }
   // Transitively closed: what must be refused before j must be refused
   // before every candidate after j. With no candidate after itself, the
   // order is then acyclic too (a cycle would put its members after

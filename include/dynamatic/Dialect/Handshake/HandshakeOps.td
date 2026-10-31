@@ -794,10 +794,13 @@ def RaceOp : Handshake_Op<"race", [
 
     ALTERNATIVES. Several candidates may answer the same: one payload, or
     one token input (an input is read by every candidate that names it).
-    Each is an ALTERNATIVE of that answer, which wins when any of them wins,
-    and they differ in `after` -- two of one answer after the same
-    candidates would be one alternative written twice, and are refused.
-    They are what a SHARED subtree of a nest becomes in one race: esa
+    Each is an ALTERNATIVE of that answer, which wins when any of them wins:
+    the same candidate under other predecessors. Alternatives read the same
+    flags (`flags` and `unless`, each compared as a set) and differ in
+    `after` (a set too). Two of one answer over other flags would be two
+    guards of one answer, which no nest makes, and are refused; two after
+    the same candidates would be one alternative written twice, and are
+    refused. They are what a SHARED subtree of a nest becomes in one race: esa
     synthesis shares a subnetwork between the decisions that read it (its
     W(y), through an `esa.fork`), and a race that takes such a subtree in
     once for each position that reads it gives each copy of its candidates

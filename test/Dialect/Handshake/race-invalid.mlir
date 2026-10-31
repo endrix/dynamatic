@@ -6,7 +6,8 @@
 // a token, never both and never neither, reads inputs that exist and at
 // least one, and its predecessors are a strict partial order written out in
 // full; every input is read by a candidate, and candidates of one answer (a
-// payload, or a token input) -- its alternatives -- differ in `after`.
+// payload, or a token input) -- its alternatives -- read the same flags and
+// differ in `after`.
 
 // A dataless race would decide nothing: zero is "nothing selected" (its
 // result is a channel by its type).
@@ -100,12 +101,36 @@ handshake.func @field(%a: !handshake.channel<i1>, ...) -> !handshake.channel<i2>
 
 // -----
 
-// Two candidates of payload 1 after the same (no) candidates: alternatives of
-// one payload differ in `after` (race.mlir's @alternatives, @either).
+// Two candidates of payload 1 over other flags (1 when a holds, or b): two
+// guards of one answer, not one candidate under two sets of predecessors.
+// Alternatives read the same flags (race.mlir's @alternatives, @sets).
 handshake.func @twice(%a: !handshake.channel<i1>, %b: !handshake.channel<i1>, ...) -> !handshake.channel<i2>
     attributes {argNames = ["a", "b"], resNames = ["out0"]} {
-  // expected-error @below {{candidates 0 and 1 are payload 1 after the same candidates: the alternatives of one answer differ in their `after`}}
+  // expected-error @below {{candidates 0 and 1 are payload 1 over other flags: the alternatives of one answer read the same flags}}
   %0 = race [] [%a, %b] {candidates = [{payload = 1 : ui2, flags = array<i64: 0>}, {payload = 1 : ui2, flags = array<i64: 1>}]} : <i2>
+  end %0 : <i2>
+}
+
+// -----
+
+// The same over other flags and after other candidates (payload 1 when a
+// holds, or b once c is refused): differing in `after` does not make them
+// alternatives.
+handshake.func @either(%a: !handshake.channel<i1>, %b: !handshake.channel<i1>, %c: !handshake.channel<i1>, ...) -> !handshake.channel<i2>
+    attributes {argNames = ["a", "b", "c"], resNames = ["out0"]} {
+  // expected-error @below {{candidates 0 and 2 are payload 1 over other flags}}
+  %0 = race [] [%a, %b, %c] {candidates = [{payload = 1 : ui2, flags = array<i64: 0>}, {payload = 2 : ui2, flags = array<i64: 2>}, {payload = 1 : ui2, flags = array<i64: 1>, after = array<i64: 1>}]} : <i2>
+  end %0 : <i2>
+}
+
+// -----
+
+// The same flags required true, another required false: `unless` is read as
+// `flags` is.
+handshake.func @unlessother(%a: !handshake.channel<i1>, %b: !handshake.channel<i1>, %c: !handshake.channel<i1>, ...) -> !handshake.channel<i2>
+    attributes {argNames = ["a", "b", "c"], resNames = ["out0"]} {
+  // expected-error @below {{candidates 0 and 2 are payload 1 over other flags}}
+  %0 = race [] [%a, %b, %c] {candidates = [{payload = 1 : ui2, flags = array<i64: 0>, unless = array<i64: 1>}, {payload = 2 : ui2, flags = array<i64: 2>}, {payload = 1 : ui2, flags = array<i64: 0>, unless = array<i64: 2>, after = array<i64: 1>}]} : <i2>
   end %0 : <i2>
 }
 
@@ -168,12 +193,24 @@ handshake.func @notoken(%t: !handshake.channel<i2>, %a: !handshake.channel<i1>, 
 
 // -----
 
-// A token read by two candidates after the same (no) candidates; read twice
-// after different ones, it is two alternatives (race.mlir's @alternatives).
+// A token read by two candidates over other flags (t, and t when a); read
+// twice over the same flags after different candidates, it is two
+// alternatives (race.mlir's @alternatives).
 handshake.func @tokentwice(%t: !handshake.channel<i2>, %a: !handshake.channel<i1>, ...) -> !handshake.channel<i2>
     attributes {argNames = ["t", "a"], resNames = ["out0"]} {
-  // expected-error @below {{candidates 0 and 1 are token 0 after the same candidates}}
+  // expected-error @below {{candidates 0 and 1 are token 0 over other flags}}
   %0 = race [%t] [%a] {candidates = [{token = 0 : i64}, {token = 0 : i64, flags = array<i64: 0>}]} : <i2>
+  end %0 : <i2>
+}
+
+// -----
+
+// A token read twice over the same flags after the same candidates: one
+// candidate written twice.
+handshake.func @tokenduplicate(%t: !handshake.channel<i2>, %a: !handshake.channel<i1>, ...) -> !handshake.channel<i2>
+    attributes {argNames = ["t", "a"], resNames = ["out0"]} {
+  // expected-error @below {{candidates 1 and 2 are token 0 after the same candidates: the alternatives of one answer differ in their `after`}}
+  %0 = race [%t] [%a] {candidates = [{payload = 1 : ui2, flags = array<i64: 0>}, {token = 0 : i64, after = array<i64: 0>}, {token = 0 : i64, after = array<i64: 0>}]} : <i2>
   end %0 : <i2>
 }
 

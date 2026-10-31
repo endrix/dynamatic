@@ -90,22 +90,24 @@ SIZED_WIDTHS = [1, 8, 32, 64]
 
 # THE RACE (`handshake.race`) is written at a structure, not at a size: its
 # CANDIDATES name what each candidate reads and after whom it comes. An entry
-# `handshake.race.size.<N>` times a race of N inputs (tokens and flags
-# together, TimingDatabase's getUnitSize), so each size is characterized at
-# the nests a lowering makes of N inputs, and the model keeps the maximum
-# over them, as over any unit's instances: a chain of priorities over one
-# flag each (the deepest `after`), an F of N guards (the widest tie between
-# winners), a guard over every flag (the widest AND), a chain of priorities
-# over tokens (the hold's P over a settled network, at any width), and a mixed
-# nest -- a token first, then guards over two flags, one of them negated, in
-# turn P and F, as the per-state decisions of picorv32's Cpu are. A nest whose
-# flag candidates need more distinct payloads than the width holds is not
-# written at that width (each shape's payloads are distinct and non-zero;
-# alternatives, two candidates of one payload, add no input and are not
-# characterized apart). The
-# sizes go to 128: TimingDatabase times a larger op by the largest entry, a
-# lower bound for it, and the cut and the placer would take such a race for
-# fitting where it may not.
+# `handshake.race.size.<N>` times a race of at most N inputs (tokens and
+# flags together) and N candidates (TimingDatabase's getUnitSize takes the
+# larger of the two: each shape below has N inputs and at most N
+# candidates), so each size is characterized at the nests a lowering makes
+# of N inputs, and the model keeps the maximum over them, as over any unit's
+# instances: a chain of priorities over one flag each (the deepest `after`),
+# an F of N guards (the widest tie between winners), a guard over every flag
+# (the widest AND), a chain of priorities over tokens (the hold's P over a
+# settled network, at any width), and a mixed nest -- a token first, then
+# guards over two flags, one of them negated, in turn P and F, as the
+# per-state decisions of picorv32's Cpu are. A nest whose flag candidates
+# need more distinct payloads than the width holds is not written at that
+# width (each shape's payloads are distinct and non-zero; alternatives, two
+# candidates of one payload, add candidates and no input, and are not
+# characterized apart: getUnitSize counts them). The sizes go to 128:
+# TimingDatabase times a larger op by the largest entry, a lower bound for
+# it, and the cut and the placer would take such a race for fitting where
+# it may not.
 RACE_UNIT = "handshake.race"
 RACE_SIZES = [2, 3, 4, 8, 16, 32, 64, 128]
 

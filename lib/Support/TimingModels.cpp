@@ -158,10 +158,15 @@ static unsigned getUnitSize(Operation *op) {
             handshake::BlockerOp>(
           [](auto joinOp) { return joinOp->getNumOperands(); })
       // a race by its inputs, tokens and flags together, as a first by its
-      // operands: each input's ready reads the others' valids, and the
-      // candidates' terms grow with them
-      .Case<handshake::RaceOp>(
-          [](handshake::RaceOp race) { return race->getNumOperands(); })
+      // operands -- each input's ready reads the others' valids -- or by its
+      // candidates where it has more (ALTERNATIVES: candidates of one answer
+      // add terms, not inputs): a size's shapes have as many inputs and at
+      // most as many candidates, so the larger of the two is a bound from
+      // above
+      .Case<handshake::RaceOp>([](handshake::RaceOp race) {
+        return std::max<unsigned>(race->getNumOperands(),
+                                  race.getCandidates().size());
+      })
       .Case<handshake::StandInOp>([](handshake::StandInOp standIn) {
         return static_cast<unsigned>(standIn.getKills().size());
       })
