@@ -70,6 +70,16 @@
 // ENTRIES-DAG: "handshake.race.size.32": {
 // ENTRIES-DAG: "handshake.race.size.64": {
 // ENTRIES-DAG: "handshake.race.size.128": {
+// ENTRIES-DAG: "handshake.commit.at_valid": {
+// ENTRIES-DAG: "handshake.race.reopen_after_taken": {
+// ENTRIES-DAG: "handshake.race.reopen_after_taken.size.2": {
+// ENTRIES-DAG: "handshake.race.reopen_after_taken.size.3": {
+// ENTRIES-DAG: "handshake.race.reopen_after_taken.size.4": {
+// ENTRIES-DAG: "handshake.race.reopen_after_taken.size.8": {
+// ENTRIES-DAG: "handshake.race.reopen_after_taken.size.16": {
+// ENTRIES-DAG: "handshake.race.reopen_after_taken.size.32": {
+// ENTRIES-DAG: "handshake.race.reopen_after_taken.size.64": {
+// ENTRIES-DAG: "handshake.race.reopen_after_taken.size.128": {
 
 // A race's readies read no data (done_wo: the other inputs' arrivals and the
 // output's ready), so the characterization does not measure data into ready
@@ -91,6 +101,19 @@
 // COMMIT:        "VK":
 // COMMIT-NEXT:   "RK":
 // COMMIT:        "inport":
+
+// The commit whose kill comes when its token is first offered has no path
+// from its ready to its kill (RK 0): the ready ends in its flip-flop. And the
+// race whose inputs reopen only after its answer was taken has none from its
+// output's ready to its inputs' (its `ready` 0).
+// RUN: FileCheck %s --check-prefix=ATVALID --input-file=%dynamatic_src_root/data/components-asap7.json
+// ATVALID:      "handshake.commit.at_valid": {
+// ATVALID-NOT:  "handshake.
+// ATVALID:        "RK": 0{{(\.0)?}}{{$}}
+// ATVALID:      "handshake.race.reopen_after_taken.size.8": {
+// ATVALID-NOT:  "handshake.
+// ATVALID:        "ready": {
+// ATVALID-NEXT:     "1": 0{{(\.0)?}}{{$}}
 
 // MEASURED-NOT: {{^ *}}"stand_in": "
 

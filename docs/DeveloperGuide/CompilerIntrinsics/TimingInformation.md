@@ -700,7 +700,14 @@ has:
   its kill, the AND of its valid in and its ready out, is a port of its own
   class, `kill`: `VK` (valid in to kill) and `RK` (the ready of its output,
   `outs_ready`, a signal into the unit, to kill), keys beside `VR`..`VD` that
-  only a commit's entry has.
+  only a commit's entry has; TimingModel reads them (`validToKill`,
+  `readyToKill`, zero where absent). A commit with `kill_at_valid` (the kill
+  in the first cycle its token is offered) is another circuit, its own entry
+  `handshake.commit.at_valid` (`KILL_AT_VALID`, `generated_units.VARIANT_KEYS`;
+  getModel reads it for a commit with the attribute): its kill is the AND of
+  its valid and a flip-flop, so `RK` is 0, and the ready ends in that
+  flip-flop, its `inport` `ready` (ASAP7 SLVT: `VK` 0.009 ns, the ready into
+  the flip-flop 0.028 ns, the valid 0.022).
 - `stand_in` passes its flag through a multiplexer and an OR, and its kills
   end in its two registers (`sent`, `owe`): the kills into the registers are
   its port model's `inport` `kill`, at every width. It is sized by its kills
@@ -741,7 +748,19 @@ has:
   (`ready_reads_no_data_units`) and its CR is 0: the path a timer finds
   there is false, through cells ABC shares between the decision and the
   readies (0.234 ns once, a race of four tokens at 64 bits, which the sizes
-  above it inherited).
+  above it inherited). A race with
+  `reopen_after_taken` (its inputs reopen only after its answer was taken: no
+  input's ready reads the output's ready) is another circuit with entries of
+  its own, sized as the plain race's, `handshake.race.reopen_after_taken.size.<N>`
+  (`REOPEN_AFTER_TAKEN`, `generated_units.VARIANT_KEYS`; a sized unit's variant
+  gets sized entries of its own in `main.py`; getModel reads them for a race
+  with the attribute). Every form the configuration has is written at each
+  point of the race's sweep. Its `ready` (the output's ready to an input's) is
+  0; its VR (another input's valid to an input's ready) 0.060, 0.077, 0.105,
+  0.152, 0.209 ns at 2, 4, 8, 16 and 32 inputs against the plain race's
+  0.050, 0.174, 0.174, 0.184, 0.264; its valid within 0.015 ns of the plain
+  race's up to 16 inputs, lower above. The plain race's entries, measured
+  again in the same run, came out byte-identical.
 - `kill_or`, the OR of a kill domain's commits, is not an operation: the
   lowering puts it beside a domain that several commits stop. It is written
   under the generator config's name, `kill_or.size.<N>` (2 to 256 inputs,
