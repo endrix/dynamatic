@@ -1,16 +1,20 @@
 // The units a commit stops have entries of their own: a stand-in is timed by
 // the entry for its number of kills, `handshake.stand_in.size.<N>` (as
 // HandshakeToHW writes its SIZE), and a load in a kill domain, which counts
-// and drops the words it owes, by `handshake.load.kill_drop`; a commit
+// and drops the words it owes, by `handshake.load.kill_drop`; and a commit
 // whose kill comes when its token is first offered (`kill_at_valid`) by
-// `handshake.commit.at_valid`; and a race whose inputs reopen only after its
-// answer was taken (`reopen_after_taken`) by its own sized entries,
-// `handshake.race.reopen_after_taken.size.<N>`, where the plain race reads
-// `handshake.race.size.<N>`. The model in Inputs gives the one-kill
-// stand-in, the plain load, the transfer's commit and the plain race a
-// 0.001 ns (or no) data path and the two-kill stand-in, the dropping load,
-// the at-valid commit and the reopening race a 1.5 ns one, so at a 2.0 ns
-// period the placer cuts only where the longer entry is read.
+// `handshake.commit.at_valid`. The model in Inputs gives the one-kill
+// stand-in, the plain load and the transfer's commit a 0.001 ns (or no) data
+// path and the two-kill stand-in, the dropping load and the at-valid commit
+// a 1.5 ns one, so at a 2.0 ns period the placer cuts only where the longer
+// entry is read.
+//
+// A race whose inputs reopen only after its answer was taken
+// (`reopen_after_taken`) has NO entry of its own: it is timed by the plain
+// race's entry at its size, `handshake.race.size.<N>`, as the plain race is.
+// The model in Inputs carries a `handshake.race.reopen_after_taken.size.2`
+// of 1.5 ns that nothing may read: at 2.0 ns a chain of two reopening races
+// keeps no buffer, as the plain chain does.
 //
 // REQUIRES: cbc
 // RUN: dynamatic-opt %s --handshake-place-buffers="algorithm=fpga20 solver=cbc timeout=30 target-period=2.0 timing-models=%S/Inputs/kill-timing-models.json spec-timing-models=%dynamatic_src_root/data/spec-timing.json" --remove-operation-names 2>/dev/null | FileCheck %s
@@ -18,7 +22,7 @@
 // Two stand-ins of one kill in a row: 0.001 ns twice fits, nothing is placed.
 // CHECK-LABEL: handshake.func @one_kill
 // CHECK-NOT:   buffer
-// CHECK:       end
+// CHECK:       end %
 handshake.func @one_kill(%d: !handshake.channel<i3>, %f: !handshake.channel<i8>, %start: !handshake.control<>, ...) -> (!handshake.channel<i3>, !handshake.channel<i8>, !handshake.control<>) attributes {argNames = ["d", "f", "start"], resNames = ["d_out", "f_out", "end"], handshake.frequencies = []} {
   %out, %kill = commit %d {handshake.bb = 0 : ui32} : <i3>
   %a = stand_in %f, %kill {handshake.bb = 0 : ui32} : <i8>
@@ -45,7 +49,7 @@ handshake.func @two_kills(%d: !handshake.channel<i3>, %e: !handshake.channel<i3>
 // truncation's 1.0 ns fit in 2.0 ns, and nothing is placed.
 // CHECK-LABEL: handshake.func @plain_load
 // CHECK-NOT:   buffer
-// CHECK:       end
+// CHECK:       end %
 handshake.func @plain_load(%addr: !handshake.channel<i2>, %mem: memref<4xi8>, %memStart: !handshake.control<>, %ctrlEnd: !handshake.control<>, %start: !handshake.control<>, ...) -> (!handshake.channel<i1>, !handshake.control<>, !handshake.control<>) attributes {argNames = ["addr", "mem", "memStart", "ctrlEnd", "start"], resNames = ["out", "memEnd", "end"], handshake.frequencies = []} {
   %ldAddr, %ldData = load [%addr] %memData {handshake.bb = 0 : ui32} : <i2>, <i8>, <i2>, <i8>
   %memData, %memEnd = mem_controller [%mem : memref<4xi8>] %memStart (%ldAddr) %ctrlEnd {connectedBlocks = [0 : i32]} : (!handshake.channel<i2>) -> !handshake.channel<i8>
@@ -71,7 +75,7 @@ handshake.func @dropping_load(%addr: !handshake.channel<i2>, %mem: memref<4xi8>,
 // data path, nothing is placed.
 // CHECK-LABEL: handshake.func @transfer_commits
 // CHECK-NOT:   buffer
-// CHECK:       end
+// CHECK:       end %
 handshake.func @transfer_commits(%d: !handshake.channel<i3>, %f: !handshake.channel<i8>, %start: !handshake.control<>, ...) -> (!handshake.channel<i3>, !handshake.channel<i8>, !handshake.channel<i8>, !handshake.control<>) attributes {argNames = ["d", "f", "start"], resNames = ["d_out", "f_out", "g_out", "end"], handshake.frequencies = []} {
   %o1, %k1 = commit %d {handshake.bb = 0 : ui32} : <i3>
   %o2, %k2 = commit %o1 {domain = 1 : ui32, handshake.bb = 0 : ui32} : <i3>
@@ -99,19 +103,19 @@ handshake.func @at_valid_commits(%d: !handshake.channel<i3>, %f: !handshake.chan
 // Two plain races of two tokens in a row: 0.001 ns twice, nothing placed.
 // CHECK-LABEL: handshake.func @plain_races
 // CHECK-NOT:   buffer
-// CHECK:       end
+// CHECK:       end %
 handshake.func @plain_races(%a: !handshake.channel<i2>, %b: !handshake.channel<i2>, %c: !handshake.channel<i2>, %start: !handshake.control<>, ...) -> (!handshake.channel<i2>, !handshake.control<>) attributes {argNames = ["a", "b", "c", "start"], resNames = ["out", "end"], handshake.frequencies = []} {
   %x = race [%a, %b] [] {candidates = [{token = 0 : i64}, {token = 1 : i64, after = array<i64: 0>}], handshake.bb = 0 : ui32} : <i2>
   %y = race [%x, %c] [] {candidates = [{token = 0 : i64}, {token = 1 : i64, after = array<i64: 0>}], handshake.bb = 0 : ui32} : <i2>
   end %y, %start : <i2>, <>
 }
 
-// The same two reopening only after their answer was taken: their own
-// entry's 1.5 ns twice does not fit, and the placer cuts between them.
+// The same two reopening only after their answer was taken: they read the
+// plain race's entry, 0.001 ns, and not the model's 1.5 ns
+// `reopen_after_taken` entry, so nothing is placed here either.
 // CHECK-LABEL: handshake.func @reopening_races
-// CHECK:       race
-// CHECK-NEXT:  buffer
-// CHECK-NEXT:  race
+// CHECK-NOT:   buffer
+// CHECK:       end %
 handshake.func @reopening_races(%a: !handshake.channel<i2>, %b: !handshake.channel<i2>, %c: !handshake.channel<i2>, %start: !handshake.control<>, ...) -> (!handshake.channel<i2>, !handshake.control<>) attributes {argNames = ["a", "b", "c", "start"], resNames = ["out", "end"], handshake.frequencies = []} {
   %x = race [%a, %b] [] {candidates = [{token = 0 : i64}, {token = 1 : i64, after = array<i64: 0>}], handshake.bb = 0 : ui32, reopen_after_taken} : <i2>
   %y = race [%x, %c] [] {candidates = [{token = 0 : i64}, {token = 1 : i64, after = array<i64: 0>}], handshake.bb = 0 : ui32, reopen_after_taken} : <i2>

@@ -30,6 +30,8 @@ def generate_commit(name, params):
     data_out = f"outs : out std_logic_vector({bitwidth} - 1 downto 0);" \
         if bitwidth else ""
     data_wire = "outs <= ins;" if bitwidth else ""
+    # what the kill is, in the form this commit has
+    kill_comment = "the token's first offer" if at_valid else "the transfer"
 
     entity = f"""
 library ieee;
@@ -49,7 +51,7 @@ entity {name} is
     {data_out}
     outs_valid : out std_logic;
     outs_ready : in  std_logic;
-    -- the transfer, as the reset of what it stops
+    -- {kill_comment}, as the reset of what it stops
     kill : out std_logic
   );
 end entity;

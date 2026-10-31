@@ -750,17 +750,21 @@ has:
   readies (0.234 ns once, a race of four tokens at 64 bits, which the sizes
   above it inherited). A race with
   `reopen_after_taken` (its inputs reopen only after its answer was taken: no
-  input's ready reads the output's ready) is another circuit with entries of
-  its own, sized as the plain race's, `handshake.race.reopen_after_taken.size.<N>`
-  (`REOPEN_AFTER_TAKEN`, `generated_units.VARIANT_KEYS`; a sized unit's variant
-  gets sized entries of its own in `main.py`; getModel reads them for a race
-  with the attribute). Every form the configuration has is written at each
-  point of the race's sweep. Its `ready` (the output's ready to an input's) is
-  0; its VR (another input's valid to an input's ready) 0.060, 0.077, 0.105,
-  0.152, 0.209 ns at 2, 4, 8, 16 and 32 inputs against the plain race's
-  0.050, 0.174, 0.174, 0.184, 0.264; its valid within 0.015 ns of the plain
-  race's up to 16 inputs, lower above. The plain race's entries, measured
-  again in the same run, came out byte-identical.
+  input's ready reads the output's ready) has NO entry of its own. It is
+  timed by the plain race's entry at its size, and the characterization does
+  not write it (`generated_units.race_points` skips a form `VARIANT_KEYS`
+  gives no key). The two forms differ in one term of the completing-round AND
+  (`done_wo`), so the valid, the data, the valid-to-data and the input readies
+  are the same logic in both, and the one arc that differs, the output's ready
+  to an input's, the reopening race does not have at all: a consumer of the
+  model drops those arcs on the attribute (StreamBlocks' esa-cut-to-period)
+  rather than reading a zero from an entry. Measured in both forms at every
+  point of the sweep, the reopening race came out 6 to 35 ps faster on average
+  per delay class while ABC moved a single point by up to 100 ps either way
+  (300-400 at 64 and 128 inputs), in both directions: an entry of its own
+  would have carried that noise as if it were a difference between the
+  circuits, and a maximum merged into the plain keys would have moved every
+  plain race by it.
 - `kill_or`, the OR of a kill domain's commits, is not an operation: the
   lowering puts it beside a domain that several commits stop. It is written
   under the generator config's name, `kill_or.size.<N>` (2 to 256 inputs,

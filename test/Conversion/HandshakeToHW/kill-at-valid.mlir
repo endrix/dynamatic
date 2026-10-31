@@ -1,5 +1,45 @@
 // RUN: dynamatic-opt %s --lower-handshake-to-hw | FileCheck %s
 
+// The order of the entries in the five RTL configurations is load-bearing:
+// RTLConfiguration::getMatchingComponent takes the FIRST entry whose name and
+// parameters match an instance, and the plain entry matches a module that
+// carries the extra parameter too (a parameter an entry does not name is one
+// it does not constrain). So each form's entry -- the race's
+// REOPEN_AFTER_TAKEN, the commit's KILL_AT_VALID -- must come BEFORE the
+// plain one of the same unit, and the plain one must name neither. Pinned
+// here for every configuration: no other test reads the vivado one at all
+// (export-rtl cannot: its `timing` parameters are not its) or the Verilog
+// beta one.
+// RUN: FileCheck %s --check-prefix=ORDER --input-file=%dynamatic_src_root/data/rtl-config-vhdl.json
+// RUN: FileCheck %s --check-prefix=ORDER --input-file=%dynamatic_src_root/data/rtl-config-vhdl-vivado.json
+// RUN: FileCheck %s --check-prefix=ORDER --input-file=%dynamatic_src_root/data/rtl-config-verilog.json
+// RUN: FileCheck %s --check-prefix=ORDER --input-file=%dynamatic_src_root/data/rtl-config-verilog-beta.json
+// RUN: FileCheck %s --check-prefix=ORDER-SMV --input-file=%dynamatic_src_root/data/rtl-config-smv.json
+
+// ORDER:          "name": "handshake.race",
+// ORDER:          "name": "REOPEN_AFTER_TAKEN",
+// ORDER:          "name": "handshake.race",
+// ORDER-NOT:      REOPEN_AFTER_TAKEN
+// ORDER:          "name": "handshake.commit",
+// ORDER:          "name": "KILL_AT_VALID",
+// ORDER:          "name": "handshake.commit",
+// ORDER-NOT:      KILL_AT_VALID
+
+// The SMV configuration also has a race in a kill domain (KILL_RESET), so
+// each of its two reopening entries comes before the two that do not reopen.
+// ORDER-SMV:      "name": "handshake.race",
+// ORDER-SMV:      "name": "REOPEN_AFTER_TAKEN",
+// ORDER-SMV:      "name": "handshake.race",
+// ORDER-SMV:      "name": "REOPEN_AFTER_TAKEN",
+// ORDER-SMV:      "name": "handshake.race",
+// ORDER-SMV-NOT:  REOPEN_AFTER_TAKEN
+// ORDER-SMV:      "name": "handshake.race",
+// ORDER-SMV-NOT:  REOPEN_AFTER_TAKEN
+// ORDER-SMV:      "name": "handshake.commit",
+// ORDER-SMV:      "name": "KILL_AT_VALID",
+// ORDER-SMV:      "name": "handshake.commit",
+// ORDER-SMV-NOT:  KILL_AT_VALID
+
 // A commit whose kill comes when its token is first offered
 // (`kill_at_valid`) and a race whose inputs reopen only after its answer was
 // taken (`reopen_after_taken`) are other circuits than the plain ones: each

@@ -83,6 +83,10 @@ def generate_race(name, params):
 
 def _generate_race(name, nt, nf, w, cands, encoding, reopen_after_taken=0):
     reopen = "emitted" if reopen_after_taken else "emitted | outs_ready"
+    # as the VHDL's: the term of done_wo the form changes
+    reopen_comment = ("\n  // (reopen_after_taken: only with the answer taken"
+                      " in an earlier cycle;\n  // no input's ready reads the"
+                      " output's ready)") if reopen_after_taken else ""
     n = nt + nf
     c = len(cands)
 
@@ -221,7 +225,7 @@ module {name}(
   wire done    = closing & (emitted | fire);
   // An input that gave its token is ready again the cycle the round
   // completes, read from the OTHER inputs alone; what it gives then is the
-  // next round's, answered now when it decides and the output is free.
+  // next round's, answered now when it decides and the output is free.{reopen_comment}
   wire [{n} - 1 : 0] done_wo = others_in & {{{n}{{{reopen}}}}};
   wire [{n} - 1 : 0] again   = iv & seen & done_wo;
   wire early = emitted & closing & (e_any_win | e_all_ref);

@@ -20,6 +20,8 @@ def generate_commit(name, params):
     data_in = f"\n  input  [{bitwidth} - 1 : 0] ins," if bitwidth else ""
     data_out = f"\n  output [{bitwidth} - 1 : 0] outs," if bitwidth else ""
     data_wire = "\n  assign outs       = ins;" if bitwidth else ""
+    # what the kill is, in the form this commit has
+    kill_comment = "the token's first offer" if at_valid else "the transfer"
     if at_valid:
         kill = """
   // the token now offered was offered last cycle and not taken: it has had
@@ -47,7 +49,7 @@ module {name}(
   // Output channel{data_out}
   output outs_valid,
   input  outs_ready,
-  // the transfer, as the reset of what it stops
+  // {kill_comment}, as the reset of what it stops
   output kill
 );
 {data_wire}

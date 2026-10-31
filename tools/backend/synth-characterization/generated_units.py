@@ -70,9 +70,6 @@ ATTRIBUTE_VALUES = {
 VARIANT_KEYS = {
     "KILL_DROP": "kill_drop",
     "KILL_AT_VALID": "at_valid",
-    # a race whose inputs reopen only after its answer was taken: its own
-    # entries, sized as the plain race's (`<name>.reopen_after_taken.size.<N>`)
-    "REOPEN_AFTER_TAKEN": "reopen_after_taken",
 }
 
 
@@ -187,15 +184,19 @@ def race_encoding(cands, width):
 def race_points(entries, widths, sizes):
     """Every race the sweep characterizes: (entry, variables, width) per
     shape, size and width, `SIZE` its inputs (which keys its entry), `SHAPE`
-    the nest's name (which the command does not read). Every form the
-    configuration has is written at each point -- an entry that constrains
-    a parameter with `eq` at that value: REOPEN_AFTER_TAKEN, a race whose
-    inputs reopen only after its answer was taken, which VARIANT_KEYS sends
-    to entries of its own, sized as the plain race's."""
+    the nest's name (which the command does not read). A form the
+    configuration pins with `eq` is written at each point when VARIANT_KEYS
+    sends it to an entry of its own, and skipped otherwise: its points would
+    be reduced into the plain race's entry, moving it by synthesis noise.
+    REOPEN_AFTER_TAKEN, a race whose inputs reopen only after its answer was
+    taken, is such a form -- it is timed by the plain race's entry
+    (TimingDatabase::getModel) -- so only the plain race is characterized."""
     result = []
     for entry in entries:
         fixed = {param["name"]: param["eq"]
                  for param in entry.get("parameters", []) if "eq" in param}
+        if any(name not in VARIANT_KEYS for name in fixed):
+            continue
         for size in sizes:
             point_widths = widths if size == sizes[0] else SIZED_WIDTHS
             for name, (nt, nf, cands) in race_shapes(size).items():

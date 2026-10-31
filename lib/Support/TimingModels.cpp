@@ -211,20 +211,16 @@ const TimingModel *TimingDatabase::getModel(Operation *op) const {
   }
 
   // A race whose inputs reopen only after its answer was taken
-  // (`reopen_after_taken`) is another circuit with entries of its own, sized
-  // as the plain race's (`handshake.race.reopen_after_taken.size.<N>`), where
-  // the model has them; the plain race's entries otherwise.
-  std::string raceVariant;
-  if (auto race = dyn_cast<handshake::RaceOp>(op);
-      race && race.getReopenAfterTaken()) {
-    raceVariant = (baseName + ".reopen_after_taken").str();
-    std::string prefix = raceVariant + ".";
-    if (models.count(raceVariant) ||
-        llvm::any_of(models, [&](const auto &entry) {
-          return entry.getKey().starts_with(prefix);
-        }))
-      baseName = raceVariant;
-  }
+  // (`reopen_after_taken`) has NO entry of its own: it is timed by the plain
+  // race's entry at its size. The two forms differ in one term of the
+  // completing-round AND (`done_wo`), so every arc this model carries --
+  // valid, data, the valid-to-data and the input readies -- is the same logic
+  // in both, and the one arc that differs, the output's ready to an input's,
+  // the reopening race does not have at all: a consumer of the model drops it
+  // on the attribute (StreamBlocks' esa-cut-to-period) rather than reading a
+  // zero from an entry. An entry of its own would carry the two syntheses'
+  // ABC noise (+-100 ps, 300-400 at 64-128 inputs) as if it were a difference
+  // between the circuits, in both directions.
 
   // A unit whose delays grow with its size is characterised at several sizes,
   // each an entry `<name>.size.<N>` beside the base entry, for the same reason
