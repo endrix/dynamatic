@@ -55,6 +55,10 @@ unsigned dynamatic::getOpDatawidth(Operation *op) {
         // both inputs and the output are one type
         return getHandshakeTypeBitWidth(priorityOp.getHi().getType());
       })
+      .Case<handshake::RaceOp>([&](handshake::RaceOp race) {
+        // the decision's: the tokens are of its type, the flags one bit
+        return getHandshakeTypeBitWidth(race.getResult().getType());
+      })
       .Case<handshake::CommitOp, handshake::StandInOp>([&](auto) {
         // the channel through it; the kill is a raw wire beside it
         return getHandshakeTypeBitWidth(op->getOperand(0).getType());
@@ -153,6 +157,11 @@ static unsigned getUnitSize(Operation *op) {
       .Case<handshake::MergeOp, handshake::FirstOp, handshake::JoinOp,
             handshake::BlockerOp>(
           [](auto joinOp) { return joinOp->getNumOperands(); })
+      // a race by its inputs, tokens and flags together, as a first by its
+      // operands: each input's ready reads the others' valids, and the
+      // candidates' terms grow with them
+      .Case<handshake::RaceOp>(
+          [](handshake::RaceOp race) { return race->getNumOperands(); })
       .Case<handshake::StandInOp>([](handshake::StandInOp standIn) {
         return static_cast<unsigned>(standIn.getKills().size());
       })

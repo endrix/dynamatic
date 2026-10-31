@@ -678,6 +678,18 @@
     "generic": "$DYNAMATIC/data/vhdl/handshake/priority.vhd"
   },
   {
+    "name": "handshake.race",
+    "parameters": [
+      { "name": "SIZE_TOKENS", "type": "unsigned" },
+      { "name": "SIZE_FLAGS", "type": "unsigned" },
+      { "name": "CANDIDATES", "type": "string" }
+    ],
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t race -p size_tokens=$SIZE_TOKENS size_flags=$SIZE_FLAGS bitwidth=$BITWIDTH candidates=\"'$CANDIDATES'\" extra_signals=$EXTRA_SIGNALS",
+    "dependencies": [
+      "types"
+    ]
+  },
+  {
     "name": "handshake.commit",
     "parameters": [
       { "name": "DATA_TYPE", "type": "dataflow", "data-eq": 0, "extra-eq": 0, "generic": false }

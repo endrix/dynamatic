@@ -367,7 +367,10 @@ LogicalResult RTLMatch::registerBitwidthParameter(hw::HWModuleExternOp &modOp,
   } else if (handshakeOp == "handshake.cond_br" ||
              handshakeOp == "handshake.select") {
     serializedParams["BITWIDTH"] = getBitwidthString(modType.getInputType(1));
-  } else if (handshakeOp == "handshake.constant") {
+  } else if (handshakeOp == "handshake.constant" ||
+             // the decision's width; its flags are one bit, and it may have
+             // no token input to read the width from
+             handshakeOp == "handshake.race") {
     serializedParams["BITWIDTH"] = getBitwidthString(modType.getOutputType(0));
   } else if (handshakeOp == "handshake.control_merge") {
     serializedParams["DATA_BITWIDTH"] =
@@ -551,7 +554,10 @@ RTLMatch::registerExtraSignalParameters(hw::HWModuleExternOp &modOp,
   } else if (
       // clang-format off
       handshakeOp == "handshake.source" ||
-      handshakeOp == "handshake.non_spec"
+      handshakeOp == "handshake.non_spec" ||
+      // the decision's: a race's inputs are of two widths, and it may have
+      // no token input (its verifier refuses extra signals anywhere)
+      handshakeOp == "handshake.race"
       // clang-format on
   ) {
     serializedParams["EXTRA_SIGNALS"] =

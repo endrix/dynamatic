@@ -88,6 +88,112 @@ SIZES = [2, 3, 4, 8, 16, 32, 64, 128, 256]
 SIZED_WIDTHS = [1, 8, 32, 64]
 
 
+# THE RACE (`handshake.race`) is written at a structure, not at a size: its
+# CANDIDATES name what each candidate reads and after whom it comes. An entry
+# `handshake.race.size.<N>` times a race of N inputs (tokens and flags
+# together, TimingDatabase's getUnitSize), so each size is characterized at
+# the nests a lowering makes of N inputs, and the model keeps the maximum
+# over them, as over any unit's instances: a chain of priorities over one
+# flag each (the deepest `after`), an F of N guards (the widest tie between
+# winners), a guard over every flag (the widest AND), a chain of priorities
+# over tokens (the hold's P over a settled network, at any width), and a mixed
+# nest -- a token first, then guards over two flags, one of them negated, in
+# turn P and F, as the per-state decisions of picorv32's Cpu are. A nest whose
+# flag candidates need more distinct payloads than the width holds is not
+# written at that width (a race's payloads are distinct and non-zero). The
+# sizes go to 128: TimingDatabase times a larger op by the largest entry, a
+# lower bound for it, and the cut and the placer would take such a race for
+# fitting where it may not.
+RACE_UNIT = "handshake.race"
+RACE_SIZES = [2, 3, 4, 8, 16, 32, 64, 128]
+
+
+def race_shapes(size):
+    """The nests of `size` inputs the race is characterized at: name ->
+    (tokens, flags, candidates as dicts with payload rank or token, flags,
+    unless, after). A flag candidate's payload is given as its rank among the
+    flag candidates (0, 1, ...), made a value at a width by race_encoding."""
+    shapes = {}
+    n = size
+    # P(g(f0), P(g(f1), ...)): candidate k after every one before it
+    shapes["chain"] = (0, n, [{"rank": k, "flags": [k], "unless": [],
+                               "after": list(range(k))} for k in range(n)])
+    # F(g(f0), ..., g(fn-1)): no order
+    shapes["f"] = (0, n, [{"rank": k, "flags": [k], "unless": [], "after": []}
+                          for k in range(n)])
+    # one guard over every flag, the last negated
+    shapes["guard"] = (0, n, [{"rank": 0, "flags": list(range(n - 1)) if n > 1 else [0],
+                               "unless": [n - 1] if n > 1 else [], "after": []}])
+    # P(t0, P(t1, ...)): the priority chain over tokens
+    shapes["tokens"] = (n, 0, [{"token": k, "flags": [], "unless": [],
+                                "after": list(range(k))} for k in range(n)])
+    # a token, then guards over two flags in turn P and F
+    flags = n - 1
+    cands = [{"token": 0, "flags": [], "unless": [], "after": []}]
+    done = [0]
+    f, rank = 0, 0
+    while f < flags:
+        group = []
+        for _ in range(2):  # an F of two guards, after everything before
+            if f >= flags:
+                break
+            unless = [f + 1] if f + 1 < flags else []
+            group.append({"rank": rank, "flags": [f], "unless": unless,
+                          "after": list(done)})
+            rank += 1
+            f += 2 if unless else 1
+        cands.extend(group)
+        done += list(range(len(cands) - len(group), len(cands)))
+    if flags > 0:
+        shapes["mixed"] = (1, flags, cands)
+    return shapes
+
+
+def race_encoding(cands, width):
+    """CANDIDATES (RaceOp::getCandidatesEncoding) of a shape at `width`: a
+    flag candidate's payload one-hot where the width holds one bit each, its
+    rank + 1 otherwise; None when the width cannot tell the candidates
+    apart."""
+    ranks = [c["rank"] for c in cands if "rank" in c]
+    if ranks and len(ranks) > 2 ** width - 1:
+        return None
+    onehot = len(ranks) <= width
+    parts = []
+    for c in cands:
+        if "token" in c:
+            field = f"t{c['token']}"
+        else:
+            field = f"p{(1 << c['rank']) if onehot else c['rank'] + 1}"
+        for letter, key in (("f", "flags"), ("u", "unless"), ("a", "after")):
+            if c[key]:
+                field += f":{letter}" + ",".join(map(str, c[key]))
+        parts.append(field)
+    return "/".join(parts)
+
+
+def race_points(entries, widths, sizes):
+    """Every race the sweep characterizes: (entry, variables, width) per
+    shape, size and width, `SIZE` its inputs (which keys its entry), `SHAPE`
+    the nest's name (which the command does not read)."""
+    entry = entries[0]
+    result = []
+    for size in sizes:
+        point_widths = widths if size == sizes[0] else SIZED_WIDTHS
+        for name, (nt, nf, cands) in race_shapes(size).items():
+            for width in point_widths:
+                encoding = race_encoding(cands, width)
+                if encoding is None:
+                    continue
+                variables = {"SIZE": size, "SHAPE": name, "SIZE_TOKENS": nt,
+                             "SIZE_FLAGS": nf, "CANDIDATES": encoding,
+                             "BITWIDTH": width,
+                             "EXTRA_SIGNALS": NO_EXTRA_SIGNALS}
+                missing = command_variables(entry["generator"]) - set(variables)
+                assert not missing, f"{RACE_UNIT}: nothing fills {sorted(missing)}"
+                result.append((entry, variables, width))
+    return result
+
+
 def size_key(unit_name, size):
     """The model key of a unit's entry at one size."""
     return f"{unit_name}.size.{size}"
@@ -271,6 +377,8 @@ def points(entries, widths, latency_table=None, sizes=None):
             entry's command.
     """
     unit_name = entries[0]["name"]
+    if unit_name == RACE_UNIT:
+        return race_points(entries, widths, sizes or RACE_SIZES[:1])
     declared = []
     for entry in entries:
         for param in entry.get("parameters", []):

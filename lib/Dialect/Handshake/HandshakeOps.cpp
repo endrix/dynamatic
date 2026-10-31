@@ -104,6 +104,29 @@ static void printHandshakeType(OpAsmPrinter &printer, Type type) {
   printHandshakeType(printer, nullptr, type);
 }
 
+/// Parser for the `custom<RaceType>` Tablegen directive: the result's type,
+/// and with it the inputs': a race's tokens are channels of its result's type
+/// and its flags one-bit channels, so no operand type is written.
+static ParseResult
+parseRaceType(OpAsmParser &parser, Type &resultType,
+              ArrayRef<OpAsmParser::UnresolvedOperand> tokens,
+              ArrayRef<OpAsmParser::UnresolvedOperand> flags,
+              SmallVectorImpl<Type> &tokenTypes,
+              SmallVectorImpl<Type> &flagTypes) {
+  if (parseHandshakeType(parser, resultType))
+    return failure();
+  tokenTypes.assign(tokens.size(), resultType);
+  flagTypes.assign(flags.size(),
+                   ChannelType::get(IntegerType::get(parser.getContext(), 1)));
+  return success();
+}
+
+/// Printer for the `custom<RaceType>` Tablegen directive.
+static void printRaceType(OpAsmPrinter &printer, Operation *, Type resultType,
+                          OperandRange, OperandRange, TypeRange, TypeRange) {
+  printHandshakeType(printer, nullptr, resultType);
+}
+
 static ParseResult parseSingleTypedHandshakeOp(
     OpAsmParser &parser, OpAsmParser::UnresolvedOperand &operand,
     NamedAttrList &attributes, Type &type, SmallVectorImpl<Type> &resTypes) {
@@ -246,6 +269,273 @@ LogicalResult PriorityOp::verify() {
     return emitOpError() << "holds the payload alone; a channel with extra "
                             "signals would lose them";
   return success();
+}
+
+//===----------------------------------------------------------------------===//
+// RaceOp
+//===----------------------------------------------------------------------===//
+
+/// The keys a candidate's dictionary may have.
+static constexpr llvm::StringLiteral kRacePayload = "payload",
+                                     kRaceToken = "token", kRaceFlags = "flags",
+                                     kRaceUnless = "unless",
+                                     kRaceAfter = "after";
+
+/// The candidates of `attr`, a race `width` bits wide with `numTokens` and
+/// `numFlags` inputs, or the first thing wrong with them, said through
+/// `emit`.
+static FailureOr<SmallVector<RaceCandidate>>
+decodeRaceCandidates(ArrayAttr attr, unsigned width,
+                     llvm::function_ref<InFlightDiagnostic()> emit) {
+  SmallVector<RaceCandidate> list;
+  for (auto [k, entry] : llvm::enumerate(attr)) {
+    auto dict = dyn_cast<DictionaryAttr>(entry);
+    if (!dict)
+      return emit() << "candidate " << k << " is not a dictionary", failure();
+    RaceCandidate cand;
+    bool sawPayload = false;
+    for (NamedAttribute field : dict) {
+      StringRef key = field.getName().getValue();
+      if (key == kRacePayload) {
+        auto value = dyn_cast<IntegerAttr>(field.getValue());
+        if (!value)
+          return emit() << "candidate " << k << "'s payload is not an integer",
+                 failure();
+        APInt bits = value.getValue();
+        if (bits.getActiveBits() > width)
+          return emit() << "candidate " << k << "'s payload "
+                        << llvm::toString(bits, 10, /*Signed=*/false)
+                        << " does not fit the result's " << width << " bits",
+                 failure();
+        cand.payload = bits.zextOrTrunc(width);
+        sawPayload = true;
+        continue;
+      }
+      if (key == kRaceToken) {
+        // An index, read unsigned whatever the attribute's type (`1 : i1` is
+        // input 1); one past 32 bits is no input's.
+        auto value = dyn_cast<IntegerAttr>(field.getValue());
+        if (!value || value.getValue().getActiveBits() > 32)
+          return emit() << "candidate " << k
+                        << "'s token is not an input's index",
+                 failure();
+        cand.token = value.getValue().getZExtValue();
+        continue;
+      }
+      SmallVector<unsigned> *into = key == kRaceFlags    ? &cand.flags
+                                    : key == kRaceUnless ? &cand.unless
+                                    : key == kRaceAfter  ? &cand.after
+                                                         : nullptr;
+      if (!into)
+        return emit() << "candidate " << k << " has a field '" << key
+                      << "'; a candidate has payload or token, and flags, "
+                         "unless and after",
+               failure();
+      auto indices = dyn_cast<DenseI64ArrayAttr>(field.getValue());
+      if (!indices)
+        return emit() << "candidate " << k << "'s " << key
+                      << " is not an array<i64>",
+               failure();
+      for (int64_t i : indices.asArrayRef()) {
+        if (i < 0)
+          return emit() << "candidate " << k << "'s " << key
+                        << " has a negative index",
+                 failure();
+        into->push_back(static_cast<unsigned>(i));
+      }
+    }
+    if (sawPayload == cand.isToken())
+      return emit() << "candidate " << k
+                    << " has to have exactly one of a payload and a token",
+             failure();
+    if (sawPayload && cand.payload.isZero())
+      return emit() << "candidate " << k
+                    << "'s payload is zero, the reserved 'nothing selected'",
+             failure();
+    list.push_back(std::move(cand));
+  }
+  return list;
+}
+
+ArrayAttr dynamatic::handshake::getRaceCandidatesAttr(
+    MLIRContext *ctx, unsigned width, ArrayRef<RaceCandidate> candidates) {
+  Builder b(ctx);
+  // Unsigned, so that a payload prints as the number it is.
+  Type payloadType = IntegerType::get(ctx, width, IntegerType::Unsigned);
+  auto array = [&](ArrayRef<unsigned> in) {
+    SmallVector<int64_t> out(in.begin(), in.end());
+    return b.getDenseI64ArrayAttr(out);
+  };
+  SmallVector<Attribute> entries;
+  for (const RaceCandidate &cand : candidates) {
+    SmallVector<NamedAttribute> fields;
+    if (cand.isToken())
+      fields.push_back(
+          b.getNamedAttr(kRaceToken, b.getI64IntegerAttr(*cand.token)));
+    else
+      fields.push_back(b.getNamedAttr(
+          kRacePayload,
+          IntegerAttr::get(payloadType, cand.payload.zextOrTrunc(width))));
+    if (!cand.flags.empty())
+      fields.push_back(b.getNamedAttr(kRaceFlags, array(cand.flags)));
+    if (!cand.unless.empty())
+      fields.push_back(b.getNamedAttr(kRaceUnless, array(cand.unless)));
+    if (!cand.after.empty())
+      fields.push_back(b.getNamedAttr(kRaceAfter, array(cand.after)));
+    entries.push_back(b.getDictionaryAttr(fields));
+  }
+  return b.getArrayAttr(entries);
+}
+
+/// The result is a one-hot-or-zero decision `width` bits wide, the tokens are
+/// of its type and the flags one bit, none with extra signals; the
+/// candidates name inputs that exist, each token input once and each flag
+/// input at least once, and their priorities are a strict partial order
+/// written out in full (`after` transitively closed and irreflexive, hence
+/// acyclic). Every candidate reads an input -- one that reads none would win
+/// before anything of its round arrived, in a round the unit cannot see
+/// start -- and a race of one candidate has a flag (one token alone is a
+/// wire). A candidate's `flags` name a flag once, and its `unless` too; a
+/// flag in both is allowed: the candidate is never enabled and is refused
+/// once the flag arrives, as a nest's guard over P and not P.
+LogicalResult RaceOp::verify() {
+  auto channel = cast<ChannelType>(getResult().getType());
+  auto data = dyn_cast<IntegerType>(channel.getDataType());
+  if (!data)
+    return emitOpError() << "decides on its payload (zero is 'nothing "
+                            "selected'), so the payload is an integer, not "
+                         << channel.getDataType();
+  if (!channel.getExtraSignals().empty())
+    return emitOpError() << "holds payloads alone; a channel with extra "
+                            "signals would lose them";
+  unsigned width = data.getWidth();
+  for (Value token : getTokens())
+    if (token.getType() != getResult().getType())
+      return emitOpError() << "takes tokens of its result's type "
+                           << getResult().getType() << ", not "
+                           << token.getType();
+  Type flagType = ChannelType::get(IntegerType::get(getContext(), 1));
+  for (Value flag : getFlags())
+    if (flag.getType() != flagType)
+      return emitOpError() << "takes flags of type " << flagType << ", not "
+                           << flag.getType();
+  if (getNumOperands() == 0)
+    return emitOpError() << "has no input";
+
+  FailureOr<SmallVector<RaceCandidate>> decoded = decodeRaceCandidates(
+      getCandidates(), width, [&]() { return emitOpError(); });
+  if (failed(decoded))
+    return failure();
+  SmallVector<RaceCandidate> &cands = *decoded;
+  unsigned n = cands.size(), numTokens = getTokens().size(),
+           numFlags = getFlags().size();
+  if (n == 0)
+    return emitOpError() << "has no candidate";
+
+  SmallVector<unsigned> tokenUses(numTokens, 0), flagUses(numFlags, 0);
+  llvm::DenseSet<llvm::APInt> payloads;
+  for (auto [k, cand] : llvm::enumerate(cands)) {
+    if (cand.isToken()) {
+      if (*cand.token >= numTokens)
+        return emitOpError() << "candidate " << k << " is token " << *cand.token
+                             << " of " << numTokens;
+      ++tokenUses[*cand.token];
+    } else if (!payloads.insert(cand.payload).second) {
+      return emitOpError() << "candidate " << k << "'s payload "
+                           << llvm::toString(cand.payload, 10, false)
+                           << " is another candidate's: a payload names one "
+                              "candidate";
+    }
+    // A list names a flag once (a repeat would change no term). The same
+    // flag in both lists is not refused: that candidate is never enabled.
+    for (auto [list, name] : {std::make_pair(&cand.flags, kRaceFlags),
+                              std::make_pair(&cand.unless, kRaceUnless)}) {
+      DenseSet<unsigned> listed;
+      for (unsigned f : *list) {
+        if (f >= numFlags)
+          return emitOpError() << "candidate " << k << " reads flag " << f
+                               << " of " << numFlags;
+        if (!listed.insert(f).second)
+          return emitOpError() << "candidate " << k << " lists flag " << f
+                               << " twice in its " << name;
+        ++flagUses[f];
+      }
+    }
+    if (!cand.isToken() && cand.flags.empty() && cand.unless.empty())
+      return emitOpError() << "candidate " << k
+                           << " reads no input: it would win before any "
+                              "token of its round arrived";
+    DenseSet<unsigned> before;
+    for (unsigned j : cand.after) {
+      if (j >= n)
+        return emitOpError() << "candidate " << k << " is after candidate " << j
+                             << " of " << n;
+      if (j == k)
+        return emitOpError() << "candidate " << k << " is after itself";
+      if (!before.insert(j).second)
+        return emitOpError()
+               << "candidate " << k << " is after candidate " << j << " twice";
+    }
+  }
+  for (auto [t, uses] : llvm::enumerate(tokenUses))
+    if (uses != 1)
+      return emitOpError() << "token " << t << " is " << uses
+                           << " candidates; a token input is exactly one";
+  for (auto [f, uses] : llvm::enumerate(flagUses))
+    if (uses == 0)
+      return emitOpError() << "flag " << f << " is read by no candidate";
+  // Transitively closed: what must be refused before j must be refused
+  // before every candidate after j. With no candidate after itself, the
+  // order is then acyclic too (a cycle would put its members after
+  // themselves).
+  for (auto [k, cand] : llvm::enumerate(cands)) {
+    DenseSet<unsigned> before(cand.after.begin(), cand.after.end());
+    for (unsigned j : cand.after)
+      for (unsigned i : cands[j].after)
+        if (!before.contains(i))
+          return emitOpError()
+                 << "candidate " << k << " is after candidate " << j
+                 << ", which is after candidate " << i << ", but candidate "
+                 << k << " is not after " << i
+                 << ": `after` lists every candidate with priority, "
+                    "transitively";
+  }
+  if (n == 1 && cands.front().flags.empty() && cands.front().unless.empty())
+    return emitOpError() << "is one token and nothing else: a wire";
+  return success();
+}
+
+SmallVector<RaceCandidate> RaceOp::getCandidateList() {
+  unsigned width =
+      cast<IntegerType>(cast<ChannelType>(getResult().getType()).getDataType())
+          .getWidth();
+  FailureOr<SmallVector<RaceCandidate>> decoded = decodeRaceCandidates(
+      getCandidates(), width, [&]() { return emitOpError(); });
+  assert(succeeded(decoded) && "a verified race decodes");
+  return std::move(*decoded);
+}
+
+std::string RaceOp::getCandidatesEncoding() {
+  std::string text;
+  llvm::raw_string_ostream os(text);
+  auto field = [&](char letter, ArrayRef<unsigned> list) {
+    if (list.empty())
+      return;
+    os << ':' << letter;
+    llvm::interleave(list, os, ",");
+  };
+  for (auto [k, cand] : llvm::enumerate(getCandidateList())) {
+    if (k)
+      os << '/';
+    if (cand.isToken())
+      os << 't' << *cand.token;
+    else
+      os << 'p' << llvm::toString(cand.payload, 10, /*Signed=*/false);
+    field('f', cand.flags);
+    field('u', cand.unless);
+    field('a', cand.after);
+  }
+  return text;
 }
 
 //===----------------------------------------------------------------------===//

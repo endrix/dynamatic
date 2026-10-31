@@ -742,6 +742,168 @@ def PriorityOp : Handshake_Op<"priority", [
   }];
 }
 
+def RaceOp : Handshake_Op<"race", [
+  Pure,
+  AttrSizedOperandSegments,
+  NamedIOInterface
+]> {
+  let summary = "a whole racing decision in one unit";
+  let description = [{
+    A decision among CANDIDATES, each answered the cycle the inputs that have
+    arrived determine it -- a decision a nest of `first` and `priority` units
+    over guards may make (how the two differ is below), in one unit whose
+    depth is logarithmic where the nest's is the nest's. A payload of `0` is
+    the reserved "nothing selected", as for `first` and `priority`.
+
+    The inputs are `tokens`, channels of the result's type (a one-hot-or-zero
+    decision computed elsewhere), and `flags`, one-bit channels. Each input
+    gives ONE token a round, taken the cycle it arrives (a `seen` bit an
+    input), and the unit emits ONE answer a round. A flag arrived 1 is TRUE,
+    arrived 0 FALSE; a token arrived non-zero CARRIES, arrived zero is EMPTY.
+
+    `candidates` is an array of dictionaries, one per candidate, in index
+    order:
+
+      - `payload` (an integer, non-zero, of at most the result's width): what
+        the candidate answers; or `token` (an index into `tokens`): the
+        candidate is that token, and answers its payload;
+      - `flags`: flag inputs required TRUE; `unless`: flag inputs required
+        FALSE (both `array<i64>`, optional);
+      - `after`: the candidates that must be REFUSED before this one may win
+        (`array<i64>`, optional) -- every candidate with priority over it,
+        through any chain of priorities, so the list is transitively closed.
+
+    A candidate is ENABLED when each of its flags arrived true, each of its
+    unless flags arrived false and its token carries; REFUSED when one of
+    its flags arrived false, one of its unless flags true, or its token
+    empty. It WINS when it is enabled and every candidate of `after` is
+    refused. The unit emits the payload of the lowest-index winner the first
+    cycle one wins, and zero the first cycle every candidate is refused,
+    whether or not every input has arrived. Two winners in one cycle are
+    incomparable (one after the other cannot win together: its predecessor
+    is enabled, not refused), so the index order is free to break the tie.
+    Once every input has arrived some candidate has won or all are refused,
+    so a round always answers.
+
+    A list names a flag once, but a flag may be both among a candidate's
+    `flags` and among its `unless` -- a guard over P and not P, which is
+    what formation makes of an action with both predicates (it shares one
+    flag between them). Such a candidate is never enabled and is refused the
+    cycle that flag arrives: the nest's guard that can never pass.
+
+    That is what a nest of `esa.f` and `esa.p` over guards may answer: F adds
+    no predecessor, P(hi, lo) puts every candidate of `hi` in the `after` of
+    every candidate of `lo`; a guard over flags is a candidate with its flags,
+    a negated flag one of its `unless`; a settled subnetwork, a token. The
+    race differs from the nest in two ways, both within the specification's
+    freedom. It keeps ONE round for all its inputs, where each unit of a nest
+    closes its own: no input gives round n+1's token before every input has
+    given round n's, so without abort-losers a next round can wait for a
+    late input of the previous one (P(a, P(b, c)) with c late: a nest's P
+    answers the next round from a while the unit under its lo still waits
+    for c; the race answers it once c is in). Under abort-losers, which has
+    every late input in by the next round's start, the race is never later
+    than the nest. And among candidates released in the same cycle it takes
+    the lowest index, where a nest's F has kept the first to arrive
+    (P(a, F(b, c)) with c before b, both released by a's refusal: the race
+    answers b, the nest c). At full rate the two are the same cycle for
+    cycle.
+
+    Unlike `first`, a race is not MergeLike, on purpose: it merges no
+    control-flow paths, and buffer placement gives a MergeLike unit a
+    transparent and an opaque slot on its output and takes it for a
+    backedge's destination, which a decision inside one round does not need.
+    The chain of firsts it replaces gets both; the race is not to be made
+    MergeLike for parity with it.
+
+    The round, as `first`'s: an answer found while the output is stalled is
+    held; once answered, the unit absorbs the late inputs. An input that has
+    given its token is ready again in the cycle the round completes (every
+    other input arrived, the answer taken or being taken), to give the next
+    round's token at once; with the answer out earlier, a next round decided
+    by those tokens alone -- a winner, or every candidate refused -- is
+    answered in that same cycle. Each input's `ready` reads the registers,
+    the OTHER inputs' `valid` and the output's `ready`, never its own
+    `valid`; the valid and the data out are combinational in the inputs
+    (latency zero) and read no `ready`. A unit whose `valid` reads a `ready`
+    (a lazy fork) upstream of two inputs of one race therefore closes a
+    combinational loop through it, as through a `first`.
+
+    Example: P(F(t, g(a, not b)), h(c)) -- the settled token t, guard g over
+    the flags a and not b, and the guard h, after both:
+
+    ```mlir
+    %0 = race [%t] [%a, %b, %c] {candidates = [
+           {token = 0 : i64},
+           {payload = 2 : i3, flags = array<i64: 0>, unless = array<i64: 1>},
+           {payload = 4 : i3, flags = array<i64: 2>, after = array<i64: 0, 1>}
+         ]} : <i3>
+    ```
+
+    The RTL generators read the structure from `CANDIDATES` (see
+    `getCandidatesEncoding`).
+  }];
+
+  let arguments = (ins Variadic<ChannelType>:$tokens,
+                       Variadic<ChannelType>:$flags,
+                       ArrayAttr:$candidates);
+  let results = (outs ChannelType:$result);
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    ` ` `[` $tokens `]` `[` $flags `]` attr-dict `:`
+    custom<RaceType>(type($result), ref($tokens), ref($flags), type($tokens),
+                     type($flags))
+  }];
+
+  let extraClassDeclaration = [{
+    // Operands `tokens_<i>` then `flags_<i>`, indexed even when one: the
+    // RTL's ports are arrays (`tokens`, `flags`). The result is `outs`.
+    std::string getOperandName(unsigned idx) {
+      unsigned numTokens = getTokens().size();
+      assert(idx < getNumOperands() && "index too high");
+      return idx < numTokens ? "tokens_" + std::to_string(idx)
+                             : "flags_" + std::to_string(idx - numTokens);
+    }
+    std::string getResultName(unsigned idx) {
+      assert(idx < 1 && "index too high");
+      return "outs";
+    }
+
+    /// The candidates, decoded from the attribute (the verifier has checked
+    /// them).
+    ::llvm::SmallVector<RaceCandidate> getCandidateList();
+
+    /// The candidates as the RTL generators read them, `CANDIDATES`: one
+    /// candidate after the other, separated by '/', each a ':'-separated list
+    /// of fields, a field a letter and a comma-separated list of numbers --
+    /// `p<payload>` or `t<token>` first, then `f<flags>`, `u<unless>`,
+    /// `a<after>` where not empty. P(F(t, g(a, not b)), h(c)) above is
+    /// "t0/p2:f0:u1/p4:f2:a0,1". Digits, letters, ',', ':' and '/' only: it
+    /// goes through a shell and Python's literal_eval unquoted by anything
+    /// but the configuration's quotes.
+    std::string getCandidatesEncoding();
+  }];
+
+  let extraClassDefinition = [{
+    ::mlir::FailureOr<::llvm::SmallVector<::mlir::NamedAttribute>>
+    RaceOp::getRTLParameters() {
+      ::mlir::MLIRContext *ctx = (*this)->getContext();
+      ::mlir::Type ui32 = ::mlir::IntegerType::get(ctx, 32, ::mlir::IntegerType::Unsigned);
+      return ::llvm::SmallVector<::mlir::NamedAttribute>{
+        {::mlir::StringAttr::get(ctx, "SIZE_TOKENS"),
+         ::mlir::IntegerAttr::get(ui32, (unsigned)getTokens().size())},
+        {::mlir::StringAttr::get(ctx, "SIZE_FLAGS"),
+         ::mlir::IntegerAttr::get(ui32, (unsigned)getFlags().size())},
+        {::mlir::StringAttr::get(ctx, "BITWIDTH"),
+         ::mlir::TypeAttr::get(getResult().getType())},
+        {::mlir::StringAttr::get(ctx, "CANDIDATES"),
+         ::mlir::StringAttr::get(ctx, getCandidatesEncoding())}
+      };
+    }
+  }];
+}
+
 def CommitOp : Handshake_Op<"commit", [
   Pure,
   AllTypesMatch<["ins", "outs"]>,

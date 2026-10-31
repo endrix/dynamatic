@@ -712,6 +712,26 @@ has:
   `handshake.load.kill_drop` (`generated_units.VARIANT_KEYS`); the base
   entry stays the plain load's. getModel reads it for a load that carries
   `handshake.kill_domain`.
+- `race` (`handshake.race`, a whole racing decision as one unit) decides on
+  its payloads too (`payload_condition_units`): every input, a token's
+  payload or a flag's bit, reaches the valid out through the candidates'
+  terms. Its ports `tokens` and `flags` are data. It is written at a
+  STRUCTURE, its CANDIDATES, not at a size: `generated_units.race_shapes`
+  gives, for 2, 3, 4, 8, 16, 32, 64 and 128 inputs, the nests a lowering
+  makes -- a chain of priorities over a flag each (the longest `after`), an
+  F of a guard each (the widest tie), one guard over every flag (the widest
+  AND), a priority chain over tokens (a hold over settled networks), and a
+  mixed nest (a token, then guards over a flag and a negated one, P and F in
+  turn) -- and its entry at a size, `handshake.race.size.<N>`, N its tokens
+  and flags together (getModel's size), is the maximum over them. A nest a
+  width cannot tell apart (more flag candidates than the width has distinct
+  non-zero payloads) is not written at that width. A race's readies read no
+  data -- an input is ready while it has not given its token, or when the
+  round completes, from the other inputs' valids and the output's ready --
+  so its data into ready is not measured (`ready_reads_no_data_units`) and
+  its CR is 0: the path a timer finds there is false, through cells ABC
+  shares between the decision and the readies (0.234 ns once, a race of four
+  tokens at 64 bits, which the sizes above it inherited).
 - `kill_or`, the OR of a kill domain's commits, is not an operation: the
   lowering puts it beside a domain that several commits stop. It is written
   under the generator config's name, `kill_or.size.<N>` (2 to 256 inputs,
@@ -760,6 +780,31 @@ to 64 bits, as for every unit; the stage is the `.stages.json` largest):
 | kill_or.size.3 | - | - | - | - | - | - | 0.015 | - | - |
 | kill_or.size.4 | - | - | - | - | - | - | 0.020 | - | - |
 | kill_or.size.8 | - | - | - | - | - | - | 0.047 | - | - |
+| handshake.race.size.2 | 0.121 | 0.039 | 0.050 | 0.182 | 0.167 | - | 0.142 | - | 0.442 |
+| handshake.race.size.3 | 0.161 | 0.063 | 0.067 | 0.202 | 0.202 | - | 0.145 | - | 0.403 |
+| handshake.race.size.4 | 0.185 | 0.075 | 0.174 | 0.222 | 0.226 | - | 0.207 | - | 0.416 |
+| handshake.race.size.8 | 0.263 | 0.075 | 0.174 | 0.278 | 0.276 | - | 0.208 | - | 0.472 |
+| handshake.race.size.16 | 0.322 | 0.096 | 0.184 | 0.303 | 0.371 | - | 0.265 | - | 0.519 |
+| handshake.race.size.32 | 0.428 | 0.113 | 0.264 | 0.372 | 0.446 | - | 0.314 | - | 0.559 |
+| handshake.race.size.64 | 0.627 | 0.135 | 0.464 | 0.408 | 0.636 | - | 0.406 | - | 0.713 |
+| handshake.race.size.128 | 0.953 | 0.174 | 0.815 | 0.558 | 0.978 | - | 0.639 | - | 1.029 |
+
+Every race entry's CR is 0 (its readies read no data, above), so the table,
+which has no CR column, says all there is.
+
+A race of N inputs replaces a nest of first and priority units over the same
+inputs, which the chain lowering built one unit per `esa.f` or `esa.p`: on
+picorv32's Cpu seven units deep, each 0.09-0.16 ns valid or condition to
+valid, about 1 ns in series by these entries, where one race of 8 to 16
+inputs is 0.26-0.32 (valid) and 0.28-0.30 (CV). At two inputs it is a
+first's or a priority's plus 20-40 ps (its literal and its predecessors'
+terms in front of the multiplexer); the race pays off from the second unit
+of a nest. From 64 inputs it is faster than a first of as many (0.627 ns of
+valid against 0.818 at 64, 0.953 against 1.475 at 128): a first's
+completing-round term reads every other input for each input, where a race's
+is one prefix and one suffix AND over the arrivals. At 128 inputs its stage
+no longer fits a 1 ns period by itself; a larger race is timed by the
+128-input entry, a bound from below, with a remark.
 
 A first grows with its inputs faster than any other sized unit: each input's
 ready in the cycle the round completes reads every other input (the

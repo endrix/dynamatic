@@ -12,6 +12,7 @@ import generators.handshake.control_merge as control_merge
 import generators.handshake.join as join
 import generators.handshake.first as first
 import generators.handshake.priority as priority
+import generators.handshake.race as race
 import generators.handshake.commit as commit
 import generators.handshake.stand_in as stand_in
 import generators.support.kill_or as kill_or
@@ -79,6 +80,8 @@ def generate_code(name, mod_type, parameters):
             return first.generate_first(name, parameters)
         case "priority":
             return priority.generate_priority(name, parameters)
+        case "race":
+            return race.generate_race(name, parameters)
         case "commit":
             return commit.generate_commit(name, parameters)
         case "stand_in":

@@ -124,11 +124,14 @@ def characterize_generated(unit_name, entries, dirs, dynamatic_dir,
     module_name = unit_name.replace(".", "_")
     sized = any(param["name"] == "SIZE"
                 for entry in entries for param in entry.get("parameters", []))
+    # a race is sized by its inputs, at the nests of generated_units.race_shapes
+    raced = unit_name == generated_units.RACE_UNIT
     base = generated_units.base_size(entries)
     keyed, scripts = {}, []
     for i, (entry, variables, width) in enumerate(generated_units.points(
             entries, unit_widths(unit_name), latency_table,
-            generated_units.sizes_of(entries) if sized else None)):
+            generated_units.RACE_SIZES if raced
+            else generated_units.sizes_of(entries) if sized else None)):
         point_dir = f"{dirs['hdl']}/{i}"
         os.makedirs(point_dir, exist_ok=True)
         top_def_file = get_hdl_files(
@@ -141,7 +144,7 @@ def characterize_generated(unit_name, entries, dirs, dynamatic_dir,
             baked_params=dict(variables, DATA_TYPE=width), id_offset=i,
             defer=True)
         keys = [unit_name]
-        if sized:
+        if sized or raced:
             size = int(variables["SIZE"])
             keys = [generated_units.size_key(unit_name, size)]
             if size == base:
