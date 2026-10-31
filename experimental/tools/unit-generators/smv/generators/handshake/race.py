@@ -49,7 +49,8 @@ def generate_race(name, params):
     token's payload), the lowest-index winner the first cycle one wins --
     enabled, every candidate of its `after` refused -- zero the first cycle
     every candidate is refused, one answer a round, each input taken the cycle
-    it arrives.
+    it arrives. Alternatives (candidates of one payload, or of one token) are
+    terms like any other: those that win together carry the same payload.
 
     The state is the RTL generator's, register for register
     (tools/unit-generators/vhdl/generators/handshake/race.py): `seen_<i>`,

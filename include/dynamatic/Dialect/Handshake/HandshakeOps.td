@@ -766,7 +766,8 @@ def RaceOp : Handshake_Op<"race", [
 
       - `payload` (an integer, non-zero, of at most the result's width): what
         the candidate answers; or `token` (an index into `tokens`): the
-        candidate is that token, and answers its payload;
+        candidate is that token, and answers its payload (several candidates
+        may share an answer: ALTERNATIVES, below);
       - `flags`: flag inputs required TRUE; `unless`: flag inputs required
         FALSE (both `array<i64>`, optional);
       - `after`: the candidates that must be REFUSED before this one may win
@@ -791,10 +792,30 @@ def RaceOp : Handshake_Op<"race", [
     flag between them). Such a candidate is never enabled and is refused the
     cycle that flag arrives: the nest's guard that can never pass.
 
+    ALTERNATIVES. Several candidates may answer the same: one payload, or
+    one token input (an input is read by every candidate that names it).
+    Each is an ALTERNATIVE of that answer, which wins when any of them wins:
+    the same candidate under other predecessors. Alternatives read the same
+    flags (`flags` and `unless`, each compared as a set) and differ in
+    `after` (a set too). Two of one answer over other flags would be two
+    guards of one answer, which no nest makes, and are refused; two after
+    the same candidates would be one alternative written twice, and are
+    refused. They are what a SHARED subtree of a nest becomes in one race: esa
+    synthesis shares a subnetwork between the decisions that read it (its
+    W(y), through an `esa.fork`), and a race that takes such a subtree in
+    once for each position that reads it gives each copy of its candidates
+    that position's predecessors, so the same guard, or the same settled
+    token, enters under two sets of dominators (F(P(h, S), P(k, S)): S's
+    answer wins once h or k is refused). Nothing else changes: alternatives
+    that win in one cycle carry the same payload, so the lowest-index
+    winner answers what any of them would; a stalled answer is held as any;
+    and every candidate refused, alternatives included, is still zero.
+
     That is what a nest of `esa.f` and `esa.p` over guards may answer: F adds
     no predecessor, P(hi, lo) puts every candidate of `hi` in the `after` of
     every candidate of `lo`; a guard over flags is a candidate with its flags,
-    a negated flag one of its `unless`; a settled subnetwork, a token. The
+    a negated flag one of its `unless`; a settled subnetwork, a token; a
+    subtree read in several places, its candidates once a place. The
     race differs from the nest in two ways, both within the specification's
     freedom. It keeps ONE round for all its inputs, where each unit of a nest
     closes its own: no input gives round n+1's token before every input has

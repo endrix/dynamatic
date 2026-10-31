@@ -16,8 +16,10 @@ Usage:
 
 The shapes are the nests a lowering makes: a chain of priorities, an F of
 incomparable guards, a guard alone over flags and a negated flag, a mixed
-nest with a token (the GHDL bench's), and a guard over a flag and its
-negation (formation's P and not P) in an F under a priority. `--checker` defaults to $NUSMV,
+nest with a token (the GHDL bench's), a guard over a flag and its
+negation (formation's P and not P) in an F under a priority, and a shared
+subtree taken in under two sets of predecessors (alternatives: one token
+read by two candidates, one payload two). `--checker` defaults to $NUSMV,
 then NuSMV, then nuXmv on PATH (see verify-first.py for a build).
 """
 import argparse
@@ -47,6 +49,11 @@ SHAPES = {
     # flag both ways), never enabled and refused once a arrives; g2 waits
     # for that and for g1's refusal
     "dead": (0, 3, 2, "p1:f1,0:u0/p2:f2/p3:f0:a0,1"),
+    # F(P(h(b, not c), S), P(k(c, d), S)), S = P(t, g(a)) taken in once for
+    # each place that reads it: ALTERNATIVES -- t read by two candidates,
+    # g's payload two -- so S's answer wins once h or k is refused (the GHDL
+    # bench's shape `alt`, at three bits)
+    "alt": (1, 4, 3, "p4:f1:u2/t0:a0/p1:f0:a0,1/p2:f2,3/t0:a3/p1:f0:a3,4"),
 }
 
 

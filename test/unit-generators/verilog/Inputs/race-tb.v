@@ -1,9 +1,11 @@
 `timescale 1ns/1ps
-// A testbench for handshake.race, used by race-iverilog.mlir: the unit under
-// test is `dut`, generated with CANDIDATES
-// "t0/p1:f0:u1:a0/p2:f2:a0/p16:f0:u0:a0,2/p4:f3,1:a0,2,3" (one 5-bit token,
+// A testbench for handshake.race, used by race-iverilog.mlir and
+// race-alt-iverilog.mlir: the unit under test is `dut`, generated with
+// CANDIDATES "t0/p1:f0:u1:a0/p2:f2:a0/p16:f0:u0:a0,2/p4:f3,1:a0,2,3" or
+// "p16:f1:u2/t0:a0/p1:f0:a0,1/p2:f2,3/t0:a3/p1:f0:a3,4" (one 5-bit token,
 // four flags), driven by the rounds of race-vectors.txt (the VHDL
-// testbench's), one a cycle: the inputs are set, the combinational outputs
+// testbench's, the test copies its shape's file there), one a cycle: the
+// inputs are set, the combinational outputs
 // checked, the clock ticks. Prints a MISMATCH line for each wrong cycle.
 module tb;
   reg clk = 0, rst = 1;

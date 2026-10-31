@@ -585,9 +585,11 @@ namespace handshake {
 /// token arrived not zero), and every candidate of `after` refused.
 struct RaceCandidate {
   /// The payload, non-zero, as wide as the race; unused for a token
-  /// candidate.
+  /// candidate. Candidates of one payload are alternatives of it (they
+  /// read the same flags and differ in `after`).
   llvm::APInt payload;
-  /// The token input the candidate is, for a token candidate.
+  /// The token input the candidate is, for a token candidate; several
+  /// candidates may be one token, alternatives as for a payload.
   std::optional<unsigned> token;
   /// Flag inputs required true, and required false. Each list names a flag
   /// once; a flag in both makes a candidate that is never enabled (refused
