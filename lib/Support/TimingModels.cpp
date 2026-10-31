@@ -199,6 +199,29 @@ const TimingModel *TimingDatabase::getModel(Operation *op) const {
       return model;
   }
 
+  // A commit whose kill comes when its token is first offered
+  // (`kill_at_valid`) is another circuit too, a flip-flop more and its kill
+  // from the valid alone: `handshake.commit.at_valid`, where the model has
+  // one; the base entry, the transfer's, otherwise.
+  if (auto commit = dyn_cast<handshake::CommitOp>(op);
+      commit && commit.getKillAtValid()) {
+    if (const TimingModel *model =
+            getModel(StringRef((baseName + ".at_valid").str())))
+      return model;
+  }
+
+  // A race whose inputs reopen only after its answer was taken
+  // (`reopen_after_taken`) has NO entry of its own: it is timed by the plain
+  // race's entry at its size. The two forms differ in one term of the
+  // completing-round AND (`done_wo`), so every arc this model carries --
+  // valid, data, the valid-to-data and the input readies -- is the same logic
+  // in both, and the one arc that differs, the output's ready to an input's,
+  // the reopening race does not have at all: a consumer of the model drops it
+  // on the attribute (StreamBlocks' esa-cut-to-period) rather than reading a
+  // zero from an entry. An entry of its own would carry the two syntheses'
+  // ABC noise (+-100 ps, 300-400 at 64-128 inputs) as if it were a difference
+  // between the circuits, in both directions.
+
   // A unit whose delays grow with its size is characterised at several sizes,
   // each an entry `<name>.size.<N>` beside the base entry, for the same reason
   // a multiplier's step is in its key: an entry nests by retiming path,
@@ -1042,6 +1065,8 @@ static const std::string DELAY_CV[] = {"delay", "CV"};
 static const std::string DELAY_CR[] = {"delay", "CR"};
 static const std::string DELAY_VC[] = {"delay", "VC"};
 static const std::string DELAY_VD[] = {"delay", "VD"};
+static const std::string DELAY_VK[] = {"delay", "VK"};
+static const std::string DELAY_RK[] = {"delay", "RK"};
 
 bool dynamatic::fromJSON(const ljson::Value &value,
                          TimingModel::PortModel &model, ljson::Path path) {
@@ -1087,6 +1112,14 @@ bool dynamatic::fromJSON(const ljson::Value &value, TimingModel &model,
   FW_FALSE(deserializeNested(DELAY_CR, object, model.condToReady, path));
   FW_FALSE(deserializeNested(DELAY_VC, object, model.validToCond, path));
   FW_FALSE(deserializeNested(DELAY_VD, object, model.validToData, path));
+  // A commit's kill (`handshake.commit`), where the model has it: optional,
+  // since no other unit has a kill out.
+  if (const ljson::Object *delays = object->getObject("delay")) {
+    if (delays->get("VK"))
+      FW_FALSE(deserializeNested(DELAY_VK, object, model.validToKill, path));
+    if (delays->get("RK"))
+      FW_FALSE(deserializeNested(DELAY_RK, object, model.readyToKill, path));
+  }
 
   // Deserialize the input ports' model
   if (const ljson::Value *value = object->get("inport")) {

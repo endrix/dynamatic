@@ -850,6 +850,27 @@ def RaceOp : Handshake_Op<"race", [
     (a lazy fork) upstream of two inputs of one race therefore closes a
     combinational loop through it, as through a `first`.
 
+    WITH `reopen_after_taken` an input that gave its token is ready again
+    once every other input has arrived and the answer was taken in an
+    EARLIER cycle, not in the cycle it is being taken: no input's `ready`
+    reads the output's `ready` (they read the registers and the other
+    inputs' `valid`), so the readers' ready back ends in the unit's
+    registers instead of running on through its inputs into whatever
+    produced them -- a guard's body and its argument latches. What it can
+    cost is a cycle to a next round's token offered in the very cycle the
+    round's answer is taken. It is therefore for a round where no input
+    offers its next round's token in that cycle -- which the round's
+    producer must argue input by input, since the answer's reader can lag
+    the race (an eager fork between the two lets one branch transfer while
+    another stalls, so the race need not fire in the cycle any one reader
+    takes); StreamBlocks' `abort-losers` argues it of a round whose losers
+    a `commit` stops. And even then the next answer comes in the same cycle,
+    since such a token, taken in the answer's cycle, is decided from the
+    registers the cycle after, and, left offered, is decided from the input
+    in that cycle. The answer out earlier (`emitted`) reopens the inputs as
+    before, in the round's completing cycle, and the early answer of the next
+    round in that cycle is unchanged.
+
     Example: P(F(t, g(a, not b)), h(c)) -- the settled token t, guard g over
     the flags a and not b, and the guard h, after both:
 
@@ -867,7 +888,8 @@ def RaceOp : Handshake_Op<"race", [
 
   let arguments = (ins Variadic<ChannelType>:$tokens,
                        Variadic<ChannelType>:$flags,
-                       ArrayAttr:$candidates);
+                       ArrayAttr:$candidates,
+                       UnitAttr:$reopen_after_taken);
   let results = (outs ChannelType:$result);
   let hasVerifier = 1;
 
@@ -911,7 +933,7 @@ def RaceOp : Handshake_Op<"race", [
     RaceOp::getRTLParameters() {
       ::mlir::MLIRContext *ctx = (*this)->getContext();
       ::mlir::Type ui32 = ::mlir::IntegerType::get(ctx, 32, ::mlir::IntegerType::Unsigned);
-      return ::llvm::SmallVector<::mlir::NamedAttribute>{
+      ::llvm::SmallVector<::mlir::NamedAttribute> params{
         {::mlir::StringAttr::get(ctx, "SIZE_TOKENS"),
          ::mlir::IntegerAttr::get(ui32, (unsigned)getTokens().size())},
         {::mlir::StringAttr::get(ctx, "SIZE_FLAGS"),
@@ -921,6 +943,11 @@ def RaceOp : Handshake_Op<"race", [
         {::mlir::StringAttr::get(ctx, "CANDIDATES"),
          ::mlir::StringAttr::get(ctx, getCandidatesEncoding())}
       };
+      // only where set: the plain race keeps its parameters
+      if (getReopenAfterTaken())
+        params.push_back({::mlir::StringAttr::get(ctx, "REOPEN_AFTER_TAKEN"),
+                          ::mlir::IntegerAttr::get(ui32, 1)});
+      return params;
     }
   }];
 }
@@ -992,6 +1019,49 @@ def CommitOp : Handshake_Op<"commit", [
     `kill` is a raw wire, as an `unbundle`'s signals are: no token, nothing
     waits for it.
 
+    WITH `kill_at_valid` the kill comes when the token is FIRST OFFERED
+    instead: `kill` is high in the first cycle `ins` is valid with a token,
+    whether or not `outs` is ready, and not again for that token, its
+    transfer included; the next token's first cycle is a kill again. One
+    flip-flop holds "offered and not taken last cycle" (`killed`, reset
+    low); the channel is still a wire, and `kill` is `rst or (ins_valid and
+    not killed)`. It is for a decision HELD from the cycle it is first
+    offered -- a `race`, a `first` or a `priority` keeps its answer, valid
+    and payload, until taken, and so do the forks and joins between it and
+    the commit, which pass that hold through (the commit need not read the
+    deciding unit itself: in StreamBlocks' lowering it reads the decision
+    through its fork and the round's room mask, an `andi`) -- whose losers
+    are known then: they can be stopped then, and the kill reads no `ready`,
+    so the readers' ready back through the dispatch is not on the reset's
+    path to every unit of the domain.
+
+    Most of what is above holds of the earlier kill, which comes at or
+    before the transfer: one kill a token, so one round ended a token (a
+    stand-in owes at most one zero); the rounds of a domain never overlap,
+    since a round still starts only after the previous commit of the domain
+    has TRANSFERRED (the producer's promise, as before); and the units of
+    the domain are idle from the cycle after the kill, earlier. While the
+    token waits, the stopped producers' zeros reach the decision, which has
+    answered and absorbs them as late losers.
+
+    One obligation MOVES, and it is the producer's: every token of a round
+    must enter the domain no later than the cycle the round's decision is
+    first offered. Under the transfer's kill, a token entering between the
+    decision's first valid cycle t and its transfer T is wiped at T+1 with
+    the rest of its round; under `kill_at_valid` the domain was reset at
+    t+1 already, so that token is not wiped -- the domain takes it for the
+    next round's, and the round it belongs to is short of it. (StreamBlocks'
+    lowering meets the obligation by what it lets into a domain: copies of
+    the round's permit, raw wires sampled with one, and the domain's own
+    loads' words, which the dropping load discards by count whenever they
+    arrive.)
+
+    A commit's `ins` must hold its token until taken, as every channel
+    does: a token REPLACED under valid without a transfer would leave
+    `killed` set and its successor unkilled, and one WITHDRAWN -- its valid
+    falling -- and offered again would be killed twice, since `killed`
+    (`ins_valid and not outs_ready`) clears when valid falls.
+
     Inside a domain the kill withdraws tokens, by design: a channel between
     two units of a domain (the latch to the guard's body, a load's word to
     the units it serves) may see `valid` fall at the kill edge with no
@@ -1009,11 +1079,14 @@ def CommitOp : Handshake_Op<"commit", [
     // another decision's commit
     %d1, %kill1 = commit %choice2 {domain = 1 : ui32} : <i3>
     %d2, %kill2 = commit %d1 {domain = 2 : ui32} : <i3>
+    // the kill in the cycle the decision is first offered
+    %d3, %kill3 = commit %choice3 {domain = 3 : ui32, kill_at_valid} : <i3>
     ```
   }];
 
   let arguments = (ins HandshakeType:$ins,
-                       DefaultValuedAttr<UI32Attr, "0">:$domain);
+                       DefaultValuedAttr<UI32Attr, "0">:$domain,
+                       UnitAttr:$kill_at_valid);
   let results = (outs HandshakeType:$outs, I1:$kill);
   let hasVerifier = 1;
 
@@ -1036,10 +1109,17 @@ def CommitOp : Handshake_Op<"commit", [
     ::mlir::FailureOr<::llvm::SmallVector<::mlir::NamedAttribute>>
     CommitOp::getRTLParameters() {
       ::mlir::MLIRContext *ctx = (*this)->getContext();
-      return ::llvm::SmallVector<::mlir::NamedAttribute>{
+      ::llvm::SmallVector<::mlir::NamedAttribute> params{
         {::mlir::StringAttr::get(ctx, "BITWIDTH"),
          ::mlir::TypeAttr::get(getOuts().getType())}
       };
+      // only where set: the transfer's commit keeps its parameters
+      if (getKillAtValid()) {
+        ::mlir::Type ui32 = ::mlir::IntegerType::get(ctx, 32, ::mlir::IntegerType::Unsigned);
+        params.push_back({::mlir::StringAttr::get(ctx, "KILL_AT_VALID"),
+                          ::mlir::IntegerAttr::get(ui32, 1)});
+      }
+      return params;
     }
   }];
 }

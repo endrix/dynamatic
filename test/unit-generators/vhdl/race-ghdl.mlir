@@ -4,6 +4,11 @@
 // RUN: python3 %dynamatic_src_root/tools/unit-generators/vhdl/vhdl-unit-generator.py -n dut -o %t/dut.vhd -t race -p size_tokens=1 size_flags=4 bitwidth=5 "candidates='t0/p1:f0:u1:a0/p2:f2:a0/p16:f0:u0:a0,2/p4:f3,1:a0,2,3'" "extra_signals={}"
 // RUN: ghdl -a --std=08 --workdir=%t %dynamatic_src_root/data/vhdl/support/types.vhd %t/dut.vhd %S/Inputs/race-tb.vhd
 // RUN: cd %t && ghdl --elab-run --std=08 --workdir=. tb --stop-time=20us 2>&1 | FileCheck %s
+// RUN: mkdir -p %t/reopen %t/reopen-other && cp %S/Inputs/race-vectors-reopen.txt %t/reopen/race-vectors.txt && cp %S/Inputs/race-vectors.txt %t/reopen-other/race-vectors.txt
+// RUN: python3 %dynamatic_src_root/tools/unit-generators/vhdl/vhdl-unit-generator.py -n dut -o %t/reopen/dut.vhd -t race -p size_tokens=1 size_flags=4 bitwidth=5 "candidates='t0/p1:f0:u1:a0/p2:f2:a0/p16:f0:u0:a0,2/p4:f3,1:a0,2,3'" "extra_signals={}" reopen_after_taken=1
+// RUN: ghdl -a --std=08 --workdir=%t/reopen %dynamatic_src_root/data/vhdl/support/types.vhd %t/reopen/dut.vhd %S/Inputs/race-tb.vhd
+// RUN: cd %t/reopen && ghdl --elab-run --std=08 --workdir=. tb --stop-time=20us 2>&1 | FileCheck %s
+// RUN: cd %t/reopen-other && not ghdl --elab-run --std=08 --workdir=../reopen tb --stop-time=20us 2>&1 | FileCheck %s --check-prefix=OTHER
 
 // handshake.race simulated, the generator's VHDL for the nest
 // P(t, F(g1(a, not b), P(g2(c), P(g0(a, not a), g3(d, b))))) -- one 5-bit
@@ -26,3 +31,13 @@
 
 // CHECK: race: 1000 cycles as expected
 // CHECK-NOT: failure
+
+// Then `reopen_after_taken`, against the same requirement with its inputs
+// reopening only after the answer was taken (race_spec.py
+// --reopen-after-taken wrote Inputs/race-vectors-reopen.txt; 162 cycles
+// close by taking their answer while an input that gave its token offers the
+// next round's, which waits a cycle). On the plain race's vectors it fails,
+// at the first such cycle, on a ready.
+
+// OTHER: (assertion failure): cycle {{[0-9]+}}: {{tokens|flags}}_ready
+// OTHER-NOT: cycles as expected

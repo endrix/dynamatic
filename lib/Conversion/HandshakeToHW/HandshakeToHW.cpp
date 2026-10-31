@@ -638,10 +638,20 @@ ModuleDiscriminator::ModuleDiscriminator(Operation *op) {
         addUnsigned("SIZE_FLAGS", race.getFlags().size());
         addType("DATA_TYPE", race.getResult());
         addString("CANDIDATES", race.getCandidatesEncoding());
+        // A race whose inputs reopen only after its answer was taken is
+        // another circuit (no input's ready reads the output's); named only
+        // where set, so that the plain race's module is unchanged
+        if (race.getReopenAfterTaken())
+          addUnsigned("REOPEN_AFTER_TAKEN", 1);
       })
-      .Case<handshake::CommitOp>([&](auto) {
-        // A wire and its transfer: the bitwidth alone
+      .Case<handshake::CommitOp>([&](handshake::CommitOp commit) {
+        // A wire and its kill: the bitwidth, and, where the kill comes when
+        // the token is first offered rather than when it passes (one
+        // flip-flop more), that -- named only where set, so that the
+        // transfer's commit keeps its module
         addType("DATA_TYPE", op->getOperand(0));
+        if (commit.getKillAtValid())
+          addUnsigned("KILL_AT_VALID", 1);
       })
       .Case<handshake::StandInOp>([&](handshake::StandInOp standIn) {
         // The number of kills it ORs, and the bitwidth

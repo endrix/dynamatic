@@ -161,6 +161,29 @@
       {"name": "SIZE_TOKENS", "type": "unsigned"},
       {"name": "SIZE_FLAGS", "type": "unsigned"},
       {"name": "CANDIDATES", "type": "string"},
+      {"name": "KILL_RESET", "type": "unsigned", "eq": 1},
+      {"name": "REOPEN_AFTER_TAKEN", "type": "unsigned", "eq": 1}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t race -p size_tokens=$SIZE_TOKENS size_flags=$SIZE_FLAGS bitwidth=$BITWIDTH candidates=\"'$CANDIDATES'\" kill_reset=$KILL_RESET reopen_after_taken=$REOPEN_AFTER_TAKEN",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.race",
+    "parameters": [
+      {"name": "SIZE_TOKENS", "type": "unsigned"},
+      {"name": "SIZE_FLAGS", "type": "unsigned"},
+      {"name": "CANDIDATES", "type": "string"},
+      {"name": "REOPEN_AFTER_TAKEN", "type": "unsigned", "eq": 1}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t race -p size_tokens=$SIZE_TOKENS size_flags=$SIZE_FLAGS bitwidth=$BITWIDTH candidates=\"'$CANDIDATES'\" reopen_after_taken=$REOPEN_AFTER_TAKEN",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.race",
+    "parameters": [
+      {"name": "SIZE_TOKENS", "type": "unsigned"},
+      {"name": "SIZE_FLAGS", "type": "unsigned"},
+      {"name": "CANDIDATES", "type": "string"},
       {"name": "KILL_RESET", "type": "unsigned", "eq": 1}
     ],
     "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t race -p size_tokens=$SIZE_TOKENS size_flags=$SIZE_FLAGS bitwidth=$BITWIDTH candidates=\"'$CANDIDATES'\" kill_reset=$KILL_RESET",
@@ -174,6 +197,14 @@
       {"name": "CANDIDATES", "type": "string"}
     ],
     "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t race -p size_tokens=$SIZE_TOKENS size_flags=$SIZE_FLAGS bitwidth=$BITWIDTH candidates=\"'$CANDIDATES'\"",
+    "hdl": "smv"
+  },
+  {
+    "name": "handshake.commit",
+    "parameters": [
+      {"name": "KILL_AT_VALID", "type": "unsigned", "eq": 1}
+    ],
+    "generator": "python $DYNAMATIC/experimental/tools/unit-generators/smv/smv-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.smv -t commit -p bitwidth=$BITWIDTH kill_at_valid=$KILL_AT_VALID",
     "hdl": "smv"
   },
   {

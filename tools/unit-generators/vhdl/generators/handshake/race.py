@@ -82,6 +82,11 @@ def generate_race(name, params):
     those tokens decide -- a winner, or every candidate refused -- is
     answered in that same cycle (the `early` view: the same decision over
     the next round's tokens alone). The output's valid reads no ready.
+
+    `reopen_after_taken` (1): an input that gave its token is ready again
+    only with the answer taken in an earlier cycle (`emitted`), not in the
+    cycle it is being taken: `done_wo` reads no `outs_ready`, so no input's
+    ready reads the output's (op description: where that costs nothing).
     """
     size_tokens = params["size_tokens"]
     size_flags = params["size_flags"]
@@ -98,10 +103,14 @@ def generate_race(name, params):
             "signals would lose them (the op's verifier refuses it)")
     if size_tokens + size_flags == 0:
         raise ValueError("handshake.race has no input")
+    reopen_after_taken = int(params.get("reopen_after_taken", 0))
+    if reopen_after_taken not in (0, 1):
+        raise ValueError("handshake.race: reopen_after_taken is 0 or 1, not "
+                         f"{reopen_after_taken}")
     cands = parse_candidates(params["candidates"], size_tokens, size_flags,
                              bitwidth)
     return _generate_race(name, size_tokens, size_flags, bitwidth, cands,
-                          params["candidates"])
+                          params["candidates"], reopen_after_taken)
 
 
 def _bits(value, width):
@@ -154,7 +163,7 @@ def _decision(prefix, cands, bitwidth, tval):
     return "\n".join(lines)
 
 
-def _generate_race(name, nt, nf, w, cands, encoding):
+def _generate_race(name, nt, nf, w, cands, encoding, reopen_after_taken=0):
     n = nt + nf
     c = len(cands)
 
@@ -265,6 +274,15 @@ end entity;
     if nf:
         readies.append(f"flags_ready  <= not seen({n} - 1 downto {nt}) or done_wo({n} - 1 downto {nt});")
 
+    if reopen_after_taken:
+        reopen_comment = (
+            "\n  -- (reopen_after_taken: only with the answer taken in an earlier cycle;"
+            "\n  -- no input's ready reads the output's ready)")
+        reopen_term = "emitted"
+    else:
+        reopen_comment = ""
+        reopen_term = "(emitted or outs_ready)"
+
     architecture = f"""
 -- Architecture of race
 architecture arch of {name} is
@@ -300,8 +318,8 @@ begin
   -- the round is closing when they are, and then answers): never its own
   -- valid, and the output's valid never reads its ready. What it gives then
   -- is the next round's; with the answer out earlier, the next round those
-  -- tokens decide is answered now.
-  done_wo <= others_in and ({n} - 1 downto 0 => (emitted or outs_ready));
+  -- tokens decide is answered now.{reopen_comment}
+  done_wo <= others_in and ({n} - 1 downto 0 => {reopen_term});
   again   <= iv and seen and done_wo;
   early   <= emitted and closing and (e_any_win or e_all_ref);
   {(chr(10) + "  ").join(readies)}

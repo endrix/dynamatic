@@ -1,5 +1,6 @@
 // REQUIRES: nusmv
 // RUN: for s in guard chain f mixed dead alt; do python3 %dynamatic_src_root/experimental/tools/unit-generators/smv/verify-race.py --shape $s || exit 1; done | FileCheck %s
+// RUN: for s in guard chain f mixed dead alt; do python3 %dynamatic_src_root/experimental/tools/unit-generators/smv/verify-race.py --shape $s --reopen-after-taken || exit 1; done | FileCheck %s --check-prefix=REOPEN
 
 // The race's SMV model, model-checked against a specification written apart
 // from it (an observer of the ports' transfers that decides the round from its
@@ -24,3 +25,18 @@
 // CHECK: shape mixed (t0/p1:f0:u1:a0/p2:f2:a0/p4:f3,1:a0,2): 18 of 18 properties hold
 // CHECK: shape dead (p1:f1,0:u0/p2:f2/p3:f0:a0,1): 14 of 14 properties hold
 // CHECK: shape alt (p4:f1:u2/t0:a0/p1:f0:a0,1/p2:f2,3/t0:a3/p1:f0:a3,4): 18 of 18 properties hold
+
+// The race whose inputs reopen only after its answer was taken
+// (`reopen_after_taken`), on the same shapes: everything above, but an input
+// that gave its token is taken again only in a closing cycle whose answer was
+// out before it, and, through the DEFINEs, no input's ready reads the output's
+// ready. Lesioned (the generator ignoring the attribute), `on_arrival` and the
+// structural check fail. The shape with ALTERNATIVES is among them: reopening
+// is per input, so candidates of one answer change nothing about it.
+
+// REOPEN: shape guard, reopen after taken (p1:f0,1:u2): 17 of 17 properties hold
+// REOPEN: shape chain, reopen after taken (p1:f0/p2:f1:a0/p4:f2:a0,1): 17 of 17 properties hold
+// REOPEN: shape f, reopen after taken (p1:f0/p2:f1/p4:f2): 17 of 17 properties hold
+// REOPEN: shape mixed, reopen after taken (t0/p1:f0:u1:a0/p2:f2:a0/p4:f3,1:a0,2): 23 of 23 properties hold
+// REOPEN: shape dead, reopen after taken (p1:f1,0:u0/p2:f2/p3:f0:a0,1): 17 of 17 properties hold
+// REOPEN: shape alt, reopen after taken (p4:f1:u2/t0:a0/p1:f0:a0,1/p2:f2,3/t0:a3/p1:f0:a3,4): 23 of 23 properties hold

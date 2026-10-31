@@ -4,6 +4,10 @@
 // RUN: python3 %dynamatic_src_root/experimental/tools/unit-generators/verilog/verilog-unit-generator.py -n dut -o %t/dut.v -t race -p size_tokens=1 size_flags=4 bitwidth=5 "candidates='t0/p1:f0:u1:a0/p2:f2:a0/p16:f0:u0:a0,2/p4:f3,1:a0,2,3'" "extra_signals={}"
 // RUN: iverilog -g2012 -o %t/sim %t/dut.v %S/Inputs/race-tb.v
 // RUN: cd %t && vvp -N sim 2>&1 | FileCheck %s
+// RUN: mkdir -p %t/reopen && cp %S/../vhdl/Inputs/race-vectors-reopen.txt %t/reopen/race-vectors.txt
+// RUN: python3 %dynamatic_src_root/experimental/tools/unit-generators/verilog/verilog-unit-generator.py -n dut -o %t/reopen/dut.v -t race -p size_tokens=1 size_flags=4 bitwidth=5 "candidates='t0/p1:f0:u1:a0/p2:f2:a0/p16:f0:u0:a0,2/p4:f3,1:a0,2,3'" "extra_signals={}" reopen_after_taken=1
+// RUN: iverilog -g2012 -o %t/reopen/sim %t/reopen/dut.v %S/Inputs/race-tb.v
+// RUN: cd %t/reopen && vvp -N sim 2>&1 | FileCheck %s
 
 // handshake.race simulated in Verilog, the verilog-beta generator's output,
 // against the random rounds of the VHDL testbench (Inputs/race-vectors.txt,
@@ -17,3 +21,7 @@
 // CHECK: race: 1000 cycles as expected
 // CHECK-NOT: failure
 // CHECK-NOT: MISMATCH
+
+// Then `reopen_after_taken` on the VHDL bench's vectors for it
+// (../vhdl/Inputs/race-vectors-reopen.txt): an input that gave its token is
+// ready again only once the answer was taken before the round's last cycle.

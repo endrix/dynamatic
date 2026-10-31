@@ -11,6 +11,15 @@
 // RUN: cd %t/gen0 && vvp -N sim 2>&1 | FileCheck %s
 // RUN: iverilog -g2012 -DDATALESS -o %t/static0/sim %dynamatic_src_root/data/verilog/handshake/dataless/commit.v %S/Inputs/commit-dataless-static-dut.v %S/Inputs/commit-tb.v
 // RUN: cd %t/static0 && vvp -N sim 2>&1 | FileCheck %s
+// RUN: mkdir -p %t/at %t/at0 %t/at-other
+// RUN: cp %S/Inputs/commit-at-valid-vectors.txt %t/at/commit-vectors.txt && cp %S/Inputs/commit-at-valid-vectors.txt %t/at0/commit-vectors.txt && cp %S/Inputs/commit-transfer-vectors.txt %t/at-other/commit-vectors.txt
+// RUN: python3 %dynamatic_src_root/experimental/tools/unit-generators/verilog/verilog-unit-generator.py -n dut -o %t/at/dut.v -t commit -p bitwidth=3 "extra_signals={}" kill_at_valid=1
+// RUN: iverilog -g2012 -o %t/at/sim %t/at/dut.v %S/Inputs/commit-tb.v
+// RUN: cd %t/at && vvp -N sim 2>&1 | FileCheck %s --check-prefix=AT
+// RUN: python3 %dynamatic_src_root/experimental/tools/unit-generators/verilog/verilog-unit-generator.py -n dut -o %t/at0/dut.v -t commit -p bitwidth=0 "extra_signals={}" kill_at_valid=1
+// RUN: iverilog -g2012 -DDATALESS -o %t/at0/sim %t/at0/dut.v %S/Inputs/commit-tb.v
+// RUN: cd %t/at0 && vvp -N sim 2>&1 | FileCheck %s --check-prefix=AT
+// RUN: cd %t/at-other && vvp -N ../at/sim 2>&1 | FileCheck %s --check-prefix=OTHER
 
 // handshake.commit simulated in Verilog, the verilog-beta generator's output
 // and the static modules the Verilog configuration emits (with data and
@@ -21,3 +30,16 @@
 // CHECK: commit: 96 cycles as expected
 // CHECK-NOT: failure
 // CHECK-NOT: MISMATCH
+
+// Then the `kill_at_valid` form, with data and dataless, against its
+// requirement (Inputs/commit_spec.py, which wrote commit-at-valid-vectors.txt;
+// the VHDL's commit-ghdl.mlir replays the same): the kill in the first cycle
+// each token is offered, not again for it. On the transfer's requirement
+// (commit-transfer-vectors.txt, the same stimulus) it mismatches.
+
+// AT: commit: 200 cycles as expected
+// AT-NOT: failure
+// AT-NOT: MISMATCH
+
+// OTHER: MISMATCH
+// OTHER: failure

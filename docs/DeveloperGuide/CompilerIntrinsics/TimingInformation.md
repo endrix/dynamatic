@@ -700,7 +700,14 @@ has:
   its kill, the AND of its valid in and its ready out, is a port of its own
   class, `kill`: `VK` (valid in to kill) and `RK` (the ready of its output,
   `outs_ready`, a signal into the unit, to kill), keys beside `VR`..`VD` that
-  only a commit's entry has.
+  only a commit's entry has; TimingModel reads them (`validToKill`,
+  `readyToKill`, zero where absent). A commit with `kill_at_valid` (the kill
+  in the first cycle its token is offered) is another circuit, its own entry
+  `handshake.commit.at_valid` (`KILL_AT_VALID`, `generated_units.VARIANT_KEYS`;
+  getModel reads it for a commit with the attribute): its kill is the AND of
+  its valid and a flip-flop, so `RK` is 0, and the ready ends in that
+  flip-flop, its `inport` `ready` (ASAP7 SLVT: `VK` 0.009 ns, the ready into
+  the flip-flop 0.028 ns, the valid 0.022).
 - `stand_in` passes its flag through a multiplexer and an OR, and its kills
   end in its two registers (`sent`, `owe`): the kills into the registers are
   its port model's `inport` `kill`, at every width. It is sized by its kills
@@ -734,14 +741,30 @@ has:
   multiplexer, and a race of at most N inputs and N candidates is timed by
   the size-N entry, whose shapes have the longest `after`, the widest tie
   and the widest AND such a race can have, each alone (an approximation for
-  a race that combines them, as for any race). A race's readies
-  read no data -- an input is ready while it has not given its token, or
-  when the round completes, from the other inputs' valids and the output's
-  ready -- so its data into ready is not measured
-  (`ready_reads_no_data_units`) and its CR is 0: the path a timer finds
-  there is false, through cells ABC shares between the decision and the
-  readies (0.234 ns once, a race of four tokens at 64 bits, which the sizes
-  above it inherited).
+  a race that combines them, as for any race). A race's readies read no data
+  -- an input is ready while it has not given its token, or when the round
+  completes, from the other inputs' valids and the output's ready -- so its
+  data into ready is not measured (`ready_reads_no_data_units`) and its CR is
+  0: the path a timer finds there is false, through cells ABC shares between
+  the decision and the readies (0.234 ns once, a race of four tokens at 64
+  bits, which the sizes above it inherited). A race with `reopen_after_taken`
+  (its inputs reopen only after its answer was taken: no input's ready reads
+  the output's ready) has NO entry of its own. It is timed by the plain
+  race's entry at its size -- the same entry, and the same caveat about
+  alternatives beyond the characterized shapes -- and the characterization
+  does not write it (`generated_units.race_points` skips a form `VARIANT_KEYS`
+  gives no key). The two forms differ in one term of the completing-round AND
+  (`done_wo`), so the valid, the data, the valid-to-data and the input readies
+  are the same logic in both, and the one arc that differs, the output's ready
+  to an input's, the reopening race does not have at all: a consumer of the
+  model drops those arcs on the attribute (StreamBlocks' esa-cut-to-period)
+  rather than reading a zero from an entry. Measured in both forms at every
+  point of the sweep, the reopening race came out 6 to 35 ps faster on average
+  per delay class while ABC moved a single point by up to 100 ps either way
+  (300-400 at 64 and 128 inputs), in both directions: an entry of its own
+  would have carried that noise as if it were a difference between the
+  circuits, and a maximum merged into the plain keys would have moved every
+  plain race by it.
 - `kill_or`, the OR of a kill domain's commits, is not an operation: the
   lowering puts it beside a domain that several commits stop. It is written
   under the generator config's name, `kill_or.size.<N>` (2 to 256 inputs,

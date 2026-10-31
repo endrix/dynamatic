@@ -70,6 +70,7 @@
 // ENTRIES-DAG: "handshake.race.size.32": {
 // ENTRIES-DAG: "handshake.race.size.64": {
 // ENTRIES-DAG: "handshake.race.size.128": {
+// ENTRIES-DAG: "handshake.commit.at_valid": {
 
 // A race's readies read no data (done_wo: the other inputs' arrivals and the
 // output's ready), so the characterization does not measure data into ready
@@ -92,6 +93,27 @@
 // COMMIT-NEXT:   "RK":
 // COMMIT:        "inport":
 
+// The commit whose kill comes when its token is first offered has no path
+// from its ready to its kill (RK 0): the ready ends in its flip-flop.
+// RUN: FileCheck %s --check-prefix=ATVALID --input-file=%dynamatic_src_root/data/components-asap7.json
+// ATVALID:      "handshake.commit.at_valid": {
+// ATVALID-NOT:  "handshake.
+// ATVALID:        "RK": 0{{(\.0)?}}{{$}}
+
+// The race whose inputs reopen only after its answer was taken has no entry
+// of its own: it is timed by the plain race's entry at its size. The two
+// forms differ in one term of the completing-round AND, so every arc the
+// model carries is the same logic in both, and the one arc that differs --
+// the output's ready to an input's -- the reopening race does not have at
+// all, which a consumer of the model expresses on the attribute (its
+// StreamBlocks reader drops those arcs in esa-cut-to-period) rather than
+// reading a zero from an entry. Measured, the two syntheses of the shared
+// logic differ by ABC noise in both directions (+-100 ps, 300-400 at 64-128
+// inputs), which an entry of its own would carry as if it were a difference
+// between the circuits.
+// RUN: FileCheck %s --check-prefix=NOREOPEN --input-file=%dynamatic_src_root/data/components-asap7.json
+// NOREOPEN-NOT: reopen_after_taken
+
 // MEASURED-NOT: {{^ *}}"stand_in": "
 
 // LOADLAT:      "handshake.load.kill_drop": {
@@ -102,7 +124,7 @@
 
 // CHECK-LABEL: handshake.func @two_way_firsts
 // CHECK-NOT:   buffer
-// CHECK:       end
+// CHECK:       end %
 // TIGHT-LABEL: handshake.func @two_way_firsts
 // TIGHT:       first
 // TIGHT-NEXT:  buffer
@@ -126,10 +148,10 @@ handshake.func @eight_way_firsts(%a: !handshake.channel<i8>, %b: !handshake.chan
 // RACE-LABEL: handshake.func @priority_chain
 // RACE:       priority
 // RACE:       buffer
-// RACE:       end
+// RACE:       end %
 // RACE-LABEL: handshake.func @race_of_four
 // RACE-NOT:   buffer
-// RACE:       end
+// RACE:       end %
 handshake.func @priority_chain(%a: !handshake.channel<i8>, %b: !handshake.channel<i8>, %c: !handshake.channel<i8>, %d: !handshake.channel<i8>, %start: !handshake.control<>, ...) -> (!handshake.channel<i8>, !handshake.control<>) attributes {argNames = ["a", "b", "c", "d", "start"], resNames = ["out", "end"], handshake.frequencies = []} {
   %x = priority %c, %d {handshake.bb = 0 : ui32} : <i8>
   %y = priority %b, %x {handshake.bb = 0 : ui32} : <i8>
