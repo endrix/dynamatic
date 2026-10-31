@@ -1,9 +1,12 @@
--- A testbench for handshake.race, used by race-ghdl.mlir: the unit under test
--- is named dut, generated with CANDIDATES
+-- A testbench for handshake.race, used by race-ghdl.mlir and
+-- race-alt-ghdl.mlir: the unit under test is named dut, one 5-bit token and
+-- four flags, generated with CANDIDATES
 -- "t0/p1:f0:u1:a0/p2:f2:a0/p16:f0:u0:a0,2/p4:f3,1:a0,2,3"
--- (P(t, F(g1(a, not b), P(g2(c), P(g0(a, not a), g3(d, b))))), one 5-bit
--- token and four flags, g0 a guard that can never pass), driven by the
--- rounds of race-vectors.txt one a cycle -- the inputs set, the
+-- (P(t, F(g1(a, not b), P(g2(c), P(g0(a, not a), g3(d, b))))), g0 a guard
+-- that can never pass) or "p16:f1:u2/t0:a0/p1:f0:a0,1/p2:f2,3/t0:a3/p1:f0:a3,4"
+-- (F(P(h(b, not c), S), P(k(c, d), S)), S = P(t, g(a)) with alternatives),
+-- driven by the rounds of race-vectors.txt (the test copies its shape's
+-- file there) one a cycle -- the inputs set, the
 -- combinational outputs checked against the requirement's, the clock ticks.
 -- Random rounds, each input's token held until taken, the sink stalling at
 -- random: a candidate wins once its flags arrived as it needs them and every

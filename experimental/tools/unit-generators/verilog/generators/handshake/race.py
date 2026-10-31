@@ -50,7 +50,9 @@ def generate_race(name, params):
     that gave its token is ready again the cycle every other input has
     arrived with the answer taken or being taken (never reading its own
     valid), and a next round its tokens decide is answered then when the
-    output is free (`e_`). The output's valid reads no ready.
+    output is free (`e_`). The output's valid reads no ready. Alternatives
+    (candidates of one payload, or of one token) are terms like any other:
+    those that win together carry the same payload.
     """
     nt = params["size_tokens"]
     nf = params["size_flags"]

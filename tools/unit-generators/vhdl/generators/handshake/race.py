@@ -6,8 +6,11 @@ def parse_candidates(text, size_tokens, size_flags, bitwidth):
 
     Returns a list of dicts with keys payload (int or None), token (int or
     None), flags, unless, after (lists of int). Checks what the generators
-    rely on; the op's verifier checks the rest (distinct payloads, the order
-    transitively closed and acyclic).
+    rely on; the op's verifier checks the rest (the order transitively
+    closed and acyclic, alternatives of one payload or one token differing
+    in `after`). Candidates of one payload, or of one token, need nothing of
+    their own here: each is a term, and those that win together carry the
+    same payload through the lowest-index select and the AND-OR multiplexer.
     """
     cands = []
     for k, entry in enumerate(text.split("/")):

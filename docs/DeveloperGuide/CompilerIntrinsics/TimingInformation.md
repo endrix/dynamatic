@@ -725,13 +725,20 @@ has:
   turn) -- and its entry at a size, `handshake.race.size.<N>`, N its tokens
   and flags together (getModel's size), is the maximum over them. A nest a
   width cannot tell apart (more flag candidates than the width has distinct
-  non-zero payloads) is not written at that width. A race's readies read no
-  data -- an input is ready while it has not given its token, or when the
-  round completes, from the other inputs' valids and the output's ready --
-  so its data into ready is not measured (`ready_reads_no_data_units`) and
-  its CR is 0: the path a timer finds there is false, through cells ABC
-  shares between the decision and the readies (0.234 ns once, a race of four
-  tokens at 64 bits, which the sizes above it inherited).
+  non-zero payloads) is not written at that width. A race with
+  ALTERNATIVES (candidates of one payload or one token, a shared subtree
+  taken in once a place that reads it) is not characterized apart: the
+  entry is keyed by the inputs, and alternatives add candidates over the
+  same inputs -- terms of the AND/OR, the prefix OR and the multiplexer, of
+  logarithmic depth -- so such a race of N inputs is timed by the size-N
+  entry, which its extra candidates may exceed a little. A race's readies
+  read no data -- an input is ready while it has not given its token, or
+  when the round completes, from the other inputs' valids and the output's
+  ready -- so its data into ready is not measured
+  (`ready_reads_no_data_units`) and its CR is 0: the path a timer finds
+  there is false, through cells ABC shares between the decision and the
+  readies (0.234 ns once, a race of four tokens at 64 bits, which the sizes
+  above it inherited).
 - `kill_or`, the OR of a kill domain's commits, is not an operation: the
   lowering puts it beside a domain that several commits stop. It is written
   under the generator config's name, `kill_or.size.<N>` (2 to 256 inputs,

@@ -389,15 +389,16 @@ ArrayAttr dynamatic::handshake::getRaceCandidatesAttr(
 
 /// The result is a one-hot-or-zero decision `width` bits wide, the tokens are
 /// of its type and the flags one bit, none with extra signals; the
-/// candidates name inputs that exist, each token input once and each flag
-/// input at least once, and their priorities are a strict partial order
-/// written out in full (`after` transitively closed and irreflexive, hence
-/// acyclic). Every candidate reads an input -- one that reads none would win
-/// before anything of its round arrived, in a round the unit cannot see
-/// start -- and a race of one candidate has a flag (one token alone is a
-/// wire). A candidate's `flags` name a flag once, and its `unless` too; a
-/// flag in both is allowed: the candidate is never enabled and is refused
-/// once the flag arrives, as a nest's guard over P and not P.
+/// candidates name inputs that exist, each input at least once, and their
+/// priorities are a strict partial order written out in full (`after`
+/// transitively closed and irreflexive, hence acyclic). Candidates of one
+/// payload, or of one token input, are alternatives and differ in `after`.
+/// Every candidate reads an input -- one that reads none would win before
+/// anything of its round arrived, in a round the unit cannot see start -- and a
+/// race of one candidate has a flag (one token alone is a wire). A candidate's
+/// `flags` name a flag once, and its `unless` too; a flag in both is allowed:
+/// the candidate is never enabled and is refused once the flag arrives, as a
+/// nest's guard over P and not P.
 LogicalResult RaceOp::verify() {
   auto channel = cast<ChannelType>(getResult().getType());
   auto data = dyn_cast<IntegerType>(channel.getDataType());
@@ -433,18 +434,12 @@ LogicalResult RaceOp::verify() {
     return emitOpError() << "has no candidate";
 
   SmallVector<unsigned> tokenUses(numTokens, 0), flagUses(numFlags, 0);
-  llvm::DenseSet<llvm::APInt> payloads;
   for (auto [k, cand] : llvm::enumerate(cands)) {
     if (cand.isToken()) {
       if (*cand.token >= numTokens)
         return emitOpError() << "candidate " << k << " is token " << *cand.token
                              << " of " << numTokens;
       ++tokenUses[*cand.token];
-    } else if (!payloads.insert(cand.payload).second) {
-      return emitOpError() << "candidate " << k << "'s payload "
-                           << llvm::toString(cand.payload, 10, false)
-                           << " is another candidate's: a payload names one "
-                              "candidate";
     }
     // A list names a flag once (a repeat would change no term). The same
     // flag in both lists is not refused: that candidate is never enabled.
@@ -478,12 +473,38 @@ LogicalResult RaceOp::verify() {
     }
   }
   for (auto [t, uses] : llvm::enumerate(tokenUses))
-    if (uses != 1)
-      return emitOpError() << "token " << t << " is " << uses
-                           << " candidates; a token input is exactly one";
+    if (uses == 0)
+      return emitOpError() << "token " << t << " is read by no candidate";
   for (auto [f, uses] : llvm::enumerate(flagUses))
     if (uses == 0)
       return emitOpError() << "flag " << f << " is read by no candidate";
+  // ALTERNATIVES: candidates of one payload, or of one token input, are each
+  // a way for that answer to win -- a subtree of the nest the race took in
+  // under two sets of predecessors -- and differ in `after`: two of one
+  // answer after the same candidates would be one way written twice.
+  auto sameAnswer = [](const RaceCandidate &a, const RaceCandidate &b) {
+    if (a.isToken() || b.isToken())
+      return a.token == b.token;
+    return a.payload == b.payload;
+  };
+  SmallVector<SmallVector<unsigned>> sortedAfter;
+  for (const RaceCandidate &cand : cands) {
+    sortedAfter.emplace_back(cand.after.begin(), cand.after.end());
+    llvm::sort(sortedAfter.back());
+  }
+  for (unsigned k = 0; k < n; ++k)
+    for (unsigned j = 0; j < k; ++j)
+      if (sameAnswer(cands[j], cands[k]) && sortedAfter[j] == sortedAfter[k]) {
+        InFlightDiagnostic diag = emitOpError() << "candidates " << j << " and "
+                                                << k << " are ";
+        if (cands[k].isToken())
+          diag << "token " << *cands[k].token;
+        else
+          diag << "payload "
+               << llvm::toString(cands[k].payload, 10, /*Signed=*/false);
+        return diag << " after the same candidates: the alternatives of one "
+                       "answer differ in their `after`";
+      }
   // Transitively closed: what must be refused before j must be refused
   // before every candidate after j. With no candidate after itself, the
   // order is then acyclic too (a cycle would put its members after

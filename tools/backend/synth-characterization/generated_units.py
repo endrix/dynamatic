@@ -100,7 +100,9 @@ SIZED_WIDTHS = [1, 8, 32, 64]
 # nest -- a token first, then guards over two flags, one of them negated, in
 # turn P and F, as the per-state decisions of picorv32's Cpu are. A nest whose
 # flag candidates need more distinct payloads than the width holds is not
-# written at that width (a race's payloads are distinct and non-zero). The
+# written at that width (each shape's payloads are distinct and non-zero;
+# alternatives, two candidates of one payload, add no input and are not
+# characterized apart). The
 # sizes go to 128: TimingDatabase times a larger op by the largest entry, a
 # lower bound for it, and the cut and the placer would take such a race for
 # fitting where it may not.

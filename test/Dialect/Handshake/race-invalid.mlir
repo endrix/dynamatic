@@ -5,7 +5,8 @@
 // it; tokens are of its type and flags one bit; a candidate is a payload or
 // a token, never both and never neither, reads inputs that exist and at
 // least one, and its predecessors are a strict partial order written out in
-// full; a token input is one candidate and a flag input read by one.
+// full; every input is read by a candidate, and candidates of one answer (a
+// payload, or a token input) -- its alternatives -- differ in `after`.
 
 // A dataless race would decide nothing: zero is "nothing selected" (its
 // result is a channel by its type).
@@ -99,9 +100,11 @@ handshake.func @field(%a: !handshake.channel<i1>, ...) -> !handshake.channel<i2>
 
 // -----
 
+// Two candidates of payload 1 after the same (no) candidates: alternatives of
+// one payload differ in `after` (race.mlir's @alternatives, @either).
 handshake.func @twice(%a: !handshake.channel<i1>, %b: !handshake.channel<i1>, ...) -> !handshake.channel<i2>
     attributes {argNames = ["a", "b"], resNames = ["out0"]} {
-  // expected-error @below {{candidate 1's payload 1 is another candidate's}}
+  // expected-error @below {{candidates 0 and 1 are payload 1 after the same candidates: the alternatives of one answer differ in their `after`}}
   %0 = race [] [%a, %b] {candidates = [{payload = 1 : ui2, flags = array<i64: 0>}, {payload = 1 : ui2, flags = array<i64: 1>}]} : <i2>
   end %0 : <i2>
 }
@@ -165,18 +168,42 @@ handshake.func @notoken(%t: !handshake.channel<i2>, %a: !handshake.channel<i1>, 
 
 // -----
 
+// A token read by two candidates after the same (no) candidates; read twice
+// after different ones, it is two alternatives (race.mlir's @alternatives).
 handshake.func @tokentwice(%t: !handshake.channel<i2>, %a: !handshake.channel<i1>, ...) -> !handshake.channel<i2>
     attributes {argNames = ["t", "a"], resNames = ["out0"]} {
-  // expected-error @below {{token 0 is 2 candidates}}
+  // expected-error @below {{candidates 0 and 1 are token 0 after the same candidates}}
   %0 = race [%t] [%a] {candidates = [{token = 0 : i64}, {token = 0 : i64, flags = array<i64: 0>}]} : <i2>
   end %0 : <i2>
 }
 
 // -----
 
+// A TRUE DUPLICATE: S = P(t, g(a)) taken in twice under the same
+// predecessors gives g's candidate twice, alike in everything; the lowering
+// takes it in once.
+handshake.func @duplicate(%t: !handshake.channel<i2>, %a: !handshake.channel<i1>, ...) -> !handshake.channel<i2>
+    attributes {argNames = ["t", "a"], resNames = ["out0"]} {
+  // expected-error @below {{candidates 1 and 2 are payload 1 after the same candidates}}
+  %0 = race [%t] [%a] {candidates = [{token = 0 : i64}, {payload = 1 : ui2, flags = array<i64: 0>, after = array<i64: 0>}, {payload = 1 : ui2, flags = array<i64: 0>, after = array<i64: 0>}]} : <i2>
+  end %0 : <i2>
+}
+
+// -----
+
+// `after` is a set: the same candidates in another order are the same.
+handshake.func @sameset(%a: !handshake.channel<i1>, %b: !handshake.channel<i1>, %c: !handshake.channel<i1>, ...) -> !handshake.channel<i3>
+    attributes {argNames = ["a", "b", "c"], resNames = ["out0"]} {
+  // expected-error @below {{candidates 2 and 3 are payload 4 after the same candidates}}
+  %0 = race [] [%a, %b, %c] {candidates = [{payload = 1 : ui3, flags = array<i64: 0>}, {payload = 2 : ui3, flags = array<i64: 1>}, {payload = 4 : ui3, flags = array<i64: 2>, after = array<i64: 0, 1>}, {payload = 4 : ui3, flags = array<i64: 2>, after = array<i64: 1, 0>}]} : <i3>
+  end %0 : <i3>
+}
+
+// -----
+
 handshake.func @tokenunread(%t: !handshake.channel<i2>, %a: !handshake.channel<i1>, ...) -> !handshake.channel<i2>
     attributes {argNames = ["t", "a"], resNames = ["out0"]} {
-  // expected-error @below {{token 0 is 0 candidates}}
+  // expected-error @below {{token 0 is read by no candidate}}
   %0 = race [%t] [%a] {candidates = [{payload = 1 : ui2, flags = array<i64: 0>}]} : <i2>
   end %0 : <i2>
 }

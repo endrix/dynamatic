@@ -66,3 +66,43 @@ handshake.func @narrow(%t: !handshake.channel<i2>, %u: !handshake.channel<i2>,
        ]} : <i2>
   end %0 : <i2>
 }
+
+// ALTERNATIVES: F(P(h, S), P(k, S)) with S = P(t, g(a)) taken in once for
+// each place that reads it (a shared subtree). The token t is read by two
+// candidates (1 after h, 4 after k) and g's payload 1 is two (2 after h and
+// t, 5 after k and t): S's answer wins once h or k is refused. Candidates of
+// one answer differ in `after`.
+// CHECK-LABEL: handshake.func @alternatives
+// CHECK: race [%arg0] [%arg1, %arg2, %arg3, %arg4] {candidates = [{flags = array<i64: 1>, payload = 16 : ui5, unless = array<i64: 2>}, {after = array<i64: 0>, token = 0 : i64}, {after = array<i64: 0, 1>, flags = array<i64: 0>, payload = 1 : ui5}, {flags = array<i64: 2, 3>, payload = 2 : ui5}, {after = array<i64: 3>, token = 0 : i64}, {after = array<i64: 3, 4>, flags = array<i64: 0>, payload = 1 : ui5}]} : <i5>
+handshake.func @alternatives(%t: !handshake.channel<i5>, %a: !handshake.channel<i1>,
+                             %b: !handshake.channel<i1>, %c: !handshake.channel<i1>,
+                             %d: !handshake.channel<i1>, ...)
+    -> !handshake.channel<i5>
+    attributes {argNames = ["t", "a", "b", "c", "d"], resNames = ["out0"]} {
+  %0 = race [%t] [%a, %b, %c, %d] {candidates = [
+         {payload = 16 : ui5, flags = array<i64: 1>, unless = array<i64: 2>},
+         {token = 0 : i64, after = array<i64: 0>},
+         {payload = 1 : ui5, flags = array<i64: 0>, after = array<i64: 0, 1>},
+         {payload = 2 : ui5, flags = array<i64: 2, 3>},
+         {token = 0 : i64, after = array<i64: 3>},
+         {payload = 1 : ui5, flags = array<i64: 0>, after = array<i64: 3, 4>}
+       ]} : <i5>
+  end %0 : <i5>
+}
+
+// Alternatives of one payload need not read the same flags: payload 1 when
+// a holds, or b once c is refused. (The lowering makes them of one guard,
+// but the op asks only that they differ in `after`.)
+// CHECK-LABEL: handshake.func @either
+// CHECK: race [] [%arg0, %arg1, %arg2] {candidates = [{flags = array<i64: 0>, payload = 1 : ui2}, {flags = array<i64: 2>, payload = 2 : ui2}, {after = array<i64: 1>, flags = array<i64: 1>, payload = 1 : ui2}]} : <i2>
+handshake.func @either(%a: !handshake.channel<i1>, %b: !handshake.channel<i1>,
+                       %c: !handshake.channel<i1>, ...)
+    -> !handshake.channel<i2>
+    attributes {argNames = ["a", "b", "c"], resNames = ["out0"]} {
+  %0 = race [] [%a, %b, %c] {candidates = [
+         {payload = 1 : ui2, flags = array<i64: 0>},
+         {payload = 2 : ui2, flags = array<i64: 2>},
+         {payload = 1 : ui2, flags = array<i64: 1>, after = array<i64: 1>}
+       ]} : <i2>
+  end %0 : <i2>
+}
