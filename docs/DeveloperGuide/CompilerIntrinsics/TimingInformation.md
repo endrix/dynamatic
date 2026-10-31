@@ -741,18 +741,18 @@ has:
   multiplexer, and a race of at most N inputs and N candidates is timed by
   the size-N entry, whose shapes have the longest `after`, the widest tie
   and the widest AND such a race can have, each alone (an approximation for
-  a race that combines them, as for any race). A race's readies
-  read no data -- an input is ready while it has not given its token, or
-  when the round completes, from the other inputs' valids and the output's
-  ready -- so its data into ready is not measured
-  (`ready_reads_no_data_units`) and its CR is 0: the path a timer finds
-  there is false, through cells ABC shares between the decision and the
-  readies (0.234 ns once, a race of four tokens at 64 bits, which the sizes
-  above it inherited). A race with
-  `reopen_after_taken` (its inputs reopen only after its answer was taken: no
-  input's ready reads the output's ready) has NO entry of its own. It is
-  timed by the plain race's entry at its size, and the characterization does
-  not write it (`generated_units.race_points` skips a form `VARIANT_KEYS`
+  a race that combines them, as for any race). A race's readies read no data
+  -- an input is ready while it has not given its token, or when the round
+  completes, from the other inputs' valids and the output's ready -- so its
+  data into ready is not measured (`ready_reads_no_data_units`) and its CR is
+  0: the path a timer finds there is false, through cells ABC shares between
+  the decision and the readies (0.234 ns once, a race of four tokens at 64
+  bits, which the sizes above it inherited). A race with `reopen_after_taken`
+  (its inputs reopen only after its answer was taken: no input's ready reads
+  the output's ready) has NO entry of its own. It is timed by the plain
+  race's entry at its size -- the same entry, and the same caveat about
+  alternatives beyond the characterized shapes -- and the characterization
+  does not write it (`generated_units.race_points` skips a form `VARIANT_KEYS`
   gives no key). The two forms differ in one term of the completing-round AND
   (`done_wo`), so the valid, the data, the valid-to-data and the input readies
   are the same logic in both, and the one arc that differs, the output's ready

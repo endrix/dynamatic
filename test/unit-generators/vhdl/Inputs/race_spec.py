@@ -213,9 +213,13 @@ class Spec:
                   "zero_early": valid_n and answer == 0 and not allin,
                   "dominated": valid_n and answer in SHAPE["dominated"],
                   "tie": valid_n and s.held is None and tie,
-                  "held": held,
-                  # the cycles the two reopening forms tell apart
-                  "taking": taking}
+                  "held": held}
+        if REOPEN_AFTER_TAKEN[0]:
+            # the cycles the two reopening forms tell apart: a closing cycle
+            # that takes its answer while an input that gave its token offers
+            # the next round's. Counted for this form alone, so that the
+            # plain race's vector files are what they were.
+            events["taking"] = taking
         if DEAD is not None:
             events["dead_waits"] = waits_on_dead(arrived, value)
         if any(same_answer(c, d) for k, c in enumerate(CANDS) for d in CANDS[:k]):
