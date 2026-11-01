@@ -21,7 +21,10 @@ concurrency:
 
 jobs:
   check-format:
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest became Ubuntu 26.04 (resolute) at the end of
+    # October 2026 and apt.llvm.org publishes no packages for it, so llvm.sh
+    # failed (apt exit 100) before clang-format ever ran. 24.04 has them.
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v4
