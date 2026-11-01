@@ -9,9 +9,10 @@ use ieee.numeric_std.all;
 -- bits, the kills of all the commits of the producer's domain (a domain may
 -- have several): any of them high ends ONE round. The rounds of a domain never
 -- overlap -- a round of the domain starts only after the previous commit of
--- the domain has transferred -- so at most one bit is high in a cycle, and it
+-- the domain has killed (at its transfer, or with `kill_at_valid` in its
+-- token's first valid cycle) -- so at most one bit is high in a cycle, and it
 -- ends the round this unit is in. (Were state B's round to start before state
--- A's commit transferred, A's kill would wipe it with A's round, and B's
+-- A's commit killed, A's kill would wipe it with A's round, and B's
 -- reader would wait for ever for this unit's token.) The producer's promise,
 -- asserted in simulation below. The zero is registered: offered in the kill
 -- cycle, `outs_valid` would depend on the decision's transfer, and that on the
@@ -26,8 +27,9 @@ use ieee.numeric_std.all;
 -- ever for the other); a kill while the producer's own token is offered and
 -- not taken resets the producer under `valid`, and the token becomes a zero
 -- before it transfers. So the stand-in's one reader must take a token the
--- cycle it arrives, with nothing between that can hold it back (an eager fork
--- whose other reader stalls, a join). Asserted in simulation (severity
+-- cycle it arrives, or before the next kill of its domain, with nothing
+-- between that can hold it back (an eager fork whose other reader stalls, a
+-- join). Asserted in simulation (severity
 -- failure, between `pragma translate_off` and `translate_on`), with the
 -- domain's promise (no two kills high in one cycle outside reset); synthesis
 -- skips both.
@@ -89,7 +91,7 @@ begin
   -- The precondition, in simulation only: a round ends only when no token
   -- waits at `outs`, neither the zero owed nor the producer's own. And the
   -- domain's promise: its rounds never overlap, so no two of its commits
-  -- transfer in one cycle (under reset every commit's kill is high).
+  -- kill in one cycle (under reset every commit's kill is high).
   -- pragma translate_off
   process (clk) is
     variable kills_high : integer;
@@ -110,7 +112,7 @@ begin
         end if;
       end loop;
       assert kills_high <= 1
-        report "stand_in: two commits of its kill domain transferred in one cycle (the domain's rounds overlap)"
+        report "stand_in: two commits of its kill domain killed in one cycle (the domain's rounds overlap)"
         severity failure;
     end if;
   end process;

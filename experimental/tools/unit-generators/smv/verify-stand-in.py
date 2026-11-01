@@ -17,7 +17,8 @@ With --kills N the unit takes N kills, the commits of one domain: each
 commit's transfer ends a round of its own (`ended` counts the kills high in a
 cycle), and the environment keeps the domain's promise that two of them never
 come in one cycle (its rounds never overlap: a round of the domain starts
-only after the previous commit of the domain has transferred). The lowering
+only after the previous commit of the domain has killed, at its transfer or
+with `kill_at_valid` in its token's first valid cycle). The lowering
 makes "a kill a round" literal: a stand-in takes the kill of every commit of
 its domain, each once, and two commits of one domain are never in series on a
 channel (both see one transfer, one round). --no-exclusive drops the promise:

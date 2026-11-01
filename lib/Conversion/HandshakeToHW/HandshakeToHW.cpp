@@ -2962,8 +2962,9 @@ static void insertIIMonitors(hw::HWModuleOp hwModOp,
 /// nothing. A stand-in takes the kills of all the commits of one domain, the
 /// one its producer is in: a commit it left out would reset the producer
 /// with no zero owed. That the rounds of a domain never overlap -- a round of
-/// the domain starts only after the previous commit of the domain has
-/// transferred -- is the producer's promise too (`handshake.commit`).
+/// the domain starts only after the previous commit of the domain has killed,
+/// at its transfer or, with `kill_at_valid`, in its token's first valid cycle
+/// -- is the producer's promise too (`handshake.commit`).
 static LogicalResult closeKillDomains(handshake::FuncOp funcOp) {
   auto domainOf = [](Operation *op) -> std::optional<uint64_t> {
     if (auto attr = op->getAttrOfType<IntegerAttr>(handshake::KILL_DOMAIN_ATTR))
