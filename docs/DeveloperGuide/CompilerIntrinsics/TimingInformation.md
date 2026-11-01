@@ -642,7 +642,8 @@ sized entry's delays as the largest at its size or any smaller one
 the 54 sized entries, by at most 0.23 ns on ASAP7 and 1.5 ns on sky130.
 
 What the sizes measured, the longest of an entry's delays (any port to any
-port, any of its widths), in ns, before that bound:
+port, any of its widths), in ns, before that bound (first: the phase-3 unit,
+before the racing units were measured):
 
 | unit | model | 2 | 8 | 32 | 64 | 128 | 256 |
 |---|---|---|---|---|---|---|---|
@@ -857,9 +858,13 @@ entries were measured at: ASAP7 LVT and RVT at 1 ns (`ASAP7_VT=lvt`, `rvt`),
 sky130 at 10 ns (`--synth-tool sky130`), the commands of "Characterizing for
 ASAP7" and "Characterizing for sky130". The periods are checked, not
 assumed: `addi` and `buffer`, measured again at them, write their entries and
-their stages in each model byte for byte, where at 0.5 ns on LVT or at 5 ns
-on sky130 seven of their eight entries move; and the plain load, measured
-again beside the dropping one, is byte-identical in all three models.
+their stages in each model byte for byte. At 0.5 ns on LVT or 5 ns on sky130
+they map the same circuits (every delay and stage equal, but for one LVT
+port delay OpenSTA rounds 1 fs the other way), and only the `inport` delays
+differ, in their last digits: those are read back as the period less the
+slack, so the bytes pin the period the entries were written at. The plain
+load, measured again beside the dropping one, is byte-identical in all
+three models.
 
 ```sh
 ASAP7_VT=lvt python3 main.py --synth-tool asap7 --dynamatic-dir "$DYN" \

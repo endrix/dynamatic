@@ -21,12 +21,16 @@
 // 0.090 would have, twice), and the placer cuts between those too.
 //
 // The other cell-library models have the same entries, each measured on its
-// own cells and not copied from another model's: sky130 HD at 10 ns and
-// ASAP7 LVT and RVT at 1 ns, the periods their other entries were measured
-// at. A model without a race entry is read by esa-cut-to-period as a first
-// of as many inputs (`substituted`), and a commit with kill_at_valid without
-// its entry as the transfer's commit; so every library's model is held to
-// the contract the ASAP7 SLVT model is (the same check prefixes).
+// own cells: sky130 HD at 10 ns and ASAP7 LVT and RVT at 1 ns, the periods
+// their other entries were measured at. A model without a race entry is read
+// by esa-cut-to-period as a first of as many inputs (`substituted`), and a
+// commit with kill_at_valid without its entry as the transfer's commit; so
+// every library's model is held to the same checks as the ASAP7 SLVT model:
+// the entries, the commit's VK and RK, no copy's note, the dropping load's
+// latency, a race's CR of 0, the at-valid commit's RK of 0, no reopening
+// entry. Those pin presence and constants, not a measurement, so each library
+// also pins one measured value, its two-input race's valid (LVTVAL, RVTVAL,
+// SKYVAL): a copy of another model's entries fails there (SLVT's is 0.1208).
 //
 // REQUIRES: cbc
 // RUN: FileCheck %s --check-prefix=ENTRIES --input-file=%dynamatic_src_root/data/components-asap7.json
@@ -49,6 +53,9 @@
 // RUN: FileCheck %s --check-prefix=MEASURED --input-file=%dynamatic_src_root/data/components-asap7-rvt.json
 // RUN: FileCheck %s --check-prefix=LOADLAT --input-file=%dynamatic_src_root/data/components-asap7-rvt.json
 // RUN: FileCheck %s --check-prefix=RACECR --input-file=%dynamatic_src_root/data/components-asap7-rvt.json
+// RUN: FileCheck %s --check-prefix=LVTVAL --input-file=%dynamatic_src_root/data/components-asap7-lvt.json
+// RUN: FileCheck %s --check-prefix=RVTVAL --input-file=%dynamatic_src_root/data/components-asap7-rvt.json
+// RUN: FileCheck %s --check-prefix=SKYVAL --input-file=%dynamatic_src_root/data/components-sky130.json
 // RUN: dynamatic-opt %s --handshake-place-buffers="algorithm=fpga20 solver=cbc timeout=30 target-period=0.3 timing-models=%dynamatic_src_root/data/components-asap7.json spec-timing-models=%dynamatic_src_root/data/spec-timing.json" --remove-operation-names 2>/dev/null | FileCheck %s
 // RUN: dynamatic-opt %s --handshake-place-buffers="algorithm=fpga20 solver=cbc timeout=30 target-period=0.22 timing-models=%dynamatic_src_root/data/components-asap7.json spec-timing-models=%dynamatic_src_root/data/spec-timing.json" --remove-operation-names 2>/dev/null | FileCheck %s --check-prefix=TIGHT
 // RUN: dynamatic-opt %s --handshake-place-buffers="algorithm=fpga20 solver=cbc timeout=30 target-period=0.25 timing-models=%dynamatic_src_root/data/components-asap7.json spec-timing-models=%dynamatic_src_root/data/spec-timing.json" --remove-operation-names 2>/dev/null | FileCheck %s --check-prefix=RACE
@@ -100,7 +107,15 @@
 // for it and every entry's CR is 0. The entry's port models (`inport`,
 // `outport`) have a CR of 0 too, after the delays' own: the NOT keeps a
 // non-zero CR from being passed over for theirs.
+// RACECR:      "handshake.race.size.2": {
+// RACECR-NOT:  "handshake.
+// RACECR-NOT:    "CR": {{[1-9]|0\.0*[1-9]}}
+// RACECR:        "CR": 0{{(\.0)?}},
 // RACECR:      "handshake.race": {
+// RACECR-NOT:  "handshake.
+// RACECR-NOT:    "CR": {{[1-9]|0\.0*[1-9]}}
+// RACECR:        "CR": 0{{(\.0)?}},
+// RACECR:      "handshake.race.size.3": {
 // RACECR-NOT:  "handshake.
 // RACECR-NOT:    "CR": {{[1-9]|0\.0*[1-9]}}
 // RACECR:        "CR": 0{{(\.0)?}},
@@ -108,7 +123,19 @@
 // RACECR-NOT:  "handshake.
 // RACECR-NOT:    "CR": {{[1-9]|0\.0*[1-9]}}
 // RACECR:        "CR": 0{{(\.0)?}},
+// RACECR:      "handshake.race.size.8": {
+// RACECR-NOT:  "handshake.
+// RACECR-NOT:    "CR": {{[1-9]|0\.0*[1-9]}}
+// RACECR:        "CR": 0{{(\.0)?}},
+// RACECR:      "handshake.race.size.16": {
+// RACECR-NOT:  "handshake.
+// RACECR-NOT:    "CR": {{[1-9]|0\.0*[1-9]}}
+// RACECR:        "CR": 0{{(\.0)?}},
 // RACECR:      "handshake.race.size.32": {
+// RACECR-NOT:  "handshake.
+// RACECR-NOT:    "CR": {{[1-9]|0\.0*[1-9]}}
+// RACECR:        "CR": 0{{(\.0)?}},
+// RACECR:      "handshake.race.size.64": {
 // RACECR-NOT:  "handshake.
 // RACECR-NOT:    "CR": {{[1-9]|0\.0*[1-9]}}
 // RACECR:        "CR": 0{{(\.0)?}},
@@ -116,6 +143,21 @@
 // RACECR-NOT:  "handshake.
 // RACECR-NOT:    "CR": {{[1-9]|0\.0*[1-9]}}
 // RACECR:        "CR": 0{{(\.0)?}},
+
+// One measured value per library: the two-input race's valid, the delay's
+// (the first "valid" of the entry; its port models' follow).
+// LVTVAL:      "handshake.race.size.2": {
+// LVTVAL-NOT:  "handshake.
+// LVTVAL:        "valid": {
+// LVTVAL-NEXT:     "1": 0.1394{{[0-9]*}}{{$}}
+// RVTVAL:      "handshake.race.size.2": {
+// RVTVAL-NOT:  "handshake.
+// RVTVAL:        "valid": {
+// RVTVAL-NEXT:     "1": 0.1748{{[0-9]*}}{{$}}
+// SKYVAL:      "handshake.race.size.2": {
+// SKYVAL-NOT:  "handshake.
+// SKYVAL:        "valid": {
+// SKYVAL-NEXT:     "1": 1.348{{[0-9]*}}{{$}}
 
 // The transfer's commit's own VK and RK: the at-valid commit's entry follows
 // it and has a VK too, so the NOT keeps the check inside the entry.
