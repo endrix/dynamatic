@@ -20,12 +20,35 @@
 // them; at 0.22 ns the two of two inputs no longer fit (the copied entry's
 // 0.090 would have, twice), and the placer cuts between those too.
 //
+// The other cell-library models have the same entries, each measured on its
+// own cells and not copied from another model's: sky130 HD at 10 ns and
+// ASAP7 LVT and RVT at 1 ns, the periods their other entries were measured
+// at. A model without a race entry is read by esa-cut-to-period as a first
+// of as many inputs (`substituted`), and a commit with kill_at_valid without
+// its entry as the transfer's commit; so every library's model is held to
+// the contract the ASAP7 SLVT model is (the same check prefixes).
+//
 // REQUIRES: cbc
 // RUN: FileCheck %s --check-prefix=ENTRIES --input-file=%dynamatic_src_root/data/components-asap7.json
 // RUN: FileCheck %s --check-prefix=COMMIT --input-file=%dynamatic_src_root/data/components-asap7.json
 // RUN: FileCheck %s --check-prefix=MEASURED --input-file=%dynamatic_src_root/data/components-asap7.json
 // RUN: FileCheck %s --check-prefix=LOADLAT --input-file=%dynamatic_src_root/data/components-asap7.json
 // RUN: FileCheck %s --check-prefix=RACECR --input-file=%dynamatic_src_root/data/components-asap7.json
+// RUN: FileCheck %s --check-prefix=ENTRIES --input-file=%dynamatic_src_root/data/components-sky130.json
+// RUN: FileCheck %s --check-prefix=COMMIT --input-file=%dynamatic_src_root/data/components-sky130.json
+// RUN: FileCheck %s --check-prefix=MEASURED --input-file=%dynamatic_src_root/data/components-sky130.json
+// RUN: FileCheck %s --check-prefix=LOADLAT --input-file=%dynamatic_src_root/data/components-sky130.json
+// RUN: FileCheck %s --check-prefix=RACECR --input-file=%dynamatic_src_root/data/components-sky130.json
+// RUN: FileCheck %s --check-prefix=ENTRIES --input-file=%dynamatic_src_root/data/components-asap7-lvt.json
+// RUN: FileCheck %s --check-prefix=COMMIT --input-file=%dynamatic_src_root/data/components-asap7-lvt.json
+// RUN: FileCheck %s --check-prefix=MEASURED --input-file=%dynamatic_src_root/data/components-asap7-lvt.json
+// RUN: FileCheck %s --check-prefix=LOADLAT --input-file=%dynamatic_src_root/data/components-asap7-lvt.json
+// RUN: FileCheck %s --check-prefix=RACECR --input-file=%dynamatic_src_root/data/components-asap7-lvt.json
+// RUN: FileCheck %s --check-prefix=ENTRIES --input-file=%dynamatic_src_root/data/components-asap7-rvt.json
+// RUN: FileCheck %s --check-prefix=COMMIT --input-file=%dynamatic_src_root/data/components-asap7-rvt.json
+// RUN: FileCheck %s --check-prefix=MEASURED --input-file=%dynamatic_src_root/data/components-asap7-rvt.json
+// RUN: FileCheck %s --check-prefix=LOADLAT --input-file=%dynamatic_src_root/data/components-asap7-rvt.json
+// RUN: FileCheck %s --check-prefix=RACECR --input-file=%dynamatic_src_root/data/components-asap7-rvt.json
 // RUN: dynamatic-opt %s --handshake-place-buffers="algorithm=fpga20 solver=cbc timeout=30 target-period=0.3 timing-models=%dynamatic_src_root/data/components-asap7.json spec-timing-models=%dynamatic_src_root/data/spec-timing.json" --remove-operation-names 2>/dev/null | FileCheck %s
 // RUN: dynamatic-opt %s --handshake-place-buffers="algorithm=fpga20 solver=cbc timeout=30 target-period=0.22 timing-models=%dynamatic_src_root/data/components-asap7.json spec-timing-models=%dynamatic_src_root/data/spec-timing.json" --remove-operation-names 2>/dev/null | FileCheck %s --check-prefix=TIGHT
 // RUN: dynamatic-opt %s --handshake-place-buffers="algorithm=fpga20 solver=cbc timeout=30 target-period=0.25 timing-models=%dynamatic_src_root/data/components-asap7.json spec-timing-models=%dynamatic_src_root/data/spec-timing.json" --remove-operation-names 2>/dev/null | FileCheck %s --check-prefix=RACE
@@ -74,21 +97,30 @@
 
 // A race's readies read no data (done_wo: the other inputs' arrivals and the
 // output's ready), so the characterization does not measure data into ready
-// for it and every entry's CR is 0.
+// for it and every entry's CR is 0. The entry's port models (`inport`,
+// `outport`) have a CR of 0 too, after the delays' own: the NOT keeps a
+// non-zero CR from being passed over for theirs.
 // RACECR:      "handshake.race": {
 // RACECR-NOT:  "handshake.
+// RACECR-NOT:    "CR": {{[1-9]|0\.0*[1-9]}}
 // RACECR:        "CR": 0{{(\.0)?}},
 // RACECR:      "handshake.race.size.4": {
 // RACECR-NOT:  "handshake.
+// RACECR-NOT:    "CR": {{[1-9]|0\.0*[1-9]}}
 // RACECR:        "CR": 0{{(\.0)?}},
 // RACECR:      "handshake.race.size.32": {
 // RACECR-NOT:  "handshake.
+// RACECR-NOT:    "CR": {{[1-9]|0\.0*[1-9]}}
 // RACECR:        "CR": 0{{(\.0)?}},
 // RACECR:      "handshake.race.size.128": {
 // RACECR-NOT:  "handshake.
+// RACECR-NOT:    "CR": {{[1-9]|0\.0*[1-9]}}
 // RACECR:        "CR": 0{{(\.0)?}},
 
+// The transfer's commit's own VK and RK: the at-valid commit's entry follows
+// it and has a VK too, so the NOT keeps the check inside the entry.
 // COMMIT:      "handshake.commit": {
+// COMMIT-NOT:  "handshake.
 // COMMIT:        "VK":
 // COMMIT-NEXT:   "RK":
 // COMMIT:        "inport":
@@ -96,6 +128,9 @@
 // The commit whose kill comes when its token is first offered has no path
 // from its ready to its kill (RK 0): the ready ends in its flip-flop.
 // RUN: FileCheck %s --check-prefix=ATVALID --input-file=%dynamatic_src_root/data/components-asap7.json
+// RUN: FileCheck %s --check-prefix=ATVALID --input-file=%dynamatic_src_root/data/components-sky130.json
+// RUN: FileCheck %s --check-prefix=ATVALID --input-file=%dynamatic_src_root/data/components-asap7-lvt.json
+// RUN: FileCheck %s --check-prefix=ATVALID --input-file=%dynamatic_src_root/data/components-asap7-rvt.json
 // ATVALID:      "handshake.commit.at_valid": {
 // ATVALID-NOT:  "handshake.
 // ATVALID:        "RK": 0{{(\.0)?}}{{$}}
@@ -112,6 +147,9 @@
 // inputs), which an entry of its own would carry as if it were a difference
 // between the circuits.
 // RUN: FileCheck %s --check-prefix=NOREOPEN --input-file=%dynamatic_src_root/data/components-asap7.json
+// RUN: FileCheck %s --check-prefix=NOREOPEN --input-file=%dynamatic_src_root/data/components-sky130.json
+// RUN: FileCheck %s --check-prefix=NOREOPEN --input-file=%dynamatic_src_root/data/components-asap7-lvt.json
+// RUN: FileCheck %s --check-prefix=NOREOPEN --input-file=%dynamatic_src_root/data/components-asap7-rvt.json
 // NOREOPEN-NOT: reopen_after_taken
 
 // MEASURED-NOT: {{^ *}}"stand_in": "

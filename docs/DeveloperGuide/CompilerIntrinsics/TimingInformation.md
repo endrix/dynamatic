@@ -851,8 +851,69 @@ is 0.062 ns at 1 bit and 0.144 at 64, a first's (two inputs) 0.060 and 0.159.
 A round's payloads are flags and action indices of one to three bits, so
 the model times its racing units as wider than they are.
 
-The sky130 and ASAP7 LVT and RVT models keep their copied entries: a run of
-first's sizes 128 and 256 takes more than an hour on ASAP7 alone.
+The sky130 and ASAP7 LVT and RVT models have the same entries, measured by
+the same runs on their own cells, each at the period the model's other
+entries were measured at: ASAP7 LVT and RVT at 1 ns (`ASAP7_VT=lvt`, `rvt`),
+sky130 at 10 ns (`--synth-tool sky130`), the commands of "Characterizing for
+ASAP7" and "Characterizing for sky130". The periods are checked, not
+assumed: `addi` and `buffer`, measured again at them, write their entries and
+their stages in each model byte for byte, where at 0.5 ns on LVT or at 5 ns
+on sky130 seven of their eight entries move; and the plain load, measured
+again beside the dropping one, is byte-identical in all three models.
+
+```sh
+ASAP7_VT=lvt python3 main.py --synth-tool asap7 --dynamatic-dir "$DYN" \
+  --json-input "$DYN/data/rtl-config-vhdl.json" \
+  --json-output "$DYN/data/components-asap7-lvt.json" --clock-period 1.0 \
+  --units handshake.race,handshake.first,handshake.priority,handshake.commit,handshake.stand_in,kill_or,handshake.load \
+  --update
+SKY130_DIR=/path/to/sky130 python3 main.py --synth-tool sky130 \
+  --dynamatic-dir "$DYN" --json-input "$DYN/data/rtl-config-vhdl.json" \
+  --json-output "$DYN/data/components-sky130.json" --clock-period 10.0 \
+  --units handshake.race,handshake.first,handshake.priority,handshake.commit,handshake.stand_in,kill_or,handshake.load \
+  --update
+```
+
+One delay of each, in ns, beside ASAP7 SLVT's (a race and a first at a size
+are the maximum over their nests and widths, as above):
+
+| entry | delay | ASAP7 SLVT, 1 ns | ASAP7 LVT, 1 ns | ASAP7 RVT, 1 ns | sky130 HD, 10 ns |
+|---|---|---:|---:|---:|---:|
+| handshake.race.size.2 | valid | 0.121 | 0.139 | 0.175 | 1.348 |
+| handshake.race.size.4 | valid | 0.185 | 0.223 | 0.290 | 2.492 |
+| handshake.race.size.8 | valid | 0.263 | 0.311 | 0.399 | 2.697 |
+| handshake.race.size.16 | valid | 0.322 | 0.387 | 0.504 | 4.098 |
+| handshake.race.size.32 | valid | 0.428 | 0.511 | 0.657 | 5.075 |
+| handshake.race.size.64 | valid | 0.627 | 0.756 | 0.967 | 7.259 |
+| handshake.race.size.128 | valid | 0.953 | 1.140 | 1.499 | 9.824 |
+| handshake.race.size.8 | CV | 0.278 | 0.334 | 0.434 | 3.044 |
+| handshake.race.size.128 | stage | 1.029 | 1.238 | 1.623 | 10.336 |
+| handshake.first.size.2 | valid | 0.103 | 0.120 | 0.152 | 1.194 |
+| handshake.first.size.8 | valid | 0.180 | 0.211 | 0.267 | 2.021 |
+| handshake.first.size.64 | valid | 0.818 | 0.967 | 1.264 | 8.246 |
+| handshake.first.size.256 | valid | 2.919 | 3.550 | 4.637 | 29.447 |
+| handshake.first.size.2 | CV | 0.159 | 0.191 | 0.247 | 1.588 |
+| handshake.priority | valid | 0.087 | 0.102 | 0.129 | 1.218 |
+| handshake.priority | CV | 0.144 | 0.174 | 0.227 | 1.930 |
+| handshake.commit | VK | 0.010 | 0.012 | 0.015 | 0.113 |
+| handshake.commit | RK | 0.009 | 0.011 | 0.014 | 0.133 |
+| handshake.commit.at_valid | VK | 0.009 | 0.011 | 0.014 | 0.113 |
+| handshake.stand_in.size.1 | valid | 0.009 | 0.010 | 0.012 | 0.234 |
+| handshake.stand_in.size.1 | kill into registers | 0.039 | 0.045 | 0.067 | 0.396 |
+| handshake.load.kill_drop | valid | 0.029 | 0.034 | 0.042 | 0.245 |
+| kill_or.size.8 | data, 1 bit | 0.047 | 0.058 | 0.077 | 0.464 |
+
+A library slows its racing units by about the factor it slows its other
+units: the median ratio to SLVT over their delays (valid, ready, VR, CV, VD
+and the data at 1 to 64 bits, where SLVT's is above 5 ps) is 1.18 on LVT,
+1.52 on RVT and 10.97 on sky130, and over the model's other entries 1.18,
+1.50 and 9.63. Within each library the race keeps the shape it has on SLVT:
+at two inputs its valid is a first's and a little more (19 ps on LVT, 23
+on RVT, 154 on sky130), and from 64 inputs it is faster than a first of as
+many. A race of 128 inputs does not fit a 1 ns period on LVT or RVT by its
+valid alone (1.140 and 1.499 ns), nor its stage sky130's 10 ns (10.336 ns).
+Each library's run of these units took about 1 h 50 min on ten cores
+(`first` 81 to 89 minutes of it, the race 24 to 25, the others a minute).
 
 ### The widths past 64 bits
 
