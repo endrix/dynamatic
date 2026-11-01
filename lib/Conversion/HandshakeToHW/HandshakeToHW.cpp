@@ -3378,8 +3378,9 @@ static LogicalResult closeKillDomains(handshake::FuncOp funcOp) {
 /// The OR of a kill domain's kills (`wireKillDomains`): `size` one-bit inputs
 /// `ins_0` ... and one output `outs`, combinational, no clock and no reset
 /// (each kill has the reset in it already: a commit's is its transfer, or its
-/// token's first valid cycle under `kill_at_valid`, or the reset). Not a Handshake unit: the lowering's own, as `mem_to_bram` is; the
-/// RTL configurations name it `kill_or`. One extern module a size.
+/// token's first valid cycle under `kill_at_valid`, or the reset). Not a
+/// Handshake unit: the lowering's own, as `mem_to_bram` is; the RTL
+/// configurations name it `kill_or`. One extern module a size.
 static hw::HWModuleExternOp getKillOrExtern(mlir::ModuleOp topModOp,
                                             unsigned size, Location loc) {
   static constexpr llvm::StringLiteral HW_NAME = "kill_or";
