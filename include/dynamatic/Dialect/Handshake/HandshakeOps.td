@@ -1001,10 +1001,10 @@ def CommitOp : Handshake_Op<"commit", [
     ends the domain's previous round, whichever it is, has transferred). With
     `kill_at_valid` (below) the promise is about the KILL instead: a round of
     the domain starts only after the previous commit's kill, its token's
-    first valid cycle. The lowering does not check it. The stand-in's VHDL and Verilog assert in
-    simulation that no two of its kills are high in one cycle, and the SMV
-    `kill_or` defines `many` (two or more of its inputs high) for an
-    observer to state it.
+    first valid cycle. The lowering does not check it. The stand-in's VHDL
+    and Verilog assert in simulation that no two of its kills are high in one
+    cycle, and the SMV `kill_or` defines `many` (two or more of its inputs
+    high) for an observer to state it.
 
     Every unit's domain has a commit, and every commit's domain has a unit or
     a stand-in: the lowering refuses the others.
@@ -1049,12 +1049,12 @@ def CommitOp : Handshake_Op<"commit", [
     commit's KILL, the first valid cycle of its token -- which it may keep
     before that token's transfer (StreamBlocks' lowering does so, with
     convert-esa-to-handshake{commit-watch=false}, where every token that
-    starts its next round comes out of a reader of the commit's `outs`, so
-    no sooner than the cycle after the kill). The transfers then kill
-    nothing, and two commits of one domain may transfer in the same cycle;
-    their kills, one at each token's first valid cycle, still come one a
-    cycle, which is what the domain's OR and its stand-ins need. A producer
-    that keeps only the transfer-ordered promise keeps this one too.
+    starts its next round comes out of a reader of the commit's `outs`, so no
+    sooner than the cycle after the kill). The transfers then kill nothing,
+    and two commits of one domain may transfer in the same cycle; their
+    kills, one at each token's first valid cycle, still come one a cycle,
+    which is what the domain's OR and its stand-ins need. A producer that
+    keeps only the transfer-ordered promise keeps this one too.
 
     One obligation MOVES, and it is the producer's: every token of a round
     must enter the domain no later than the cycle the round's decision is
@@ -1151,19 +1151,19 @@ def StandInOp : Handshake_Op<"stand_in", [
     `kills` are the kills of the commits of one domain, the producer's (a
     domain may have several, `commit`), and the stand-in takes all of its
     domain's commits, each once. The lowering refuses one that leaves a
-    commit out -- that commit's transfer would reset the producer with no
-    zero owed here, and the reader of the round it ends would wait for ever
-    -- and one that takes a kill twice (two bits high for one round). They
-    are OR'd inside: a cycle in which any of them is high ends ONE round, and
-    the unit is otherwise the same whatever their number. That is sound
-    because the rounds of a domain never overlap (`commit`): a round of the
-    domain starts only after the previous commit of the domain has killed --
-    at its transfer, or, with `kill_at_valid`, in its token's first valid
-    cycle -- so at most one of the kills is high in a cycle and it ends the
-    round this stand-in is in. (A round started before the previous commit's
-    kill is wiped by that kill, and its reader waits for ever for this
-    unit's token.) The VHDL and Verilog forms assert in simulation that no
-    two kills are high in one cycle outside reset.
+    commit out -- that commit's kill would reset the producer with no zero
+    owed here, and the reader of the round it ends would wait for ever -- and
+    one that takes a kill twice (two bits high for one round). They are OR'd
+    inside: a cycle in which any of them is high ends ONE round, and the unit
+    is otherwise the same whatever their number. That is sound because the
+    rounds of a domain never overlap (`commit`): a round of the domain starts
+    only after the previous commit of the domain has killed -- at its
+    transfer, or, with `kill_at_valid`, in its token's first valid cycle --
+    so at most one of the kills is high in a cycle and it ends the round this
+    stand-in is in. (A round started before the previous commit's kill is
+    wiped by that kill, and its reader waits for ever for this unit's token.)
+    The VHDL and Verilog forms assert in simulation that no two kills are
+    high in one cycle outside reset.
 
     Two bits: the round's token has passed (a kill ends the round), a zero
     is owed. The zero is registered because a zero offered in the kill cycle
@@ -1185,13 +1185,13 @@ def StandInOp : Handshake_Op<"stand_in", [
     the transfer. "Exactly one token a round" holds only under it. So the
     stand-in's one reader must take a token the cycle it arrives, or before
     the next kill of its domain -- as a decision unit takes a token of the
-    round it is in on arrival, and a token of the next round offered while
-    it still finishes this one in the cycle it reopens, which no kill of
-    that next round precedes (a transfer in the kill's own cycle counts as
-    passed) -- with nothing between them that can hold it back past that
-    kill (an eager fork whose other reader stalls, a join waiting for
-    another input). The VHDL and Verilog forms assert it in
-    simulation; the hardware does not check it.
+    round it is in on arrival, and a token of the next round offered while it
+    still finishes this one in the cycle it reopens, which no kill of that
+    next round precedes (a transfer in the kill's own cycle counts as passed)
+    -- with nothing between them that can hold it back past that kill (an
+    eager fork whose other reader stalls, a join waiting for another input).
+    The VHDL and Verilog forms assert it in simulation; the hardware does not
+    check it.
 
     Example:
 

@@ -13,8 +13,8 @@ def generate_stand_in(name, params):
     commit of the domain has killed (at its transfer, or with `kill_at_valid`
     in its token's first valid cycle) -- so at most one bit is high in a
     cycle, and it ends the round this unit is in. (Were state B's round to
-    start before state A's commit killed, A's kill would wipe it with
-    A's round, and B's reader would wait for ever for this unit's token.) The
+    start before state A's commit killed, A's kill would wipe it with A's
+    round, and B's reader would wait for ever for this unit's token.) The
     producer's promise, asserted in simulation with the precondition.
 
     The zero is registered: offered in the kill cycle, `outs_valid` would
@@ -22,17 +22,17 @@ def generate_stand_in(name, params):
     units this channel feeds -- a combinational loop through them.
 
     The precondition: no kill while a token is offered at `outs` and not
-    taken. A kill while the zero is owed and not taken would owe a second
-    one, which two bits cannot hold (one zero for two rounds, and the
-    decision waits for ever for the other); a kill while the producer's own
-    token is offered and not taken resets the producer under `valid`, and
-    the token becomes a zero before it transfers. So the stand-in's one
-    reader must take a token the cycle it arrives, or before the next kill of
-    its domain, with nothing between that can hold it back (an eager fork
-    whose other reader stalls, a join). A
-    process between `pragma translate_off` and `translate_on` asserts it in
-    simulation (severity failure), and the domain's promise (no two kills
-    high in one cycle outside reset); synthesis skips both.
+    taken. A kill while the zero is owed and not taken would owe a second one,
+    which two bits cannot hold (one zero for two rounds, and the decision
+    waits for ever for the other); a kill while the producer's own token is
+    offered and not taken resets the producer under `valid`, and the token
+    becomes a zero before it transfers. So the stand-in's one reader must take
+    a token the cycle it arrives, or before the next kill of its domain, with
+    nothing between that can hold it back (an eager fork whose other reader
+    stalls, a join). A process between `pragma translate_off` and
+    `translate_on` asserts it in simulation (severity failure), and the
+    domain's promise (no two kills high in one cycle outside reset); synthesis
+    skips both.
     """
     bitwidth = params["bitwidth"]
     size = params["size"]
@@ -66,7 +66,7 @@ entity {name} is
     ins       : in  std_logic_vector({bitwidth} - 1 downto 0);
     ins_valid : in  std_logic;
     ins_ready : out std_logic;
-    -- the commits' transfers, one bit a commit: any ends the round
+    -- the commits' kills, one bit a commit: any ends the round
     kill : in std_logic_vector({size} - 1 downto 0);
     -- output channel
     outs       : out std_logic_vector({bitwidth} - 1 downto 0);

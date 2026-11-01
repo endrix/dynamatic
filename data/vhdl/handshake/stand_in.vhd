@@ -8,31 +8,29 @@ use ieee.numeric_std.all;
 -- `ins` waiting meanwhile. Two flip-flops, `sent` and `owe`. `kill` has SIZE
 -- bits, the kills of all the commits of the producer's domain (a domain may
 -- have several): any of them high ends ONE round. The rounds of a domain never
--- overlap -- a round of the domain starts only after the previous commit of
--- the domain has killed (at its transfer, or with `kill_at_valid` in its
--- token's first valid cycle) -- so at most one bit is high in a cycle, and it
--- ends the round this unit is in. (Were state B's round to start before state
--- A's commit killed, A's kill would wipe it with A's round, and B's
--- reader would wait for ever for this unit's token.) The producer's promise,
--- asserted in simulation below. The zero is registered: offered in the kill
--- cycle, `outs_valid` would depend on the decision's transfer, and that on the
--- readies of the units this channel feeds, a combinational loop. The same
--- circuit as the generator's
--- (tools/unit-generators/vhdl/generators/handshake/stand_in.py), with the
--- width and the number of kills lifted into generics.
+-- overlap -- a round of the domain starts only after the previous commit of the
+-- domain has killed (at its transfer, or with `kill_at_valid` in its token's
+-- first valid cycle) -- so at most one bit is high in a cycle, and it ends the
+-- round this unit is in. (Were state B's round to start before state A's commit
+-- killed, A's kill would wipe it with A's round, and B's reader would wait for
+-- ever for this unit's token.) The producer's promise, asserted in simulation
+-- below. The zero is registered: offered in the kill cycle, `outs_valid` would
+-- depend on the decision's transfer, and that on the readies of the units this
+-- channel feeds, a combinational loop. The same circuit as the generator's
+-- (tools/unit-generators/vhdl/generators/handshake/stand_in.py), with the width
+-- and the number of kills lifted into generics.
 --
--- The precondition: no kill while a token is offered at `outs` and not taken.
--- A kill while the zero is owed and not taken would owe a second one, which
--- two bits cannot hold (one zero for two rounds, and the decision waits for
--- ever for the other); a kill while the producer's own token is offered and
--- not taken resets the producer under `valid`, and the token becomes a zero
--- before it transfers. So the stand-in's one reader must take a token the
--- cycle it arrives, or before the next kill of its domain, with nothing
--- between that can hold it back (an eager fork whose other reader stalls, a
--- join). Asserted in simulation (severity
--- failure, between `pragma translate_off` and `translate_on`), with the
--- domain's promise (no two kills high in one cycle outside reset); synthesis
--- skips both.
+-- The precondition: no kill while a token is offered at `outs` and not taken. A
+-- kill while the zero is owed and not taken would owe a second one, which two
+-- bits cannot hold (one zero for two rounds, and the decision waits for ever
+-- for the other); a kill while the producer's own token is offered and not
+-- taken resets the producer under `valid`, and the token becomes a zero before
+-- it transfers. So the stand-in's one reader must take a token the cycle it
+-- arrives, or before the next kill of its domain, with nothing between that can
+-- hold it back (an eager fork whose other reader stalls, a join). Asserted in
+-- simulation (severity failure, between `pragma translate_off` and
+-- `translate_on`), with the domain's promise (no two kills high in one cycle
+-- outside reset); synthesis skips both.
 entity stand_in is
   generic (
     SIZE      : integer;
@@ -45,7 +43,7 @@ entity stand_in is
     ins       : in  std_logic_vector(DATA_TYPE - 1 downto 0);
     ins_valid : in  std_logic;
     ins_ready : out std_logic;
-    -- the commits' transfers, one bit a commit: any ends the round
+    -- the commits' kills, one bit a commit: any ends the round
     kill : in std_logic_vector(SIZE - 1 downto 0);
     -- output channel
     outs       : out std_logic_vector(DATA_TYPE - 1 downto 0);

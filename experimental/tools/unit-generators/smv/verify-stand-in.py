@@ -3,27 +3,28 @@
 
 `stand_in` answers zero for a producer a `commit` stopped: the units it feeds
 must receive exactly one token a round from it, the producer's when it
-answered, a zero when it was stopped first. The observer counts, from the
-ports alone, the tokens that leave against the rounds that ended (the kills)
-and requires the difference to say what the unit owes: one token a round,
-real or zero, never both, never none. The environment is the one the round
-gives the unit: a producer that answers at most once a round and holds what
-it offers until taken (it is reset by the kill, so it may offer again from the
-cycle after one), a consumer free to stall, and a kill that never comes while
-a token of the unit is offered and not taken (the units it feeds absorb a late
-token the cycle it comes, so the round's decision cannot pass meanwhile).
+answered, a zero when it was stopped first. The observer counts, from the ports
+alone, the tokens that leave against the rounds that ended (the kills) and
+requires the difference to say what the unit owes: one token a round, real or
+zero, never both, never none. The environment is the one the round gives the
+unit: a producer that answers at most once a round and holds what it offers
+until taken (it is reset by the kill, so it may offer again from the cycle
+after one), a consumer free to stall, and a kill that never comes while a token
+of the unit is offered and not taken (the unit it feeds takes a token the cycle
+it comes, or at the latest in the cycle of the next kill of its domain, a
+transfer in the kill's cycle counting as passed).
 
-With --kills N the unit takes N kills, the commits of one domain: each
-commit's transfer ends a round of its own (`ended` counts the kills high in a
-cycle), and the environment keeps the domain's promise that two of them never
-come in one cycle (its rounds never overlap: a round of the domain starts
-only after the previous commit of the domain has killed, at its transfer or
-with `kill_at_valid` in its token's first valid cycle). The lowering
-makes "a kill a round" literal: a stand-in takes the kill of every commit of
-its domain, each once, and two commits of one domain are never in series on a
-channel (both see one transfer, one round). --no-exclusive drops the promise:
-two kills in one cycle then end two rounds, the unit owes one zero for them,
-and `one` fails -- the promise is what the unit's two bits rest on.
+With --kills N the unit takes N kills, the commits of one domain: each commit's
+kill ends a round of its own (`ended` counts the kills high in a cycle), and
+the environment keeps the domain's promise that two of them never come in one
+cycle (its rounds never overlap: a round of the domain starts only after the
+previous commit of the domain has killed, at its transfer or with
+`kill_at_valid` in its token's first valid cycle). The lowering makes "a kill a
+round" literal: a stand-in takes the kill of every commit of its domain, each
+once, and two commits of one domain are never in series on a channel (both see
+one transfer, one round). --no-exclusive drops the promise: two kills in one
+cycle then end two rounds, the unit owes one zero for them, and `one` fails --
+the promise is what the unit's two bits rest on.
 
 Usage:
     python3 verify-stand-in.py [--bitwidth W] [--kills N] [--no-exclusive]
@@ -70,7 +71,7 @@ MODULE main
   last_ins : {t};
 
   DEFINE
-  -- the rounds the commits end this cycle, one a commit that transfers
+  -- the rounds the commits end this cycle, one a commit whose kill is high
   ended := {ended};
   kill := {" | ".join(kills)};
   x_in := iv & dut.ins_ready;
