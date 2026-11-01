@@ -49,6 +49,6 @@
 // TWO-NOT: MISMATCH
 // TWO-NOT: FATAL
 
-// PROMISE: FATAL: {{.*}}two commits of its kill domain transferred in one cycle (the domain's rounds overlap)
+// PROMISE: FATAL: {{.*}}two commits of its kill domain killed in one cycle (the domain's rounds overlap)
 // PROMISE-NEXT: Time: 85000
 // PROMISE-NOT: cycles as expected

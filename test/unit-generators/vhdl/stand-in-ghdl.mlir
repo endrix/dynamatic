@@ -25,5 +25,5 @@
 // CHECK: stand_in, two kills: 339 cycles as expected
 // CHECK-NOT: failure
 
-// PROMISE: @85ns:(assertion failure): stand_in: two commits of its kill domain transferred in one cycle (the domain's rounds overlap)
+// PROMISE: @85ns:(assertion failure): stand_in: two commits of its kill domain killed in one cycle (the domain's rounds overlap)
 // PROMISE-NOT: cycles as expected

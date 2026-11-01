@@ -12,12 +12,13 @@ def generate_stand_in(name, params):
     producer's domain (a domain may have several): any of them high ends ONE
     round, `kill` their OR, the model otherwise the same whatever their
     number. The rounds of a domain never overlap -- a round of the domain
-    starts only after the previous commit of the domain has transferred -- so
+    starts only after the previous commit of the domain has killed (at its
+    transfer, or with `kill_at_valid` in its token's first valid cycle) -- so
     at most one kill is high in a cycle, and it ends the round this unit is
-    in. (Were state B's round to start before state A's commit transferred,
-    A's kill would wipe it with A's round, and B's reader would wait for ever
-    for this unit's token.) The producer's promise, which an observer states
-    as an assumption (verify-stand-in.py) or checks (`many` of the domain's
+    in. (Were state B's round to start before state A's commit killed, A's
+    kill would wipe it with A's round, and B's reader would wait for ever for
+    this unit's token.) The producer's promise, which an observer states as an
+    assumption (verify-stand-in.py) or checks (`many` of the domain's
     `kill_or`).
     """
     data_type = SmvScalarType(params[ATTR_BITWIDTH])
