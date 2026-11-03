@@ -23,6 +23,9 @@
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Transforms/DialectConversion.h"
+#include <functional>
+#include <optional>
+#include <tuple>
 
 using namespace mlir;
 using namespace dynamatic;
@@ -1066,12 +1069,138 @@ LogicalResult experimental::ftd::addGsaGates(
     return effA == effB;
   };
 
+  // Two identical gammas are merged only when they are consumed under the same
+  // conditions. The gammas of a tree are in one block and take no suppression
+  // from one another: the token of a gamma goes to every mux its result feeds,
+  // and each of them must take it on every execution which produces it. A
+  // gamma is consumed when the mux it feeds is and that mux's select takes the
+  // gamma's side; a root (a gamma feeding anything but a gate of its own block)
+  // and a MU are consumed on every execution of their block. Merging two gammas
+  // consumed under different conditions -- the sub-gamma of a block reached on
+  // two routes of the tree, below two parents, or the roots of two blocks --
+  // feeds a mux which, on some execution, takes nothing: a token is left, or
+  // the circuit deadlocks.
+  //
+  // A mux whose two inputs are the same tree is not counted: the reduction
+  // below bypasses it, and the two copies below it, merged, take its place. Two
+  // trees are the same when their selects and their inputs are, once these
+  // muxes are bypassed. The merges and the reductions below change neither the
+  // trees nor the conditions, which are therefore computed once, here.
+  DenseSet<Operation *> liveGates;
+  for (auto &[idx, op] : gsaList)
+    if (op)
+      liveGates.insert(op);
+
+  // getTree gives two values the same number when they are the same value, or
+  // the same tree of gammas of `block`. Any other value, a MU among them, is a
+  // leaf. The first number stands for the selects of the MUs of a block: each
+  // MU has its own, but all of them take their initial input on the first
+  // iteration of an entry in the loop, and their loop input on the next ones.
+  unsigned numTrees = 0;
+  unsigned muSelect = numTrees++;
+  DenseMap<Value, unsigned> treePerLeaf;
+  DenseMap<std::tuple<unsigned, unsigned, unsigned>, unsigned> treePerShape;
+  DenseMap<Operation *, unsigned> treePerGamma;
+  std::function<unsigned(Value, Block *)> getTree = [&](Value v, Block *block) {
+    Operation *defOp = v.getDefiningOp();
+    if (defOp && defOp->getBlock() == block && liveGates.contains(defOp) &&
+        defOp->hasAttr(FTD_EXPLICIT_GAMMA)) {
+      if (auto it = treePerGamma.find(defOp); it != treePerGamma.end())
+        return it->second;
+      auto mux = cast<handshake::MuxOp>(defOp);
+      unsigned select = getTree(mux.getSelectOperand(), block);
+      unsigned in0 = getTree(mux.getDataOperands()[0], block);
+      unsigned in1 = getTree(mux.getDataOperands()[1], block);
+      unsigned tree = in0;
+      if (in0 != in1) {
+        auto [it, inserted] =
+            treePerShape.try_emplace({select, in0, in1}, numTrees);
+        if (inserted)
+          ++numTrees;
+        tree = it->second;
+      }
+      treePerGamma[defOp] = tree;
+      return tree;
+    }
+    auto [it, inserted] =
+        treePerLeaf.try_emplace(getEffectiveValue(v), numTrees);
+    if (inserted)
+      ++numTrees;
+    return it->second;
+  };
+
+  // getConsumption returns the conditions under which a gamma is consumed: its
+  // block, and the side taken at each select on the way from the root, as the
+  // tree of the select and the operand index of the side. It returns none when
+  // two muxes the gamma feeds would consume it under different conditions.
+  using Consumption =
+      std::pair<Block *, SmallVector<std::pair<unsigned, unsigned>>>;
+  DenseMap<Operation *, std::optional<Consumption>> consumptionPerGamma;
+  std::function<std::optional<Consumption>(Operation *)> getConsumption =
+      [&](Operation *gamma) -> std::optional<Consumption> {
+    if (auto it = consumptionPerGamma.find(gamma);
+        it != consumptionPerGamma.end())
+      return it->second;
+    // A gamma met again on the way to its root has no root, and stays unknown.
+    consumptionPerGamma[gamma] = std::nullopt;
+    Block *block = gamma->getBlock();
+    std::optional<Consumption> consumption;
+    for (OpOperand &use : gamma->getResult(0).getUses()) {
+      // A placeholder of a one-input gamma, erased above, keeps its operands
+      // while the conversion rewriter defers the erasure, so its uses are
+      // skipped.
+      if (oneInputGammaList.contains(use.getOwner()))
+        continue;
+      std::optional<Consumption> useConsumption = Consumption{block, {}};
+      auto parent = dyn_cast<handshake::MuxOp>(use.getOwner());
+      if (parent && parent->getBlock() == block && liveGates.contains(parent) &&
+          use.getOperandNumber() > 0) {
+        if (!parent->hasAttr(FTD_EXPLICIT_MU))
+          useConsumption = getConsumption(parent);
+        bool testsNothing = getTree(parent.getDataOperands()[0], block) ==
+                            getTree(parent.getDataOperands()[1], block);
+        if (useConsumption && !testsNothing) {
+          std::pair<unsigned, unsigned> side(
+              parent->hasAttr(FTD_EXPLICIT_MU)
+                  ? muSelect
+                  : getTree(parent.getSelectOperand(), block),
+              use.getOperandNumber());
+          auto &sides = useConsumption->second;
+          sides.insert(llvm::upper_bound(sides, side), side);
+        }
+      }
+      if (!useConsumption || (consumption && *consumption != *useConsumption))
+        return std::nullopt;
+      consumption = useConsumption;
+    }
+    if (!consumption)
+      consumption = Consumption{block, {}};
+    consumptionPerGamma[gamma] = consumption;
+    return consumption;
+  };
+
+  // The GSA analysis builds every gamma tree with a new gate per input, so each
+  // gamma feeds one parent and its consumption is known. If the consumption of
+  // one gamma cannot be read (two muxes would consume it under different
+  // conditions before anything is merged, or the gammas form a cycle), every
+  // merge in the function is refused, the safe ones included.
+  bool canMerge = true;
+  for (Operation *op : liveGates)
+    if (op->hasAttr(FTD_EXPLICIT_GAMMA) && !getConsumption(op))
+      canMerge = false;
+  auto areConsumedAlike = [&](Operation *a, Operation *b) {
+    if (!canMerge || !a->hasAttr(FTD_EXPLICIT_GAMMA) ||
+        !b->hasAttr(FTD_EXPLICIT_GAMMA))
+      return false;
+    return *consumptionPerGamma.lookup(a) == *consumptionPerGamma.lookup(b);
+  };
+
   // Iterate through the generated operations until the tree structure fully
   // converges. The first step performs common subexpression elimination by
   // scanning horizontally across all generated multiplexers. Whenever two
   // distinct multiplexers share identical selection conditions and data
-  // inputs, they are merged into a single operation to eliminate structural
-  // duplication.
+  // inputs and are consumed under the same conditions, they are merged into a
+  // single operation to eliminate structural duplication.
   bool changed = true;
   while (changed) {
     changed = false;
@@ -1095,7 +1224,8 @@ LogicalResult experimental::ftd::addGsaGates(
             areEquivalentValues(mux1.getDataOperands()[0],
                                 mux2.getDataOperands()[0]) &&
             areEquivalentValues(mux1.getDataOperands()[1],
-                                mux2.getDataOperands()[1])) {
+                                mux2.getDataOperands()[1]) &&
+            areConsumedAlike(mux1, mux2)) {
 
           mux2.getResult().replaceAllUsesWith(mux1.getResult());
           rewriter.eraseOp(mux2);
