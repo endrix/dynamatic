@@ -380,3 +380,49 @@ func.func @nest3(%n: i32, %m: i32, %x: i32) -> i32 {
 ^e:
   return %acc : i32
 }
+
+// A conditional branch reaching the join on both of its edges, with two
+// values: the pass routes its true edge through a block of its own, so that
+// each value has a predecessor. The gamma under %q selects on %r (false: %x3,
+// true: %x2).
+//
+// CHECK-LABEL: handshake.func @double_edge(
+// CHECK-DAG:     %[[R:[a-zA-Z0-9_]+]], %{{[a-zA-Z0-9_]+}} = cond_br %arg0, %arg1 {
+// CHECK-DAG:     %{{[a-zA-Z0-9_]+}}, %[[X2:[a-zA-Z0-9_]+]] = cond_br %{{[0-9]+}}, %arg3 {
+// CHECK-DAG:     %{{[a-zA-Z0-9_]+}}, %[[X3:[a-zA-Z0-9_]+]] = cond_br %{{[0-9]+}}, %arg4 {
+// CHECK-DAG:     %[[J:[0-9]+]] = mux %arg0 [%{{[a-zA-Z0-9_]+}}, %[[B7:[0-9]+]]] {ftd.GAMMA
+// CHECK-DAG:     %[[B7]] = mux %[[R]] [%[[X3]], %[[X2]]] {ftd.GAMMA
+// CHECK:         end {{.*}} %[[J]], %arg5
+func.func @double_edge(%q: i1, %r: i1, %x0: i64, %x2: i64, %x3: i64) -> i64 {
+  %y0 = arith.addi %x0, %x0 : i64
+  cf.cond_br %q, ^b7, ^b8
+^b8:
+  cf.br ^j(%y0 : i64)
+^b7:
+  cf.cond_br %r, ^j(%x2 : i64), ^j(%x3 : i64)
+^j(%l: i64):
+  return %l : i64
+}
+
+// The same edge after a pass-through and an argument joined (r2e).
+//
+// CHECK-LABEL: handshake.func @double_edge_after_pass_through(
+// CHECK-DAG:     %[[R:[a-zA-Z0-9_]+]], %{{[a-zA-Z0-9_]+}} = cond_br %arg1, %arg2 {
+// CHECK-DAG:     %{{[a-zA-Z0-9_]+}}, %[[X2:[a-zA-Z0-9_]+]] = cond_br %{{[0-9]+}}, %arg5 {
+// CHECK-DAG:     %{{[a-zA-Z0-9_]+}}, %[[X3:[a-zA-Z0-9_]+]] = cond_br %{{[0-9]+}}, %arg6 {
+// CHECK-DAG:     %{{[a-zA-Z0-9_]+}}, %[[W:[a-zA-Z0-9_]+]] = cond_br %arg1, %[[PHI:[0-9]+]] {
+// CHECK-DAG:     %[[PHI]] = mux %arg0 [%{{[a-zA-Z0-9_]+}}, %{{[a-zA-Z0-9_]+}}] {ftd.GAMMA
+// CHECK-DAG:     %[[J:[0-9]+]] = mux %arg1 [%[[W]], %[[B7:[0-9]+]]] {ftd.GAMMA
+// CHECK-DAG:     %[[B7]] = mux %[[R]] [%[[X3]], %[[X2]]] {ftd.GAMMA
+// CHECK:         end {{.*}} %[[J]], %arg7
+func.func @double_edge_after_pass_through(%p: i1, %q: i1, %r: i1, %x0: i64, %x1: i64, %x2: i64, %x3: i64) -> i64 {
+  cf.cond_br %p, ^b3, ^b4(%x0 : i64)
+^b3:
+  cf.br ^b4(%x1 : i64)
+^b4(%w: i64):
+  cf.cond_br %q, ^b7, ^j(%w : i64)
+^b7:
+  cf.cond_br %r, ^j(%x2 : i64), ^j(%x3 : i64)
+^j(%l: i64):
+  return %l : i64
+}

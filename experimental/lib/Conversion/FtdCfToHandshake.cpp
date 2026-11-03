@@ -337,6 +337,33 @@ void ftd::completeFastTokenDelivery(handshake::FuncOp funcOp,
   shadow.destroy();
 }
 
+/// The GSA analysis tells the inputs of a phi apart by the predecessor which
+/// sends them, and a path by its blocks. A conditional branch reaching one
+/// block on both of its edges, with different operands, sends two values from
+/// one predecessor along two paths of the same blocks. Its true edge is routed
+/// through a new block, placed after it, which forwards the true operands: each
+/// value then has a predecessor of its own.
+static void splitEdgesSendingTwoValues(ModuleOp modOp) {
+  SmallVector<cf::CondBranchOp> condBranches;
+  modOp.walk([&](cf::CondBranchOp condBr) {
+    if (condBr.getTrueDest() == condBr.getFalseDest() &&
+        !llvm::equal(condBr.getTrueOperands(), condBr.getFalseOperands()))
+      condBranches.push_back(condBr);
+  });
+
+  for (cf::CondBranchOp condBr : condBranches) {
+    Block *pred = condBr->getBlock();
+    Block *forward = new Block();
+    pred->getParent()->getBlocks().insertAfter(pred->getIterator(), forward);
+    OpBuilder builder(condBr->getContext());
+    builder.setInsertionPointToEnd(forward);
+    cf::BranchOp::create(builder, condBr.getLoc(), condBr.getTrueDest(),
+                         condBr.getTrueOperands());
+    condBr.getTrueDestOperandsMutable().clear();
+    condBr->setSuccessor(forward, 0);
+  }
+}
+
 namespace {
 
 struct FtdCfToHandshakePass
@@ -346,6 +373,9 @@ struct FtdCfToHandshakePass
   void runDynamaticPass() override {
     MLIRContext *ctx = &getContext();
     ModuleOp modOp = getOperation();
+
+    // Before the CFG is captured and analyzed
+    splitEdgesSendingTwoValues(modOp);
 
     CfToHandshakeTypeConverter converter;
     RewritePatternSet patterns(ctx);
