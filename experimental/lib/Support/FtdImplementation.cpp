@@ -471,8 +471,10 @@ LogicalResult ftd::createPhiNetworkDeps(
 /// Returns true if `operand` is taken by the gate `consumerOp` once per entry
 /// of the loop whose header holds it, rather than once per iteration: the
 /// initial input of a MU, and any input of a gamma of the tree which builds a
-/// MU's initial input (the tree of the phi of the inputs from outside the
-/// loop, placed in the header with the MU).
+/// MU's initial input in the MU's own block (the tree of the phi of the inputs
+/// from outside the loop, placed in the header with the MU). A gamma in
+/// another block, a preheader or the exit of a previous loop, runs once per
+/// iteration of its own loop, even when its value is a MU's initial input.
 static bool isTakenOncePerLoopEntry(Operation *consumerOp, Value operand) {
   auto isInitOfMu = [](Operation *user, Value v) -> bool {
     return llvm::isa<handshake::MuxOp>(user) &&
@@ -491,7 +493,8 @@ static bool isTakenOncePerLoopEntry(Operation *consumerOp, Value operand) {
     if (!visited.insert(gamma).second)
       continue;
     for (Operation *user : gamma->getResult(0).getUsers()) {
-      if (isInitOfMu(user, gamma->getResult(0)))
+      if (isInitOfMu(user, gamma->getResult(0)) &&
+          user->getAttr("handshake.bb") == gamma->getAttr("handshake.bb"))
         return true;
       if (llvm::isa<handshake::MuxOp>(user) &&
           user->hasAttr(FTD_EXPLICIT_GAMMA) &&
