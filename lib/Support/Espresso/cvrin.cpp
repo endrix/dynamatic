@@ -607,6 +607,7 @@ int read_pla(char *fp, int needs_dcset, int needs_offset, int pla_type,
   StringStream ss;
   initStringStream(&ss, fp);
   parse_pla(&ss, PLA);
+  freeStringStream(&ss); // the PLA keeps copies of what it read
 
   /* Check for nothing on the file -- implies reached EOF */
   if (PLA->F == NULL) {
