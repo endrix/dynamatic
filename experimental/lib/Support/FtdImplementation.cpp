@@ -771,6 +771,18 @@ LogicalResult experimental::ftd::addGsaGates(
   if (region.getBlocks().size() == 1)
     return success();
 
+  // A phi with a single operand is its operand, and no gate stands for it: its
+  // uses take the value of the operand. This is done before any multiplexer is
+  // created, so that a use moved onto the value of another gate is rerouted to
+  // that gate's multiplexer together with the gate's own uses.
+  for (Gate *phi : gsa.getSingleOperandPhis()) {
+    GateInput *operand = phi->operands.front();
+    Value replacement = operand->isTypeGate() ? operand->getGate()->result
+                                              : operand->getValue();
+    for (OpOperand &use : llvm::make_early_inc_range(phi->result.getUses()))
+      rewriter.modifyOpInPlace(use.getOwner(), [&]() { use.set(replacement); });
+  }
+
   // List of missing GSA functions
   SmallVector<MissingGsa> missingGsaList;
   // List of gammas with only one input

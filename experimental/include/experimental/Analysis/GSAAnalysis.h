@@ -53,10 +53,12 @@ struct GateInput {
 
   /// Set of all blocks that forward this GateInput to the gate.
   /// A value or block argument is defined in a producer block, but may reach
-  /// the PHI through one or more sender blocks. Each sender block comes
-  /// immediately before the consumer block in the CFG. For predicate
-  /// computation, control dependence must be analyzed on the sender
-  /// blocks as well as on the producer.
+  /// the PHI through one or more sender blocks. Each sender block is a
+  /// predecessor of the block of the PHI, and the PHI takes this input exactly
+  /// when it is reached from one of them: the condition of the input is the
+  /// one of the paths reaching the PHI through its senders, wherever the value
+  /// is produced. The set is empty for the inputs of a gate built from a merge,
+  /// whose condition is then computed from the producer block.
   std::unordered_set<Block *> senders;
 
   /// Constructor a gate input being the result of an operation.
@@ -189,6 +191,12 @@ public:
   /// Get a vector containing all the gates related to a basic block.
   ArrayRef<Gate *> getGatesPerBlock(Block *bb) const;
 
+  /// Get the phis having a single operand. Such a phi is its operand, there is
+  /// nothing to choose: no gate stands for it, the gates which had it as input
+  /// have its operand instead, and the value it defines is to be replaced by
+  /// the one of its operand.
+  ArrayRef<Gate *> getSingleOperandPhis() const { return singleOperandPhis; }
+
   /// Deallocates all the gates created.
   ~GSAAnalysis();
 
@@ -206,6 +214,9 @@ private:
   /// List of all gate inputs which have been created (and must be thus
   /// deallocated).
   SmallVector<GateInput *> gateInputList;
+
+  /// Phis with a single operand, which do not become gates.
+  SmallVector<Gate *> singleOperandPhis;
 
   /// Identify the gates necessary in the function, referencing all of their
   /// inputs. In this case, the starting point are the block arguments in the
@@ -228,6 +239,24 @@ private:
   void convertPhiToGamma(Region &region,
                          const experimental::ftd::BlockIndexing &bi);
 
+  /// Make every gate input which takes `gate` take `input` instead.
+  void replaceGateInput(Gate *gate, std::variant<Value, Gate *> input);
+
+  /// For each operand of `phi`, compute the boolean expression of the
+  /// condition under which the phi takes it, from the senders of the operands.
+  /// The conditions the expressions use are added to `conditions`.
+  ListExpressionsPerGate
+  getExpressionsFromSenders(Gate *phi, DenseSet<unsigned> &conditions,
+                            const ftd::BlockIndexing &bi);
+
+  /// For each operand of `phi`, compute the boolean expression of the
+  /// condition under which the phi takes it, from the producer blocks of the
+  /// operands, for a phi built from a merge (whose operands have no senders).
+  /// The conditions the expressions use are added to `conditions`.
+  ListExpressionsPerGate
+  getExpressionsFromProducers(Gate *phi, DenseSet<unsigned> &conditions,
+                              const ftd::BlockIndexing &bi);
+
   /// Given a boolean expression for each phi's inputs, expand it in a tree
   /// of gamma functions.
   Gate *expandGammaTree(ListExpressionsPerGate &expressions,
@@ -235,7 +264,8 @@ private:
                         const ftd::BlockIndexing &bi);
 
   /// Given the list of gates in `gatesPerBlock`, get rid of the phi after their
-  /// conversion to the GSA equivalents.
+  /// conversion to the GSA equivalents (the phis with a single operand are
+  /// moved to `singleOperandPhis`).
   void removePhiGates();
 };
 } // namespace gsa

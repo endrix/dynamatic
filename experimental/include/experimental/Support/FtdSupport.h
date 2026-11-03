@@ -102,7 +102,9 @@ struct ShadowCFG {
 // ===--------------------------------------------------------------------=== //
 
 /// Class to associate an index to each block, so that if block Bi dominates
-/// block Bj then i < j. While this is guaranteed by the MLIR CFG construction,
+/// block Bj then i < j, and if there is an edge from Bi to Bj which is not a
+/// back edge then i < j (a topological order of the CFG without its back
+/// edges). While the order of the blocks in the region often is such an order,
 /// it cannot really be given for granted, thus it is more convenient to have a
 /// custom indexing.
 class BlockIndexing {
