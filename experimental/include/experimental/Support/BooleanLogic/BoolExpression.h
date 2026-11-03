@@ -21,6 +21,7 @@
 #ifndef EXPERIMENTAL_SUPPORT_BOOLEANLOGIC_BOOLEXPRESSION_H
 #define EXPERIMENTAL_SUPPORT_BOOLEANLOGIC_BOOLEXPRESSION_H
 
+#include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/StringRef.h"
 #include <map>
 #include <set>
@@ -52,6 +53,14 @@ std::set<std::string> replaceDontCares(const std::set<std::string> &minterms);
 struct BoolExpression {
   ExpressionType type;
 
+  /// The most variables a truth table is built over (`runEspresso`): 2^n rows,
+  /// each a line of 2n+2 characters in espresso's input, which espresso parses
+  /// into a cover of its own. Measured on one sum of paths minimized whole,
+  /// time grows about 2.5 times and memory 2 times per variable: 0.7 s and
+  /// 73 MB at 18 variables, 17 s and 0.55 GB at 22, 106 s and 2.2 GB at 24,
+  /// so about 10 minutes and 9 GB at 26 and an hour and 35 GB at 28.
+  static constexpr unsigned MAX_TRUTH_TABLE_VARIABLES = 24;
+
   BoolExpression(ExpressionType t) : type(t) {}
 
   virtual ~BoolExpression() = default;
@@ -77,6 +86,15 @@ struct BoolExpression {
 
   /// Evaluates a Boolean Expression baed on a cerain setting on the variables
   bool evaluate(std::map<std::string, bool> row);
+
+  /// Evaluates a Boolean Expression on all the rows of a truth table at once,
+  /// as `evaluate` does on one: bit `i` of the result is its value on row `i`,
+  /// and `columns` holds the values of each variable, bit `i` on row `i`. A
+  /// word operation covers 64 rows, where `evaluate` copies the row's map at
+  /// every node of the expression
+  llvm::BitVector
+  evaluateRows(const std::map<std::string, llvm::BitVector> &columns,
+               unsigned numOfRows);
 
   /// Generates the truth table for any BooleanExpression by evaluating each
   /// row in it

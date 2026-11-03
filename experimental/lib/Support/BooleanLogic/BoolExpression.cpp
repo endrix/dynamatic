@@ -20,8 +20,10 @@
 #include "experimental/Support/BooleanLogic/BoolExpression.h"
 #include "dynamatic/Support/Espresso/main.h"
 #include "experimental/Support/BooleanLogic/Parser.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cmath>
+#include <cstdlib>
 #include <set>
 #include <string>
 
@@ -73,15 +75,20 @@ std::string BoolExpression::toString() {
 }
 
 void BoolExpression::getVariablesRec(std::set<std::string> &s) {
-  if (type == ExpressionType::Variable) {
-    SingleCond *cond = static_cast<SingleCond *>(this);
-    s.insert(cond->id);
-  } else if (type == ExpressionType::And || type == ExpressionType::Or) {
-    Operator *op = static_cast<Operator *>(this);
+  // Down the right operands in a loop: a sum built a term at a time (a phi
+  // input's paths, before they are minimized) is as deep as it has terms
+  BoolExpression *exp = this;
+  while (exp->type == ExpressionType::And || exp->type == ExpressionType::Or) {
+    Operator *op = static_cast<Operator *>(exp);
     if (op->left)
       op->left->getVariablesRec(s);
-    if (op->right)
-      op->right->getVariablesRec(s);
+    if (!op->right)
+      return;
+    exp = op->right;
+  }
+  if (exp->type == ExpressionType::Variable) {
+    SingleCond *cond = static_cast<SingleCond *>(exp);
+    s.insert(cond->id);
   }
 }
 
@@ -132,6 +139,59 @@ bool BoolExpression::evaluate(std::map<std::string, bool> row) {
 
   default:
     return false;
+  }
+}
+
+BitVector
+BoolExpression::evaluateRows(const std::map<std::string, BitVector> &columns,
+                             unsigned numOfRows) {
+  switch (type) {
+  case (ExpressionType::Variable): {
+    SingleCond *singleCond = static_cast<SingleCond *>(this);
+    auto column = columns.find(singleCond->id);
+    BitVector values =
+        column != columns.end() ? column->second : BitVector(numOfRows);
+    if (singleCond->isNegated)
+      values.flip();
+    return values;
+  }
+  case (ExpressionType::One):
+    return BitVector(numOfRows, true);
+  case (ExpressionType::Zero):
+    return BitVector(numOfRows);
+  case (ExpressionType::Or): {
+    // Down the right operands of a sum in a loop (see `getVariablesRec`),
+    // holding one row vector for the whole sum
+    BitVector values(numOfRows);
+    BoolExpression *exp = this;
+    while (exp->type == ExpressionType::Or) {
+      Operator *op = static_cast<Operator *>(exp);
+      if (op->left)
+        values |= op->left->evaluateRows(columns, numOfRows);
+      if (!op->right)
+        return values;
+      exp = op->right;
+    }
+    values |= exp->evaluateRows(columns, numOfRows);
+    return values;
+  }
+  case (ExpressionType::And): {
+    Operator *op = static_cast<Operator *>(this);
+    BitVector values = op->left ? op->left->evaluateRows(columns, numOfRows)
+                                : BitVector(numOfRows, true);
+    if (op->right)
+      values &= op->right->evaluateRows(columns, numOfRows);
+    return values;
+  }
+  case (ExpressionType::Not): {
+    Operator *op = static_cast<Operator *>(this);
+    BitVector values = op->right->evaluateRows(columns, numOfRows);
+    values.flip();
+    return values;
+  }
+
+  default:
+    return BitVector(numOfRows);
   }
 }
 
@@ -358,9 +418,24 @@ BoolExpression *BoolExpression::propagateNegation(bool negated) {
 
 //--------------Espresso--------------
 
+/// Stops with an error rather than build a truth table over more than
+/// MAX_TRUTH_TABLE_VARIABLES variables. The GSA analysis refuses such a phi
+/// input with an error of its own before it gets here.
+static void checkTruthTableSize(size_t numVariables) {
+  if (numVariables <= BoolExpression::MAX_TRUTH_TABLE_VARIABLES)
+    return;
+  std::string message =
+      "boolean minimization: a truth table over " +
+      std::to_string(numVariables) + " variables, more than the " +
+      std::to_string(BoolExpression::MAX_TRUTH_TABLE_VARIABLES) +
+      " it is built over";
+  llvm::report_fatal_error(StringRef(message), /*gen_crash_diag=*/false);
+}
+
 std::string BoolExpression::runEspresso() {
   std::string espressoInput = "";
   std::set<std::string> vars = this->getVariables();
+  checkTruthTableSize(vars.size());
   // adding the number of inputs and outputs to the file
   espressoInput += (".i " + std::to_string(vars.size()) + "\n");
   espressoInput += ".o 1\n";
@@ -371,20 +446,32 @@ std::string BoolExpression::runEspresso() {
   espressoInput += "\n";
   // add the name of the output f to the file
   espressoInput += ".ob f\n";
-  // generate and add the truth table
-  std::vector<std::tuple<std::map<std::string, bool>, bool>> truthTable =
-      generateTruthTable();
-  for (std::tuple<std::map<std::string, bool>, bool> row : truthTable) {
-    std::map<std::string, bool> value = std::get<0>(row);
-    for (const std::string &s : vars) {
-      espressoInput += (std::string(value[s] ? "1" : "0") + " ");
-    }
-    bool res = std::get<1>(row);
-    espressoInput += (std::string(res ? "1" : "0") + "\n");
+  // generate and add the truth table, the rows of `generateTruthTable`: in row
+  // `i`, the variable of index `j` in `vars` takes bit `j` of `i`. The
+  // expression is evaluated on all the rows at once.
+  unsigned numOfRows = 1u << vars.size();
+  std::map<std::string, BitVector> columns;
+  unsigned j = 0;
+  for (const std::string &var : vars) {
+    BitVector &column = columns[var];
+    column.resize(numOfRows);
+    for (unsigned i = 0; i < numOfRows; i++)
+      if ((i >> j) & 1)
+        column.set(i);
+    j++;
+  }
+  BitVector results = evaluateRows(columns, numOfRows);
+  espressoInput.reserve(espressoInput.size() +
+                        numOfRows * (2 * vars.size() + 2));
+  for (unsigned i = 0; i < numOfRows; i++) {
+    for (j = 0; j < vars.size(); j++)
+      espressoInput += ((i >> j) & 1) ? "1 " : "0 ";
+    espressoInput += results[i] ? "1\n" : "0\n";
   }
   // run espresso
   char *r = run_espresso(espressoInput.data());
   std::string result = r;
+  free(r);
   if (result == "Failed to Minimize")
     return result;
   int start = result.find('=');
@@ -395,6 +482,7 @@ std::string BoolExpression::runEspresso() {
 std::string BoolExpression::runEspressoSop() {
   std::string espressoInput = "";
   std::set<std::string> vars = this->getVariables();
+  checkTruthTableSize(vars.size());
   // adding the number of inputs and outputs to the file
   espressoInput += (".i " + std::to_string(vars.size()) + "\n");
   espressoInput += ".o 1\n";
@@ -411,6 +499,7 @@ std::string BoolExpression::runEspressoSop() {
     espressoInput += (row + "\n");
   char *r = run_espresso(espressoInput.data());
   std::string result = r;
+  free(r);
   if (result == "Failed to Minimize")
     return result;
   int start = result.find('=');
