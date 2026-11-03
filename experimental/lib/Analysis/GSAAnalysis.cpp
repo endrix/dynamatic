@@ -140,6 +140,17 @@ experimental::gsa::GSAAnalysis::GSAAnalysis(Operation *operation) {
     llvm::errs() << "[GSA] GSAAnalysis failed due to a wrong input type\n";
 }
 
+void experimental::gsa::GSAAnalysis::emitGammaTreeError(Gate *phi,
+                                                        StringRef reason) {
+  mlir::emitError(phi->result.getLoc())
+      << "fast token delivery cannot build the gamma tree of this block "
+         "argument: "
+      << reason
+      << " (the analysis supports cf.cond_br branches with two distinct "
+         "successors, in reducible control flow)";
+  analysisFailed = true;
+}
+
 experimental::gsa::Gate *experimental::gsa::GSAAnalysis::expandGammaTree(
     ListExpressionsPerGate &expressions, std::queue<unsigned> conditions,
     Gate *originalPhi, const BlockIndexing &bi) {
@@ -155,8 +166,11 @@ experimental::gsa::Gate *experimental::gsa::GSAAnalysis::expandGammaTree(
   unsigned indexToUse;
   std::string conditionToUse;
   while (true) {
-    if (conditions.empty())
-      llvm_unreachable("No condition tells the inputs of a phi apart");
+    if (conditions.empty()) {
+      emitGammaTreeError(originalPhi,
+                         "no branch condition tells its inputs apart");
+      return nullptr;
+    }
     indexToUse = conditions.front();
     conditionToUse = "c" + std::to_string(indexToUse);
     conditions.pop();
@@ -174,7 +188,9 @@ experimental::gsa::Gate *experimental::gsa::GSAAnalysis::expandGammaTree(
     if (cofactorUsage == expressions.size())
       break;
 
-    llvm_unreachable("A cofactor is used only by some expressions");
+    emitGammaTreeError(
+        originalPhi, "a branch condition tells only some of its inputs apart");
+    return nullptr;
   }
 
   ListExpressionsPerGate conditionsFalseExpressions;
@@ -215,9 +231,11 @@ experimental::gsa::Gate *experimental::gsa::GSAAnalysis::expandGammaTree(
   //
   // If no elements are present, then that input will never be used, and it is
   // considered as empty.
-  auto setGammaOperand = [&](int input, ListExpressionsPerGate &list) -> void {
+  auto setGammaOperand = [&](int input, ListExpressionsPerGate &list) -> bool {
     if (list.size() > 1) {
       Gate *gamma = expandGammaTree(list, conditions, originalPhi, bi);
+      if (!gamma)
+        return false;
       operandsGamma[input] = new GateInput(gamma);
       gateInputList.push_back(operandsGamma[input]);
     } else if (list.size() == 1) {
@@ -226,10 +244,12 @@ experimental::gsa::Gate *experimental::gsa::GSAAnalysis::expandGammaTree(
       operandsGamma[input] = new GateInput();
       gateInputList.push_back(operandsGamma[input]);
     }
+    return true;
   };
 
-  setGammaOperand(1, conditionsTrueExpressions);
-  setGammaOperand(0, conditionsFalseExpressions);
+  if (!setGammaOperand(1, conditionsTrueExpressions) ||
+      !setGammaOperand(0, conditionsFalseExpressions))
+    return nullptr;
 
   // Create a new gamma and add it to the list of phis for the original basic
   // block.
@@ -596,6 +616,8 @@ void experimental::gsa::GSAAnalysis::convertPhiToGamma(
       // Expand the expressions to get the tree of gammas
       Gate *gammaRoot =
           expandGammaTree(expressionsList, conditionsOrdered, phi, bi);
+      if (!gammaRoot)
+        return;
       gammaRoot->isRoot = true;
 
       // Once that a phi has been converted into a tree of gammas, all the

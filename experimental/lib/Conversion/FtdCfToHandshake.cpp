@@ -611,6 +611,8 @@ LogicalResult ftd::FtdLowerFuncToHandshake::matchAndRewrite(
 
   // Add the muxes as obtained by the GSA analysis of this function.
   gsa::GSAAnalysis gsaAnalysis(lowerFuncOp.getOperation());
+  if (gsaAnalysis.hasFailed())
+    return failure();
   if (failed(addGsaGates(lowerFuncOp.getRegion(), rewriter, gsaAnalysis,
                          &pendingMuxOperands)))
     return failure();

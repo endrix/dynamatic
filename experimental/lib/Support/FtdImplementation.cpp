@@ -1160,6 +1160,8 @@ LogicalResult ftd::replaceMergeToGSA(handshake::FuncOp &funcOp,
     if (!merge->hasAttr(NEW_PHI))
       continue;
     gsa::GSAAnalysis gsa(merge, funcOp.getRegion());
+    if (gsa.hasFailed())
+      return failure();
     if (failed(ftd::addGsaGates(funcOp.getRegion(), rewriter, gsa, nullptr,
                                 false)))
       return failure();

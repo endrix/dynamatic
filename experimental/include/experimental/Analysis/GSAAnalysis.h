@@ -191,6 +191,11 @@ public:
   /// Get a vector containing all the gates related to a basic block.
   ArrayRef<Gate *> getGatesPerBlock(Block *bb) const;
 
+  /// Returns true if the analysis could not convert the region, in which case
+  /// it emitted an error on the block argument it could not convert, and its
+  /// gates are not to be used.
+  bool hasFailed() const { return analysisFailed; }
+
   /// Get the phis having a single operand. Such a phi is its operand, there is
   /// nothing to choose: no gate stands for it, the gates which had it as input
   /// have its operand instead, and the value it defines is to be replaced by
@@ -217,6 +222,14 @@ private:
 
   /// Phis with a single operand, which do not become gates.
   SmallVector<Gate *> singleOperandPhis;
+
+  /// Whether the analysis failed (see `hasFailed`).
+  bool analysisFailed = false;
+
+  /// Emit an error on the block argument of `phi`, whose inputs cannot be
+  /// expanded into a tree of gammas for `reason`, and mark the analysis as
+  /// failed.
+  void emitGammaTreeError(Gate *phi, StringRef reason);
 
   /// Identify the gates necessary in the function, referencing all of their
   /// inputs. In this case, the starting point are the block arguments in the
@@ -258,7 +271,8 @@ private:
                               const ftd::BlockIndexing &bi);
 
   /// Given a boolean expression for each phi's inputs, expand it in a tree
-  /// of gamma functions.
+  /// of gamma functions. Returns nullptr, after an error, if no order of the
+  /// conditions expands it.
   Gate *expandGammaTree(ListExpressionsPerGate &expressions,
                         std::queue<unsigned> conditions, Gate *originalPhi,
                         const ftd::BlockIndexing &bi);
