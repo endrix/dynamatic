@@ -99,8 +99,8 @@ void experimental::gsa::GSAAnalysis::convertSSAToGSAMerges(
   // After the conversion is done, `gatesPerBlock` will contain some phis, some
   // MUs and some GAMMAs. Since we are only interested in the last two, we can
   // remove all the phis.
-  removePhiGates();
-  printAllGates();
+  removePhiGates(region);
+  printAllGates(region);
 }
 
 experimental::gsa::GSAAnalysis::GSAAnalysis(Operation *operation) {
@@ -156,13 +156,24 @@ experimental::gsa::Gate *experimental::gsa::GSAAnalysis::expandGammaTree(
     Gate *originalPhi, const BlockIndexing &bi) {
 
   // At each iteration, we want to use a cofactor that is present in all the
-  // expressions in `expressions`. The cofactors are ordered according to the
-  // block indexing, a topological order of the CFG without its back edges, and
-  // the expression of an input is the sum of the paths reaching the phi
-  // through one of its senders, none of which takes a back edge: restricted on
-  // the cofactors already expanded, the paths which remain all traverse the
-  // block of the next cofactor in use, and if that cofactor is present in one
-  // expression, then it must be present in all the others.
+  // expressions in `expressions`. This holds in a reducible CFG whose
+  // conditional branches are cf.cond_br with two distinct successors (the pass
+  // splits a branch reaching one block on both edges with two values). The
+  // cofactors are ordered according to the block indexing, a topological order
+  // of the CFG without its back edges, and the expression of an input is the
+  // sum of the paths reaching the phi through one of its senders, which take no
+  // back edge. Restricted on the cofactors already expanded:
+  // - every execution which remains traverses the block of the first cofactor
+  //   some expression uses: an execution avoiding it, completed after that
+  //   block as one which the cofactor changes, would leave every expression
+  //   unchanged when the cofactor flips;
+  // - an expression not using that cofactor would select its input from both
+  //   successors of the block under the same conditions; the executions from
+  //   either successor would then all traverse the first block that selection
+  //   depends on, and from there on reach the same input, so that no
+  //   expression would use the cofactor.
+  // A cf.switch (whose edges carry no condition) or an irreducible cycle
+  // breaks this, and the analysis fails with an error.
   unsigned indexToUse;
   std::string conditionToUse;
   while (true) {
@@ -303,6 +314,8 @@ void experimental::gsa::GSAAnalysis::convertSSAToGSA(Region &region) {
   // Vector to store all the missing phi
   SmallVector<MissingPhi> phisToConnect;
 
+  mlir::DominanceInfo domInfo;
+
   // For each block in the function
   for (Block &block : region.getBlocks()) {
 
@@ -320,6 +333,10 @@ void experimental::gsa::GSAAnalysis::convertSSAToGSA(Region &region) {
       // For each predecessor of the block, which is in charge of
       // providing the inputs of the phi functions
       for (Block *pred : block.getPredecessors()) {
+
+        // An unreachable predecessor sends nothing
+        if (!domInfo.isReachableFromEntry(pred))
+          continue;
 
         // Make sure that a predecessor is covered only once
         if (coveredPredecessors.contains(pred))
@@ -432,8 +449,8 @@ void experimental::gsa::GSAAnalysis::convertSSAToGSA(Region &region) {
   // After the conversion is done, `gatesPerBlock` will contain some phis, some
   // MUs and some GAMMAs. Since we are only interested in the last two, we can
   // remove all the phis.
-  removePhiGates();
-  printAllGates();
+  removePhiGates(region);
+  printAllGates(region);
 }
 
 void experimental::gsa::GSAAnalysis::replaceGateInput(
@@ -450,7 +467,8 @@ void experimental::gsa::GSAAnalysis::replaceGateInput(
 
 experimental::gsa::ListExpressionsPerGate
 experimental::gsa::GSAAnalysis::getExpressionsFromSenders(
-    Gate *phi, DenseSet<unsigned> &conditions, const BlockIndexing &bi) {
+    Gate *phi, DenseSet<unsigned> &conditions, const BlockIndexing &bi,
+    mlir::DominanceInfo &domInfo) {
 
   // The phi takes an operand exactly when it is reached from one of the
   // operand's senders, wherever the operand is produced: a value may be
@@ -459,17 +477,22 @@ experimental::gsa::GSAAnalysis::getExpressionsFromSenders(
   // on their paths. The paths are thus taken from the nearest common dominator
   // of the senders, which every execution reaching the phi through them
   // traverses, to the phi, and each path belongs to the operand having the
-  // last block before the phi among its senders.
-  mlir::DominanceInfo domInfo;
+  // last block before the phi among its senders. In a reducible CFG, no such
+  // path takes a back edge (a path into a loop through its header would have
+  // to come back through the common dominator), except the edge into the phi
+  // from a latch when the phi gathers the loop inputs of a MU.
   Block *commonDominator = nullptr;
+  bool firstSender = true;
   for (GateInput *operand : phi->operands) {
     for (Block *sender : operand->senders) {
       commonDominator =
-          commonDominator
-              ? domInfo.findNearestCommonDominator(commonDominator, sender)
-              : sender;
+          firstSender
+              ? sender
+              : domInfo.findNearestCommonDominator(commonDominator, sender);
+      firstSender = false;
     }
   }
+  assert(commonDominator && "The senders of a phi have a common dominator");
 
   ListExpressionsPerGate expressions;
   for (GateInput *operand : phi->operands)
@@ -499,9 +522,8 @@ experimental::gsa::GSAAnalysis::getExpressionsFromSenders(
 
 experimental::gsa::ListExpressionsPerGate
 experimental::gsa::GSAAnalysis::getExpressionsFromProducers(
-    Gate *phi, DenseSet<unsigned> &conditions, const BlockIndexing &bi) {
-
-  mlir::DominanceInfo domInfo;
+    Gate *phi, DenseSet<unsigned> &conditions, const BlockIndexing &bi,
+    mlir::DominanceInfo &domInfo) {
 
   // Sort the operands of the phi so that Bi comes before Bj if Bi dominates
   // Bj. The block indexing is such an order; dominance itself is not a strict
@@ -557,6 +579,8 @@ experimental::gsa::GSAAnalysis::getExpressionsFromProducers(
 void experimental::gsa::GSAAnalysis::convertPhiToGamma(
     Region &region, const BlockIndexing &bi) {
 
+  mlir::DominanceInfo domInfo;
+
   // For each block, in the order of the region: the order of `gatesPerBlock`,
   // keyed by pointers, changes from one run to the next, and so would the
   // indices of the gates
@@ -595,8 +619,10 @@ void experimental::gsa::GSAAnalysis::convertPhiToGamma(
              "Either all or none of the inputs of a phi have senders");
       ListExpressionsPerGate expressionsList =
           fromSenders
-              ? getExpressionsFromSenders(phi, blocksWithConditionInPath, bi)
-              : getExpressionsFromProducers(phi, blocksWithConditionInPath, bi);
+              ? getExpressionsFromSenders(phi, blocksWithConditionInPath, bi,
+                                          domInfo)
+              : getExpressionsFromProducers(phi, blocksWithConditionInPath, bi,
+                                            domInfo);
       assert(llvm::none_of(expressionsList,
                            [](auto &e) {
                              return e.first->type == ExpressionType::Zero;
@@ -795,12 +821,18 @@ void experimental::gsa::GSAAnalysis::convertPhiToMu(Region &region,
   }
 }
 
-void experimental::gsa::GSAAnalysis::removePhiGates() {
-  for (auto const &[block, gates] : gatesPerBlock) {
+void experimental::gsa::GSAAnalysis::removePhiGates(Region &region) {
+  // In the order of the region, as `singleOperandPhis` is replayed by
+  // `addGsaGates`
+  for (Block &bb : region) {
+    Block *block = &bb;
+    auto it = gatesPerBlock.find(block);
+    if (it == gatesPerBlock.end())
+      continue;
 
     // New vector of gates, which will contain only gamms and mus
     SmallVector<Gate *> gatesWithoutPhis;
-    for (Gate *g : gates) {
+    for (Gate *g : it->second) {
       // Delete the gate in case of a phi, otherwise keep it and insert it in
       // the new list. A phi with a single operand is kept aside: the value it
       // defines is to be replaced by the one of its operand.
@@ -822,9 +854,9 @@ experimental::gsa::GSAAnalysis::getGatesPerBlock(Block *bb) const {
   return it == gatesPerBlock.end() ? ArrayRef<Gate *>() : it->getSecond();
 }
 
-void experimental::gsa::GSAAnalysis::printAllGates() {
-  for (auto const &[_, gates] : gatesPerBlock) {
-    for (Gate *g : gates)
+void experimental::gsa::GSAAnalysis::printAllGates(Region &region) {
+  for (Block &block : region) {
+    for (Gate *g : getGatesPerBlock(&block))
       g->print();
   }
   for (Gate *g : singleOperandPhis)

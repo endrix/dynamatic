@@ -19,6 +19,7 @@
 #include "dynamatic/Support/LLVM.h"
 #include "experimental/Support/BooleanLogic/BoolExpression.h"
 #include "experimental/Support/FtdSupport.h"
+#include "mlir/IR/Dominance.h"
 #include "mlir/Pass/AnalysisManager.h"
 #include <queue>
 #include <unordered_set>
@@ -241,8 +242,8 @@ private:
   /// handshake::merge
   void convertSSAToGSAMerges(handshake::MergeOp &merge, Region &region);
 
-  /// Print the list of the gate functions.
-  void printAllGates();
+  /// Print the list of the gate functions, in the order of the region.
+  void printAllGates(Region &region);
 
   /// Mark as mu all the phi gates which correspond to loop variables.
   void convertPhiToMu(Region &region,
@@ -260,7 +261,8 @@ private:
   /// The conditions the expressions use are added to `conditions`.
   ListExpressionsPerGate
   getExpressionsFromSenders(Gate *phi, DenseSet<unsigned> &conditions,
-                            const ftd::BlockIndexing &bi);
+                            const ftd::BlockIndexing &bi,
+                            mlir::DominanceInfo &domInfo);
 
   /// For each operand of `phi`, compute the boolean expression of the
   /// condition under which the phi takes it, from the producer blocks of the
@@ -268,7 +270,8 @@ private:
   /// The conditions the expressions use are added to `conditions`.
   ListExpressionsPerGate
   getExpressionsFromProducers(Gate *phi, DenseSet<unsigned> &conditions,
-                              const ftd::BlockIndexing &bi);
+                              const ftd::BlockIndexing &bi,
+                              mlir::DominanceInfo &domInfo);
 
   /// Given a boolean expression for each phi's inputs, expand it in a tree
   /// of gamma functions. Returns nullptr, after an error, if no order of the
@@ -279,8 +282,8 @@ private:
 
   /// Given the list of gates in `gatesPerBlock`, get rid of the phi after their
   /// conversion to the GSA equivalents (the phis with a single operand are
-  /// moved to `singleOperandPhis`).
-  void removePhiGates();
+  /// moved to `singleOperandPhis`, in the order of the region).
+  void removePhiGates(Region &region);
 };
 } // namespace gsa
 } // namespace experimental
