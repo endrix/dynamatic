@@ -96,6 +96,11 @@ void experimental::gsa::GSAAnalysis::convertSSAToGSAMerges(
   convertPhiToMu(region, bi);
   convertPhiToGamma(region, bi);
 
+  // A failed conversion leaves phis which gammas still refer to: the gates are
+  // not to be used, and are only deleted
+  if (analysisFailed)
+    return;
+
   // After the conversion is done, `gatesPerBlock` will contain some phis, some
   // MUs and some GAMMAs. Since we are only interested in the last two, we can
   // remove all the phis.
@@ -445,6 +450,11 @@ void experimental::gsa::GSAAnalysis::convertSSAToGSA(Region &region) {
 
   convertPhiToMu(region, bi);
   convertPhiToGamma(region, bi);
+
+  // A failed conversion leaves phis which gammas still refer to: the gates are
+  // not to be used, and are only deleted
+  if (analysisFailed)
+    return;
 
   // After the conversion is done, `gatesPerBlock` will contain some phis, some
   // MUs and some GAMMAs. Since we are only interested in the last two, we can
