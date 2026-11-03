@@ -99,17 +99,22 @@ func.func @three_way(%q: i1, %r: i1, %x0: i64, %x2: i64, %x4: i64) -> i64 {
 // A latch sends %c0, produced before the loop: it is an input of the MU from
 // inside the loop, and the same value sent from the entry is its initial
 // input. The loop input of the MU of %s is a gamma on %p (false: %c0, true:
-// %s2).
+// %s2). The gamma takes %c0 at each iteration that selects it, so %c0 is
+// regenerated for the loop; the MU takes it once per entry of the loop, so its
+// initial input is %c0 itself.
 //
 // CHECK-LABEL: handshake.func @latch_sends_value_from_before_loop(
-// CHECK-DAG:     %[[PR:[0-9]+]] = mux %{{[0-9]+}} [%arg1, %[[P:[a-zA-Z0-9_]+]]] {ftd.regen
-// CHECK-DAG:     %[[P]], %{{[a-zA-Z0-9_]+}} = cond_br %{{[0-9]+}}, %[[PR]]
 // CHECK-DAG:     %[[C0:[0-9]+]] = constant %{{[0-9]+}} {{.*}}value = 0 : i32
-// CHECK-DAG:     %[[S2L:[a-zA-Z0-9_]+]], %{{[a-zA-Z0-9_]+}} = cond_br %[[P]], %[[S2:[0-9]+]]
+// CHECK-DAG:     %[[PR:[0-9]+]] = mux %{{[0-9]+}} [%arg1, %[[P:[a-zA-Z0-9_]+]]] {ftd.regen
+// CHECK-DAG:     %[[P]], %{{[a-zA-Z0-9_]+}} = cond_br %{{[0-9]+}}, %[[PR]] {
+// CHECK-DAG:     %[[C0R:[0-9]+]] = mux %{{[0-9]+}} [%[[C0]], %[[C0L:[a-zA-Z0-9_]+]]] {ftd.regen
+// CHECK-DAG:     %[[C0L]], %{{[a-zA-Z0-9_]+}} = cond_br %{{[0-9]+}}, %[[C0R]] {
+// CHECK-DAG:     %{{[a-zA-Z0-9_]+}}, %[[C0G:[a-zA-Z0-9_]+]] = cond_br %[[P]], %[[C0L]] {
+// CHECK-DAG:     %[[S2G:[a-zA-Z0-9_]+]], %{{[a-zA-Z0-9_]+}} = cond_br %[[P]], %[[S2:[0-9]+]] {
 // CHECK-DAG:     %[[S2]] = addi
-// CHECK-DAG:     %[[LOOP:[0-9]+]] = mux %[[P]] [%[[C0]], %[[S2L]]] {ftd.GAMMA
+// CHECK-DAG:     %[[LOOP:[0-9]+]] = mux %[[P]] [%[[C0G]], %[[S2G]]] {ftd.GAMMA
 // CHECK-DAG:     %[[S:[0-9]+]] = mux %{{[0-9]+}} [%[[C0]], %[[LOOP]]] {ftd.MU
-// CHECK-DAG:     %{{[a-zA-Z0-9_]+}}, %[[OUT:[a-zA-Z0-9_]+]] = cond_br %{{[0-9]+}}, %[[S]]
+// CHECK-DAG:     %{{[a-zA-Z0-9_]+}}, %[[OUT:[a-zA-Z0-9_]+]] = cond_br %{{[0-9]+}}, %[[S]] {
 // CHECK:         end {{.*}} %[[OUT]], %arg2
 func.func @latch_sends_value_from_before_loop(%n: i32, %p: i1) -> i32 {
   %c0 = arith.constant 0 : i32
@@ -133,16 +138,21 @@ func.func @latch_sends_value_from_before_loop(%n: i32, %p: i1) -> i32 {
 // The CFG of an action body (skip_mode_params of an AV1 decoder), reduced as
 // far as the analysis still failed on it: in a loop, ^bb14 joins the phi of
 // ^bb10 (single predecessor), passed through, and a function argument. The
-// MU's loop input is a gamma on %a16 (false: %a14, true: %z28).
+// MU's loop input is a gamma on %a16 (false: %a14, true: %z28), each input
+// regenerated for the loop and delivered on the side of %a16 that selects it.
 //
 // CHECK-LABEL: handshake.func @skip_mode_params_reduced(
 // CHECK-DAG:     %[[A16R:[0-9]+]] = mux %{{[0-9]+}} [%arg2, %[[A16:[a-zA-Z0-9_]+]]] {ftd.regen
-// CHECK-DAG:     %[[A16]], %{{[a-zA-Z0-9_]+}} = cond_br %{{[0-9]+}}, %[[A16R]]
-// CHECK-DAG:     %{{[a-zA-Z0-9_]+}}, %[[A14:[a-zA-Z0-9_]+]] = cond_br %{{[0-9]+}}, %arg1
-// CHECK-DAG:     %{{[a-zA-Z0-9_]+}}, %[[Z28:[a-zA-Z0-9_]+]] = cond_br %{{[0-9]+}}, %arg3
+// CHECK-DAG:     %[[A16]], %{{[a-zA-Z0-9_]+}} = cond_br %{{[0-9]+}}, %[[A16R]] {
+// CHECK-DAG:     %[[A14R:[0-9]+]] = mux %{{[0-9]+}} [%arg1, %[[A14L:[a-zA-Z0-9_]+]]] {ftd.regen
+// CHECK-DAG:     %[[A14L]], %{{[a-zA-Z0-9_]+}} = cond_br %{{[0-9]+}}, %[[A14R]] {
+// CHECK-DAG:     %[[Z28R:[0-9]+]] = mux %{{[0-9]+}} [%arg3, %[[Z28L:[a-zA-Z0-9_]+]]] {ftd.regen
+// CHECK-DAG:     %[[Z28L]], %{{[a-zA-Z0-9_]+}} = cond_br %{{[0-9]+}}, %[[Z28R]] {
+// CHECK-DAG:     %{{[a-zA-Z0-9_]+}}, %[[A14:[a-zA-Z0-9_]+]] = cond_br %[[A16]], %[[A14L]] {
+// CHECK-DAG:     %[[Z28:[a-zA-Z0-9_]+]], %{{[a-zA-Z0-9_]+}} = cond_br %[[A16]], %[[Z28L]] {
 // CHECK-DAG:     %[[G:[0-9]+]] = mux %[[A16]] [%[[A14]], %[[Z28]]] {ftd.GAMMA
 // CHECK-DAG:     %[[MU:[0-9]+]] = mux %{{[0-9]+}} [%arg4, %[[G]]] {ftd.MU
-// CHECK-DAG:     %{{[a-zA-Z0-9_]+}}, %[[OUT:[a-zA-Z0-9_]+]] = cond_br %{{[0-9]+}}, %[[MU]]
+// CHECK-DAG:     %{{[a-zA-Z0-9_]+}}, %[[OUT:[a-zA-Z0-9_]+]] = cond_br %{{[0-9]+}}, %[[MU]] {
 // CHECK:         end {{.*}} %[[OUT]], %arg5
 func.func @skip_mode_params_reduced(%a5: i1, %a14: i64, %a16: i1, %z28: i64, %z13: i64) -> i64 {
   cf.br ^bb1(%z13 : i64)
@@ -202,4 +212,171 @@ func.func @seventeen_blocks(%a0: i1, %a12: i1, %a23: i1, %z9: i33) -> i33 {
   cf.br ^bb16
 ^bb16:
   return %z9 : i33
+}
+
+// Values produced before a loop and taken inside it by a gamma are regenerated
+// for the loop, as for any other consumer: a latch re-sending the value the
+// loop started with (%x in @keep), a latch sending an argument (@loopx), two
+// latches sending it among three (@ml), and an inner latch sending the value
+// of the outer loop's header (@nest2). Each gamma takes the value through its
+// regeneration and the branch on the gamma's own select.
+//
+// CHECK-LABEL: handshake.func @keep(
+// CHECK-DAG:     %[[K:[0-9]+]] = mux %{{[0-9]+}} [%arg2, %[[G:[0-9]+]]] {ftd.MU
+// CHECK-DAG:     %[[PR:[0-9]+]] = mux %{{[0-9]+}} [%arg1, %[[P:[a-zA-Z0-9_]+]]] {ftd.regen
+// CHECK-DAG:     %[[XR:[0-9]+]] = mux %{{[0-9]+}} [%arg2, %[[XL:[a-zA-Z0-9_]+]]] {ftd.regen
+// CHECK-DAG:     %[[P]], %{{[a-zA-Z0-9_]+}} = cond_br %{{[0-9]+}}, %[[PR]] {
+// CHECK-DAG:     %[[XL]], %{{[a-zA-Z0-9_]+}} = cond_br %{{[0-9]+}}, %[[XR]] {
+// CHECK-DAG:     %[[KL:[a-zA-Z0-9_]+]], %{{[a-zA-Z0-9_]+}} = cond_br %{{[0-9]+}}, %[[K]] {
+// CHECK-DAG:     %[[XG:[a-zA-Z0-9_]+]], %{{[a-zA-Z0-9_]+}} = cond_br %[[P]], %[[XL]] {
+// CHECK-DAG:     %{{[a-zA-Z0-9_]+}}, %[[KG:[a-zA-Z0-9_]+]] = cond_br %[[P]], %[[KL]] {
+// CHECK-DAG:     %[[G]] = mux %[[P]] [%[[KG]], %[[XG]]] {ftd.GAMMA
+// CHECK:         end
+func.func @keep(%n: i32, %p: i1, %x: i32) -> i32 {
+  %c0 = arith.constant 0 : i32
+  %c1 = arith.constant 1 : i32
+  cf.br ^h(%c0, %x : i32, i32)
+^h(%i: i32, %k: i32):
+  %cond = arith.cmpi slt, %i, %n : i32
+  cf.cond_br %cond, ^b, ^e
+^b:
+  %i2 = arith.addi %i, %c1 : i32
+  cf.cond_br %p, ^l1, ^l2
+^l1:
+  cf.br ^h(%i2, %x : i32, i32)
+^l2:
+  cf.br ^h(%i2, %k : i32, i32)
+^e:
+  %r = arith.addi %k, %i : i32
+  return %r : i32
+}
+
+// CHECK-LABEL: handshake.func @loopx(
+// CHECK-DAG:     %[[S:[0-9]+]] = mux %{{[0-9]+}} [%arg2, %[[G:[0-9]+]]] {ftd.MU
+// CHECK-DAG:     %[[PR:[0-9]+]] = mux %{{[0-9]+}} [%arg1, %[[P:[a-zA-Z0-9_]+]]] {ftd.regen
+// CHECK-DAG:     %[[XR:[0-9]+]] = mux %{{[0-9]+}} [%arg2, %[[XL:[a-zA-Z0-9_]+]]] {ftd.regen
+// CHECK-DAG:     %[[P]], %{{[a-zA-Z0-9_]+}} = cond_br %{{[0-9]+}}, %[[PR]] {
+// CHECK-DAG:     %[[XL]], %{{[a-zA-Z0-9_]+}} = cond_br %{{[0-9]+}}, %[[XR]] {
+// CHECK-DAG:     %{{[a-zA-Z0-9_]+}}, %[[XG:[a-zA-Z0-9_]+]] = cond_br %[[P]], %[[XL]] {
+// CHECK-DAG:     %[[S2G:[a-zA-Z0-9_]+]], %{{[a-zA-Z0-9_]+}} = cond_br %[[P]], %[[S2:[0-9]+]] {
+// CHECK-DAG:     %[[S2]] = addi
+// CHECK-DAG:     %[[G]] = mux %[[P]] [%[[XG]], %[[S2G]]] {ftd.GAMMA
+// CHECK-DAG:     %{{[a-zA-Z0-9_]+}}, %[[OUT:[a-zA-Z0-9_]+]] = cond_br %{{[0-9]+}}, %[[S]] {
+// CHECK:         end {{.*}} %[[OUT]], %arg3
+func.func @loopx(%n: i32, %p: i1, %x: i32) -> i32 {
+  %c0 = arith.constant 0 : i32
+  %c1 = arith.constant 1 : i32
+  cf.br ^h(%c0, %x : i32, i32)
+^h(%i: i32, %s: i32):
+  %cond = arith.cmpi slt, %i, %n : i32
+  cf.cond_br %cond, ^b, ^e
+^b:
+  %s2 = arith.addi %s, %i : i32
+  %i2 = arith.addi %i, %c1 : i32
+  cf.cond_br %p, ^l1, ^l2
+^l1:
+  cf.br ^h(%i2, %s2 : i32, i32)
+^l2:
+  cf.br ^h(%i2, %x : i32, i32)
+^e:
+  return %s : i32
+}
+
+// CHECK-LABEL: handshake.func @ml(
+// CHECK-DAG:     %[[S:[0-9]+]] = mux %{{[0-9]+}} [%arg3, %[[G:[0-9]+]]] {ftd.MU
+// CHECK-DAG:     %[[G]] = mux %[[P:[a-zA-Z0-9_]+]] [%[[GQ:[0-9]+]], %[[X1:[a-zA-Z0-9_]+]]] {ftd.GAMMA
+// CHECK-DAG:     %[[GQ]] = mux %{{[a-zA-Z0-9_]+}} [%[[X3:[a-zA-Z0-9_]+]], %{{[a-zA-Z0-9_]+}}] {ftd.GAMMA
+// CHECK-DAG:     %[[X1]], %{{[a-zA-Z0-9_]+}} = cond_br %[[P]], %[[X1L:[a-zA-Z0-9_]+]] {
+// CHECK-DAG:     %[[X1L]], %{{[a-zA-Z0-9_]+}} = cond_br %{{[0-9]+}}, %[[X1R:[0-9]+]] {
+// CHECK-DAG:     %[[X1R]] = mux %{{[0-9]+}} [%arg3, %{{[a-zA-Z0-9_]+}}] {ftd.regen
+// CHECK-DAG:     %{{[a-zA-Z0-9_]+}}, %[[X3]] = cond_br %{{[0-9]+}}, %[[X3L:[a-zA-Z0-9_]+]] {
+// CHECK-DAG:     %[[X3L]], %{{[a-zA-Z0-9_]+}} = cond_br %{{[0-9]+}}, %[[X3R:[0-9]+]] {
+// CHECK-DAG:     %[[X3R]] = mux %{{[0-9]+}} [%arg3, %{{[a-zA-Z0-9_]+}}] {ftd.regen
+// CHECK:         end
+func.func @ml(%n: i32, %p: i1, %q: i1, %x: i32) -> i32 {
+  %c0 = arith.constant 0 : i32
+  %c1 = arith.constant 1 : i32
+  cf.br ^h(%c0, %x : i32, i32)
+^h(%i: i32, %s: i32):
+  %cond = arith.cmpi slt, %i, %n : i32
+  cf.cond_br %cond, ^b, ^e
+^b:
+  %i2 = arith.addi %i, %c1 : i32
+  %s2 = arith.addi %s, %i : i32
+  cf.cond_br %p, ^l1, ^b2
+^b2:
+  cf.cond_br %q, ^l2, ^l3
+^l1:
+  cf.br ^h(%i2, %x : i32, i32)
+^l2:
+  cf.br ^h(%i2, %s2 : i32, i32)
+^l3:
+  cf.br ^h(%i2, %x : i32, i32)
+^e:
+  return %s : i32
+}
+
+// CHECK-LABEL: handshake.func @nest2(
+// CHECK-DAG:     %[[T:[0-9]+]] = mux %{{[0-9]+}} [%[[SL:[a-zA-Z0-9_]+]], %[[G:[0-9]+]]] {ftd.MU, handshake.bb = 2
+// CHECK-DAG:     %[[SL]], %{{[a-zA-Z0-9_]+}} = cond_br %{{[0-9]+}}, %[[S:[0-9]+]] {handshake.bb = 1
+// CHECK-DAG:     %[[S]] = mux %{{[0-9]+}} [%{{[0-9]+}}, %{{[a-zA-Z0-9_]+}}] {ftd.MU, handshake.bb = 1
+// CHECK-DAG:     %[[SR:[0-9]+]] = mux %{{[0-9]+}} [%[[SL]], %[[SRL:[a-zA-Z0-9_]+]]] {ftd.regen, handshake.bb = 2
+// CHECK-DAG:     %[[SRL]], %{{[a-zA-Z0-9_]+}} = cond_br %{{[0-9]+}}, %[[SR]] {handshake.bb = 2
+// CHECK-DAG:     %{{[a-zA-Z0-9_]+}}, %[[SG:[a-zA-Z0-9_]+]] = cond_br %[[P:[a-zA-Z0-9_]+]], %[[SRL]] {handshake.bb = 2
+// CHECK-DAG:     %[[G]] = mux %[[P]] [%[[SG]], %{{[a-zA-Z0-9_]+}}] {ftd.GAMMA, handshake.bb = 2
+// CHECK:         end
+func.func @nest2(%n: i32, %m: i32, %p: i1) -> i32 {
+  %c0 = arith.constant 0 : i32
+  %c1 = arith.constant 1 : i32
+  cf.br ^oh(%c0, %c0 : i32, i32)
+^oh(%i: i32, %s: i32):
+  %co = arith.cmpi slt, %i, %n : i32
+  cf.cond_br %co, ^ih(%c0, %s : i32, i32), ^e
+^ih(%j: i32, %t: i32):
+  %ci = arith.cmpi slt, %j, %m : i32
+  cf.cond_br %ci, ^ib, ^ix
+^ib:
+  %j2 = arith.addi %j, %c1 : i32
+  %t2 = arith.addi %t, %j : i32
+  cf.cond_br %p, ^l1, ^l2
+^l1:
+  cf.br ^ih(%j2, %t2 : i32, i32)
+^l2:
+  cf.br ^ih(%j2, %s : i32, i32)
+^ix:
+  %i2 = arith.addi %i, %c1 : i32
+  cf.br ^oh(%i2, %t : i32, i32)
+^e:
+  return %s : i32
+}
+
+// The inner MU of a nest starts from %x, produced before both loops. It takes
+// it once per entry of the inner loop, that is once per iteration of the outer
+// one: %x is regenerated for the outer loop only.
+//
+// CHECK-LABEL: handshake.func @nest3(
+// CHECK-DAG:     %[[XR:[0-9]+]] = mux %{{[0-9]+}} [%arg2, %[[XL:[a-zA-Z0-9_]+]]] {ftd.regen, handshake.bb = 1
+// CHECK-DAG:     %[[XL]], %{{[a-zA-Z0-9_]+}} = cond_br %{{[0-9]+}}, %[[XR]] {handshake.bb = 1
+// CHECK-DAG:     %{{[0-9]+}} = mux %{{[0-9]+}} [%[[XL]], %{{[0-9]+}}] {ftd.MU, handshake.bb = 2
+// CHECK:         end
+func.func @nest3(%n: i32, %m: i32, %x: i32) -> i32 {
+  %c0 = arith.constant 0 : i32
+  %c1 = arith.constant 1 : i32
+  cf.br ^oh(%c0, %c0 : i32, i32)
+^oh(%i: i32, %acc: i32):
+  %co = arith.cmpi slt, %i, %n : i32
+  cf.cond_br %co, ^ih(%c0, %x : i32, i32), ^e
+^ih(%j: i32, %s: i32):
+  %ci = arith.cmpi slt, %j, %m : i32
+  cf.cond_br %ci, ^ib, ^ix
+^ib:
+  %j2 = arith.addi %j, %c1 : i32
+  %s2 = arith.addi %s, %j : i32
+  cf.br ^ih(%j2, %s2 : i32, i32)
+^ix:
+  %i2 = arith.addi %i, %c1 : i32
+  %acc2 = arith.addi %acc, %s : i32
+  cf.br ^oh(%i2, %acc2 : i32, i32)
+^e:
+  return %acc : i32
 }

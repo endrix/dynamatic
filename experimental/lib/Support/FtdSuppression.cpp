@@ -2019,13 +2019,16 @@ void ftd::insertDirectSuppression(mlir::OpBuilder &builder,
   Block *dominatorBlock = producerBlock;
 
   // Account for the condition of a Mux only if it corresponds to a GAMMA GSA
-  // gate
+  // gate. A producer in the gamma's own block counts when it is a MU or a
+  // regeneration mux: both stand in the loop header for a value at the start of
+  // an iteration, which the gamma takes only on the paths selecting it.
   bool deliverToGamma =
       llvm::isa<handshake::MuxOp>(consumer) &&
       consumer->hasAttr(FTD_EXPLICIT_GAMMA) &&
       (producerBlock != consumerBlock ||
        (connection.getDefiningOp() &&
-        connection.getDefiningOp()->hasAttr(FTD_EXPLICIT_MU)));
+        (connection.getDefiningOp()->hasAttr(FTD_EXPLICIT_MU) ||
+         connection.getDefiningOp()->hasAttr(FTD_REGEN))));
 
   // If producer is unreachable, the suppression is not needed.
   if (!isReachable(entryBlock, producerBlock)) {
