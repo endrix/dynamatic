@@ -494,6 +494,35 @@ Value SignalRegistry::lookup(StringRef var, const PathContext &queryPath) {
 // Static helpers (internal to this TU)
 // ===--------------------------------------------------------------------=== //
 
+/// Returns the reverse of `lcfg`'s origMap: the node standing for each original
+/// block. Every original block has at most one node in these graphs
+/// (buildLocalCFGRegion clones a block once, buildDecisionGraph keeps a subset
+/// of its blocks, and extractLayeredCFG clones each block of the scope once),
+/// so the reverse is a function of the original block and does not depend on
+/// the order origMap happens to be walked in.
+static DenseMap<Block *, Block *> reverseOrigMap(const ftd::LocalCFG &lcfg) {
+  DenseMap<Block *, Block *> reverse;
+  for (auto [node, origBlock] : lcfg.origMap) {
+    if (!origBlock)
+      continue;
+    bool inserted = reverse.try_emplace(origBlock, node).second;
+    assert(inserted && "two nodes of a graph stand for one original block");
+    (void)inserted;
+  }
+  return reverse;
+}
+
+/// The control dependences `cda` found for `block` (none if the block has no
+/// entry), read in place from the analysis: valid as long as `cda` is.
+static const DenseSet<Block *> &
+controlDepsOf(const ControlDependenceAnalysis &cda, Block *block) {
+  static const DenseSet<Block *> noDeps;
+  const ControlDependenceAnalysis::BlockControlDepsMap &deps =
+      cda.getAllBlockDeps();
+  auto it = deps.find(block);
+  return it == deps.end() ? noDeps : it->second.allControlDeps;
+}
+
 /// Identify the block that has muxCondition as its terminator condition
 /// Note that it is not necessarily the same block defining the muxCondition
 static Block *returnMuxConditionBlock(Value muxCondition,
@@ -1246,10 +1275,10 @@ Value ftd::computeLoopBackedgeCondition(
 
   // 2. CDA on raw graph to get full control deps
   ControlDependenceAnalysis locCDATmp(*locGraph->region);
-  DenseSet<Block *> locConsControlDepsFull =
-      locCDATmp.getAllBlockDeps()[locGraph->newCons].allControlDeps;
-  DenseSet<Block *> locConsAcyclicDeps =
-      locCDATmp.getAllBlockDeps()[locGraph->newCons].allControlDeps;
+  const DenseSet<Block *> &locConsControlDepsFull =
+      controlDepsOf(locCDATmp, locGraph->newCons);
+  const DenseSet<Block *> &locConsAcyclicDeps =
+      controlDepsOf(locCDATmp, locGraph->newCons);
 
   // 3. Build full decision graph for CyclicGraphManager
   auto fullDecisionGraph =
@@ -1257,10 +1286,7 @@ Value ftd::computeLoopBackedgeCondition(
   CyclicGraphManager cyclicMgr(*fullDecisionGraph);
 
   // 4. Build origToFullDG map
-  DenseMap<Block *, Block *> origToFullDG;
-  for (auto [dgBlock, origBlock] : fullDecisionGraph->origMap)
-    if (origBlock)
-      origToFullDG[origBlock] = dgBlock;
+  DenseMap<Block *, Block *> origToFullDG = reverseOrigMap(*fullDecisionGraph);
 
   // 5. Create cyclic demotion helper
   CyclicDemotionHelper demotionHelper(
@@ -1280,8 +1306,8 @@ Value ftd::computeLoopBackedgeCondition(
 
   // 9. CDA on acyclic DG
   ControlDependenceAnalysis locCDA(*acyclicDG->region);
-  DenseSet<Block *> locConsControlDeps =
-      locCDA.getAllBlockDeps()[acyclicDG->newCons].allControlDeps;
+  const DenseSet<Block *> &locConsControlDeps =
+      controlDepsOf(locCDA, acyclicDG->newCons);
 
   // 10. Enumerate paths → expression → circuit
   BoolExpression *fBackedge =
@@ -1785,8 +1811,8 @@ Value CyclicDemotionHelper::demoteOneLevel(Value currentValue, Block *origBlock,
 
   // 2. CDA on levelCFG (main suppression: header -> loop exit)
   ControlDependenceAnalysis levelCDA(*levelCFG->region);
-  DenseSet<Block *> levelDeps =
-      levelCDA.getAllBlockDeps()[levelCFG->newCons].allControlDeps;
+  const DenseSet<Block *> &levelDeps =
+      controlDepsOf(levelCDA, levelCFG->newCons);
 
   // 3. Create level-local registry and pre-register all dep variables
   //    at their correct level (demoting higher-level ones recursively)
@@ -1835,11 +1861,11 @@ Value CyclicDemotionHelper::demoteOneLevel(Value currentValue, Block *origBlock,
     auto dpLocGraph = buildLocalCFGRegion(dpBuilder, origHeader, origBlock, bi);
     if (dpLocGraph->newCons) {
       ControlDependenceAnalysis dpCDA(*dpLocGraph->region);
-      auto dpDepsTmp =
-          dpCDA.getAllBlockDeps()[dpLocGraph->newCons].allControlDeps;
+      const DenseSet<Block *> &dpDepsTmp =
+          controlDepsOf(dpCDA, dpLocGraph->newCons);
       auto dpDG = buildDecisionGraph(*dpLocGraph, dpDepsTmp);
       ControlDependenceAnalysis dpDGCDA(*dpDG->region);
-      auto dpDeps = dpDGCDA.getAllBlockDeps()[dpDG->newCons].allControlDeps;
+      const DenseSet<Block *> &dpDeps = controlDepsOf(dpDGCDA, dpDG->newCons);
       BoolExpression *fConsDP = enumeratePaths(*dpDG, bi, dpDeps);
       fSupDP = fConsDP->boolMinimize()->boolNegate()->boolMinimize();
 
@@ -1952,13 +1978,11 @@ collectSuppressionConditionBlocks(Block *producerBlock, Block *consumerBlock,
   auto loc = ftd::buildLocalCFGRegion(tmp, producerBlock, consumerBlock, bi);
   if (loc->newCons && loc->newCons != loc->sinkBB) {
     ControlDependenceAnalysis locCDA(*loc->region);
-    DenseSet<Block *> deps =
-        locCDA.getAllBlockDeps()[loc->newCons].allControlDeps;
+    const DenseSet<Block *> &deps = controlDepsOf(locCDA, loc->newCons);
     auto dg = ftd::buildDecisionGraph(*loc, deps);
 
     ControlDependenceAnalysis dgCDA(*dg->region);
-    DenseSet<Block *> dgDeps =
-        dgCDA.getAllBlockDeps()[dg->newCons].allControlDeps;
+    const DenseSet<Block *> &dgDeps = controlDepsOf(dgCDA, dg->newCons);
 
     BoolExpression *fCons = enumeratePaths(*dg, bi, dgDeps);
     BoolExpression *fSup = fCons->boolMinimize()->boolNegate()->boolMinimize();
@@ -2158,7 +2182,7 @@ void ftd::insertDirectSuppression(mlir::OpBuilder &builder,
   // extended below with the condition blocks driving the gamma's selects and
   // their dependences.
   DenseSet<Block *> locConsControlDepsFull =
-      locCDA.getAllBlockDeps()[locGraph->newCons].allControlDeps;
+      controlDepsOf(locCDA, locGraph->newCons);
   // The condition blocks driving the gamma's selects along the consumer input's
   // path — the conditions under which the consumer input is the one selected.
   DenseSet<Block *> muxConditionSet;
@@ -2178,6 +2202,8 @@ void ftd::insertDirectSuppression(mlir::OpBuilder &builder,
     Operation *currentMuxOp = consumer;
     Value currentConnection = connection;
     bool isChainActive = true;
+    // The node of the local CFG standing for each original block.
+    DenseMap<Block *, Block *> origToLocal = reverseOrigMap(*locGraph);
 
     while (isChainActive) {
       bool isDataInput = false;
@@ -2222,15 +2248,7 @@ void ftd::insertDirectSuppression(mlir::OpBuilder &builder,
         muxConditionSet.insert(muxConditionBlock);
 
         // 3. Find the corresponding Block in the Local CFG
-        // Since locGraph->origMap maps Local->Original, we iterate to reverse
-        // lookup.
-        Block *condBlockLocal = nullptr;
-        for (auto it : locGraph->origMap) {
-          if (it.second == muxConditionBlock) {
-            condBlockLocal = it.first;
-            break;
-          }
-        }
+        Block *condBlockLocal = origToLocal.lookup(muxConditionBlock);
 
         // 4. Add to dependencies and record requirement
         if (condBlockLocal) {
@@ -2239,10 +2257,10 @@ void ftd::insertDirectSuppression(mlir::OpBuilder &builder,
           // Add this block and its all-dependency blocks to the dependency set
           // so path enumeration observes it.
           locConsControlDepsFull.insert(condBlockLocal);
-          for (Block *dep :
-               locCDA.getAllBlockDeps()[condBlockLocal].allControlDeps) {
-            locConsControlDepsFull.insert(dep);
-          }
+          const DenseSet<Block *> &condBlockDeps =
+              controlDepsOf(locCDA, condBlockLocal);
+          locConsControlDepsFull.insert(condBlockDeps.begin(),
+                                        condBlockDeps.end());
 
           // Record the specific value required (True/False) to pass this Mux
           muxConstraints[condBlockLocal] = requiredVal;
@@ -2343,10 +2361,7 @@ void ftd::insertDirectSuppression(mlir::OpBuilder &builder,
   ftd::CyclicGraphManager cyclicMgr(*fullDecisionGraph);
 
   // Lookup from an original IR block to its node in the decision graph.
-  DenseMap<Block *, Block *> origToFullDG;
-  for (auto [dgBlock, origBlock] : fullDecisionGraph->origMap)
-    if (origBlock)
-      origToFullDG[origBlock] = dgBlock;
+  DenseMap<Block *, Block *> origToFullDG = reverseOrigMap(*fullDecisionGraph);
 
   // Create the cyclic demotion helper
   CyclicDemotionHelper demotionHelper(
@@ -2363,20 +2378,20 @@ void ftd::insertDirectSuppression(mlir::OpBuilder &builder,
   // CDA on the acyclic level 0 CFG — allControlDeps == forwardControlDeps
   // because the graph is a DAG.
   ControlDependenceAnalysis level0CDA(*level0CFG->region);
-  DenseSet<Block *> level0Deps =
-      level0CDA.getAllBlockDeps()[level0CFG->newCons].allControlDeps;
+  DenseSet<Block *> level0Deps = controlDepsOf(level0CDA, level0CFG->newCons);
+
+  // The node of the level-0 CFG standing for each original block.
+  DenseMap<Block *, Block *> origToLevel0 = reverseOrigMap(*level0CFG);
 
   // Translate mux condition blocks (original IR) into level0CFG and insert
   // them into the dependency set.
   for (Block *muxCondOrigIR : muxConditionSet) {
-    for (auto &[l0Block, l0Orig] : level0CFG->origMap) {
-      if (l0Orig == muxCondOrigIR) {
-        level0Deps.insert(l0Block);
-        for (Block *dep : level0CDA.getAllBlockDeps()[l0Block].allControlDeps)
-          level0Deps.insert(dep);
-        break;
-      }
-    }
+    Block *l0Block = origToLevel0.lookup(muxCondOrigIR);
+    if (!l0Block)
+      continue;
+    level0Deps.insert(l0Block);
+    const DenseSet<Block *> &l0BlockDeps = controlDepsOf(level0CDA, l0Block);
+    level0Deps.insert(l0BlockDeps.begin(), l0BlockDeps.end());
   }
 
   // Translate mux constraints from locGraph blocks to level0CFG blocks.
@@ -2385,12 +2400,8 @@ void ftd::insertDirectSuppression(mlir::OpBuilder &builder,
     Block *origIR = locGraph->origMap.lookup(locBlock);
     if (!origIR)
       continue;
-    for (auto &[l0Block, l0Orig] : level0CFG->origMap) {
-      if (l0Orig == origIR) {
-        level0MuxConstraints[l0Block] = reqVal;
-        break;
-      }
-    }
+    if (Block *l0Block = origToLevel0.lookup(origIR))
+      level0MuxConstraints[l0Block] = reqVal;
   }
 
   // The decision graph at loop-nesting level 0 (all back edges cut), left
@@ -2415,8 +2426,8 @@ void ftd::insertDirectSuppression(mlir::OpBuilder &builder,
       buildDecisionGraph(*level0CFG, level0Deps, level0MuxConstraints);
 
   ControlDependenceAnalysis decCDA(*level0ConstrainedDG->region);
-  DenseSet<Block *> constrainedDeps =
-      decCDA.getAllBlockDeps()[level0ConstrainedDG->newCons].allControlDeps;
+  const DenseSet<Block *> &constrainedDeps =
+      controlDepsOf(decCDA, level0ConstrainedDG->newCons);
 
   // fCons is the condition under which the consumer actually uses the token;
   // its negation, fSup, is when the token must be discarded.
@@ -2457,8 +2468,8 @@ void ftd::insertDirectSuppression(mlir::OpBuilder &builder,
 
     // Cyclic decision graph, then its level-0 (acyclic) reduction.
     ControlDependenceAnalysis locCDAlocal(*locG->region);
-    DenseSet<Block *> depsTmp =
-        locCDAlocal.getAllBlockDeps()[locG->newCons].allControlDeps;
+    const DenseSet<Block *> &depsTmp =
+        controlDepsOf(locCDAlocal, locG->newCons);
     auto fullDG = buildDecisionGraph(*locG, depsTmp);
 
     CyclicGraphManager cyc(*fullDG);
@@ -2467,13 +2478,12 @@ void ftd::insertDirectSuppression(mlir::OpBuilder &builder,
         cyc.extractLayeredCFG(cyc.getTopLevelScope(), l0Builder);
 
     ControlDependenceAnalysis l0CDA(*level0CFGlocal->region);
-    DenseSet<Block *> l0Deps =
-        l0CDA.getAllBlockDeps()[level0CFGlocal->newCons].allControlDeps;
+    const DenseSet<Block *> &l0Deps =
+        controlDepsOf(l0CDA, level0CFGlocal->newCons);
     auto level0DG = buildDecisionGraph(*level0CFGlocal, l0Deps);
 
     ControlDependenceAnalysis dgCDA(*level0DG->region);
-    DenseSet<Block *> dgDeps =
-        dgCDA.getAllBlockDeps()[level0DG->newCons].allControlDeps;
+    const DenseSet<Block *> &dgDeps = controlDepsOf(dgCDA, level0DG->newCons);
 
     // Private registry: reuse the already-demoted level-0 condition wires
     // (shared via the demotion cache in demotionHelper), then build this
@@ -2593,13 +2603,13 @@ void ftd::insertDirectSuppression(mlir::OpBuilder &builder,
               buildLocalCFGRegion(lfBuilder, producerBlock, pdNode, bi);
           if (lfLoc->newCons) {
             ControlDependenceAnalysis lfLocCDA(*lfLoc->region);
-            DenseSet<Block *> lfDepsTmp =
-                lfLocCDA.getAllBlockDeps()[lfLoc->newCons].allControlDeps;
+            const DenseSet<Block *> &lfDepsTmp =
+                controlDepsOf(lfLocCDA, lfLoc->newCons);
             auto lfDG = buildDecisionGraph(*lfLoc, lfDepsTmp);
 
             ControlDependenceAnalysis lfDGCDA(*lfDG->region);
-            DenseSet<Block *> lfDeps =
-                lfDGCDA.getAllBlockDeps()[lfDG->newCons].allControlDeps;
+            const DenseSet<Block *> &lfDeps =
+                controlDepsOf(lfDGCDA, lfDG->newCons);
 
             BoolExpression *lfCons = enumeratePaths(*lfDG, bi, lfDeps);
             BoolExpression *lfSup =

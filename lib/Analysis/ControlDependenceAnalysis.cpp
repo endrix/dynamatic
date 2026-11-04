@@ -166,8 +166,16 @@ void dynamatic::ControlDependenceAnalysis::addDepsOfDeps(Region &region) {
       SmallVector<Block *, 4> currentDeps(blockDeps.begin(), blockDeps.end());
 
       for (Block *oneDep : currentDeps) {
-        DenseSet<Block *> &oneDepDeps =
-            blocksControlDeps[oneDep].allControlDeps;
+        // A lookup, not operator[]: `blockDeps` points into the map, and an
+        // insertion can grow the map and move every entry. A dependence may
+        // have no entry yet (a block that is itself control dependent on
+        // nothing, such as the latch of a bottom-tested loop, which comes
+        // after the blocks that depend on it), and it then has no dependences
+        // to add.
+        auto oneDepIt = blocksControlDeps.find(oneDep);
+        if (oneDepIt == blocksControlDeps.end())
+          continue;
+        DenseSet<Block *> &oneDepDeps = oneDepIt->second.allControlDeps;
         for (Block *oneDepDep : oneDepDeps) {
           if (blockDeps.insert(oneDepDep).second)
             changed = true; // Found a new dependency
@@ -196,8 +204,11 @@ void dynamatic::ControlDependenceAnalysis::identifyForwardControlDeps(
 
   dfs(dfs, &region.front());
 
+  // lookup, not operator[]: a block the DFS did not reach has no number (0,
+  // as before), and nothing is inserted while the other operand's reference
+  // into the map is pending.
   auto comesBeforeInCFG = [&](Block *a, Block *b) -> bool {
-    return dfsNum[a] < dfsNum[b];
+    return dfsNum.lookup(a) < dfsNum.lookup(b);
   };
 
   // oneDep is considered a forwardControlDep if it comes before block in the
@@ -208,26 +219,28 @@ void dynamatic::ControlDependenceAnalysis::identifyForwardControlDeps(
         blocksControlDeps[&block].forwardControlDeps.insert(oneDep);
 }
 
-std::optional<DenseSet<Block *>>
+const DenseSet<Block *> *
 dynamatic::ControlDependenceAnalysis::getBlockAllControlDeps(
     Block *block) const {
-  if (!blocksControlDeps.contains(block))
-    return std::nullopt;
+  auto it = blocksControlDeps.find(block);
+  if (it == blocksControlDeps.end())
+    return nullptr;
 
-  return blocksControlDeps.lookup(block).allControlDeps;
+  return &it->second.allControlDeps;
 }
 
-std::optional<DenseSet<Block *>>
+const DenseSet<Block *> *
 dynamatic::ControlDependenceAnalysis::getBlockForwardControlDeps(
     Block *block) const {
-  if (!blocksControlDeps.contains(block))
-    return std::nullopt;
+  auto it = blocksControlDeps.find(block);
+  if (it == blocksControlDeps.end())
+    return nullptr;
 
-  return blocksControlDeps.lookup(block).forwardControlDeps;
+  return &it->second.forwardControlDeps;
 }
 
 // Return the map of the control dependencies as stored in the class
-ControlDependenceAnalysis::BlockControlDepsMap
+const ControlDependenceAnalysis::BlockControlDepsMap &
 dynamatic::ControlDependenceAnalysis::getAllBlockDeps() const {
   return blocksControlDeps;
 }
