@@ -204,8 +204,11 @@ void dynamatic::ControlDependenceAnalysis::identifyForwardControlDeps(
 
   dfs(dfs, &region.front());
 
+  // lookup, not operator[]: a block the DFS did not reach has no number (0,
+  // as before), and nothing is inserted while the other operand's reference
+  // into the map is pending.
   auto comesBeforeInCFG = [&](Block *a, Block *b) -> bool {
-    return dfsNum[a] < dfsNum[b];
+    return dfsNum.lookup(a) < dfsNum.lookup(b);
   };
 
   // oneDep is considered a forwardControlDep if it comes before block in the
