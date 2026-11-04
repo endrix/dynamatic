@@ -494,6 +494,24 @@ Value SignalRegistry::lookup(StringRef var, const PathContext &queryPath) {
 // Static helpers (internal to this TU)
 // ===--------------------------------------------------------------------=== //
 
+/// Returns the reverse of `lcfg`'s origMap: the node standing for each original
+/// block. Every original block has at most one node in these graphs
+/// (buildLocalCFGRegion clones a block once, buildDecisionGraph keeps a subset
+/// of its blocks, and extractLayeredCFG clones each block of the scope once),
+/// so the reverse is a function of the original block and does not depend on
+/// the order origMap happens to be walked in.
+static DenseMap<Block *, Block *> reverseOrigMap(const ftd::LocalCFG &lcfg) {
+  DenseMap<Block *, Block *> reverse;
+  for (auto [node, origBlock] : lcfg.origMap) {
+    if (!origBlock)
+      continue;
+    bool inserted = reverse.try_emplace(origBlock, node).second;
+    assert(inserted && "two nodes of a graph stand for one original block");
+    (void)inserted;
+  }
+  return reverse;
+}
+
 /// Identify the block that has muxCondition as its terminator condition
 /// Note that it is not necessarily the same block defining the muxCondition
 static Block *returnMuxConditionBlock(Value muxCondition,
@@ -1257,10 +1275,7 @@ Value ftd::computeLoopBackedgeCondition(
   CyclicGraphManager cyclicMgr(*fullDecisionGraph);
 
   // 4. Build origToFullDG map
-  DenseMap<Block *, Block *> origToFullDG;
-  for (auto [dgBlock, origBlock] : fullDecisionGraph->origMap)
-    if (origBlock)
-      origToFullDG[origBlock] = dgBlock;
+  DenseMap<Block *, Block *> origToFullDG = reverseOrigMap(*fullDecisionGraph);
 
   // 5. Create cyclic demotion helper
   CyclicDemotionHelper demotionHelper(
@@ -2178,6 +2193,8 @@ void ftd::insertDirectSuppression(mlir::OpBuilder &builder,
     Operation *currentMuxOp = consumer;
     Value currentConnection = connection;
     bool isChainActive = true;
+    // The node of the local CFG standing for each original block.
+    DenseMap<Block *, Block *> origToLocal = reverseOrigMap(*locGraph);
 
     while (isChainActive) {
       bool isDataInput = false;
@@ -2222,15 +2239,7 @@ void ftd::insertDirectSuppression(mlir::OpBuilder &builder,
         muxConditionSet.insert(muxConditionBlock);
 
         // 3. Find the corresponding Block in the Local CFG
-        // Since locGraph->origMap maps Local->Original, we iterate to reverse
-        // lookup.
-        Block *condBlockLocal = nullptr;
-        for (auto it : locGraph->origMap) {
-          if (it.second == muxConditionBlock) {
-            condBlockLocal = it.first;
-            break;
-          }
-        }
+        Block *condBlockLocal = origToLocal.lookup(muxConditionBlock);
 
         // 4. Add to dependencies and record requirement
         if (condBlockLocal) {
@@ -2346,10 +2355,7 @@ void ftd::insertDirectSuppression(mlir::OpBuilder &builder,
   ftd::CyclicGraphManager cyclicMgr(*fullDecisionGraph);
 
   // Lookup from an original IR block to its node in the decision graph.
-  DenseMap<Block *, Block *> origToFullDG;
-  for (auto [dgBlock, origBlock] : fullDecisionGraph->origMap)
-    if (origBlock)
-      origToFullDG[origBlock] = dgBlock;
+  DenseMap<Block *, Block *> origToFullDG = reverseOrigMap(*fullDecisionGraph);
 
   // Create the cyclic demotion helper
   CyclicDemotionHelper demotionHelper(
@@ -2369,19 +2375,20 @@ void ftd::insertDirectSuppression(mlir::OpBuilder &builder,
   DenseSet<Block *> level0Deps =
       level0CDA.getAllBlockDeps()[level0CFG->newCons].allControlDeps;
 
+  // The node of the level-0 CFG standing for each original block.
+  DenseMap<Block *, Block *> origToLevel0 = reverseOrigMap(*level0CFG);
+
   // Translate mux condition blocks (original IR) into level0CFG and insert
   // them into the dependency set.
   for (Block *muxCondOrigIR : muxConditionSet) {
-    for (auto &[l0Block, l0Orig] : level0CFG->origMap) {
-      if (l0Orig == muxCondOrigIR) {
-        // Copied out of the map getAllBlockDeps() returns by value, as above.
-        level0Deps.insert(l0Block);
-        DenseSet<Block *> l0BlockDeps =
-            level0CDA.getAllBlockDeps()[l0Block].allControlDeps;
-        level0Deps.insert(l0BlockDeps.begin(), l0BlockDeps.end());
-        break;
-      }
-    }
+    Block *l0Block = origToLevel0.lookup(muxCondOrigIR);
+    if (!l0Block)
+      continue;
+    // Copied out of the map getAllBlockDeps() returns by value, as above.
+    level0Deps.insert(l0Block);
+    DenseSet<Block *> l0BlockDeps =
+        level0CDA.getAllBlockDeps()[l0Block].allControlDeps;
+    level0Deps.insert(l0BlockDeps.begin(), l0BlockDeps.end());
   }
 
   // Translate mux constraints from locGraph blocks to level0CFG blocks.
@@ -2390,12 +2397,8 @@ void ftd::insertDirectSuppression(mlir::OpBuilder &builder,
     Block *origIR = locGraph->origMap.lookup(locBlock);
     if (!origIR)
       continue;
-    for (auto &[l0Block, l0Orig] : level0CFG->origMap) {
-      if (l0Orig == origIR) {
-        level0MuxConstraints[l0Block] = reqVal;
-        break;
-      }
-    }
+    if (Block *l0Block = origToLevel0.lookup(origIR))
+      level0MuxConstraints[l0Block] = reqVal;
   }
 
   // The decision graph at loop-nesting level 0 (all back edges cut), left
