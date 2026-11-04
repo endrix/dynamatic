@@ -13,8 +13,11 @@
 
 #include "experimental/Support/FtdSupport.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
+#include "mlir/IR/RegionGraphTraits.h"
 #include "mlir/Transforms/DialectConversion.h"
+#include "llvm/ADT/PostOrderIterator.h"
 #include "llvm/ADT/TypeSwitch.h"
+#include <queue>
 #include <unordered_set>
 
 using namespace mlir;
@@ -30,23 +33,76 @@ std::string ftd::BlockIndexing::getBlockCondition(Block *block) const {
 }
 
 ftd::BlockIndexing::BlockIndexing(Region &region) {
-  mlir::DominanceInfo domInfo;
+  if (region.empty())
+    return;
 
-  // Create a vector with all the blocks
-  SmallVector<Block *> allBlocks;
-  for (Block &bb : region.getBlocks())
-    allBlocks.push_back(&bb);
+  // The blocks are numbered in a topological order of the CFG without its back
+  // edges. In such an order, each block comes after its dominators (the path
+  // from the entry to a block in a depth-first search has no back edge, and it
+  // traverses every dominator of the block), and an edge which is not a back
+  // edge goes from a lower to a higher index. Among the blocks whose
+  // predecessors through such edges are all numbered, the one which comes
+  // first in the region is numbered next, so that a region whose blocks are
+  // already in such an order keeps it. Unreachable blocks come last.
+  //
+  // Sorting the blocks with `dominates` as comparator does not give such an
+  // order: dominance is reflexive and partial, thus not a strict weak ordering,
+  // and the result of the sort is unspecified as soon as two blocks are not
+  // related by dominance.
 
-  // Sort the vector according to the dominance information, so that each
-  // block comes after its dominators.
-  llvm::sort(allBlocks.begin(), allBlocks.end(),
-             [&](Block *a, Block *b) { return domInfo.dominates(a, b); });
+  // Position of each block in the region
+  DenseMap<Block *, unsigned> position;
+  for (auto [idx, bb] : llvm::enumerate(region))
+    position.insert({&bb, idx});
 
-  // Associate a smaller index in the map to the blocks at higher levels of the
-  // dominance tree
-  for (auto [blockID, bb] : llvm::enumerate(allBlocks)) {
+  // A reverse post-order of the reachable blocks: an edge towards a block which
+  // does not come later in it is a back edge.
+  DenseMap<Block *, unsigned> rpoIndex;
+  for (auto [idx, bb] : llvm::enumerate(
+           llvm::ReversePostOrderTraversal<Block *>(&region.front())))
+    rpoIndex.insert({bb, idx});
+  auto isForwardEdge = [&](Block *src, Block *dst) -> bool {
+    return rpoIndex.lookup(src) < rpoIndex.lookup(dst);
+  };
+
+  // Number of edges, back edges excluded, from blocks which are not numbered
+  // yet towards each block
+  DenseMap<Block *, unsigned> pendingEdges;
+  for (auto &[bb, _] : rpoIndex) {
+    for (Block *successor : bb->getSuccessors()) {
+      if (isForwardEdge(bb, successor))
+        ++pendingEdges[successor];
+    }
+  }
+
+  // Blocks ready to be numbered, the first one in the region on top
+  auto comesLater = [&](Block *a, Block *b) -> bool {
+    return position.lookup(a) > position.lookup(b);
+  };
+  std::priority_queue<Block *, std::vector<Block *>, decltype(comesLater)>
+      readyBlocks(comesLater);
+  readyBlocks.push(&region.front());
+
+  unsigned blockID = 0;
+  auto numberBlock = [&](Block *bb) -> void {
     indexToBlock.insert({blockID, bb});
     blockToIndex.insert({bb, blockID});
+    ++blockID;
+  };
+
+  while (!readyBlocks.empty()) {
+    Block *bb = readyBlocks.top();
+    readyBlocks.pop();
+    numberBlock(bb);
+    for (Block *successor : bb->getSuccessors()) {
+      if (isForwardEdge(bb, successor) && --pendingEdges[successor] == 0)
+        readyBlocks.push(successor);
+    }
+  }
+
+  for (Block &bb : region) {
+    if (!rpoIndex.contains(&bb))
+      numberBlock(&bb);
   }
 }
 

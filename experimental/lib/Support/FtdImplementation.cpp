@@ -468,6 +468,43 @@ LogicalResult ftd::createPhiNetworkDeps(
 // Regeneration
 // ===--------------------------------------------------------------------=== //
 
+/// Returns true if `operand` is taken by the gate `consumerOp` once per entry
+/// of the loop whose header holds it, rather than once per iteration: the
+/// initial input of a MU, and any input of a gamma of the tree which builds a
+/// MU's initial input in the MU's own block (the tree of the phi of the inputs
+/// from outside the loop, placed in the header with the MU). A gamma in
+/// another block, a preheader or the exit of a previous loop, runs once per
+/// iteration of its own loop, even when its value is a MU's initial input.
+static bool isTakenOncePerLoopEntry(Operation *consumerOp, Value operand) {
+  auto isInitOfMu = [](Operation *user, Value v) -> bool {
+    return llvm::isa<handshake::MuxOp>(user) &&
+           user->hasAttr(FTD_EXPLICIT_MU) && user->getOperand(1) == v;
+  };
+  if (consumerOp->hasAttr(FTD_EXPLICIT_MU))
+    return isInitOfMu(consumerOp, operand);
+  if (!consumerOp->hasAttr(FTD_EXPLICIT_GAMMA))
+    return false;
+
+  // Follow the gamma tree to its root, and check what the root feeds
+  SmallVector<Operation *> worklist = {consumerOp};
+  DenseSet<Operation *> visited;
+  while (!worklist.empty()) {
+    Operation *gamma = worklist.pop_back_val();
+    if (!visited.insert(gamma).second)
+      continue;
+    for (Operation *user : gamma->getResult(0).getUsers()) {
+      if (isInitOfMu(user, gamma->getResult(0)) &&
+          user->getAttr("handshake.bb") == gamma->getAttr("handshake.bb"))
+        return true;
+      if (llvm::isa<handshake::MuxOp>(user) &&
+          user->hasAttr(FTD_EXPLICIT_GAMMA) &&
+          user->getAttr("handshake.bb") == gamma->getAttr("handshake.bb"))
+        worklist.push_back(user);
+    }
+  }
+  return false;
+}
+
 void ftd::addRegenOperandConsumer(mlir::OpBuilder &builder,
                                   handshake::FuncOp &funcOp,
                                   Operation *consumerOp, Value operand,
@@ -479,15 +516,24 @@ void ftd::addRegenOperandConsumer(mlir::OpBuilder &builder,
   DominanceInfo domInfo(shadow.shadowFunc);
   CFGLoopInfo loopInfo(domInfo.getDomTree(&shadowRegion));
 
-  // Skip if the consumer was added by this function, if it is an init merge, if
-  // it comes from the explicit gsa gate insertion process or if it is a generic
-  // operation to skip
-  if (consumerOp->hasAttr(FTD_REGEN) ||
-      consumerOp->hasAttr(FTD_EXPLICIT_GAMMA) ||
-      consumerOp->hasAttr(FTD_EXPLICIT_MU) ||
-      consumerOp->hasAttr(FTD_INIT_MERGE) ||
+  // Skip if the consumer was added by this function, if it is an init merge or
+  // if it is a generic operation to skip
+  if (consumerOp->hasAttr(FTD_REGEN) || consumerOp->hasAttr(FTD_INIT_MERGE) ||
       consumerOp->hasAttr(FTD_OP_TO_SKIP))
     return;
+
+  // The gates of the GSA analysis are consumers like the others: a gamma or a
+  // MU inside a loop takes a value produced outside the loop at each iteration
+  // which selects it, so the value is regenerated. The select of a MU is the
+  // init merge of its own loop, and is left alone. A value taken once per entry
+  // of a loop (the initial input of a MU, and the inputs of the gammas building
+  // it) is regenerated for the loops around that loop only, like the inputs of
+  // a loop merge.
+  if (consumerOp->hasAttr(FTD_EXPLICIT_MU) &&
+      consumerOp->getOperand(0) == operand)
+    return;
+  bool oncePerLoopEntry = consumerOp->hasAttr(NEW_PHI) ||
+                          isTakenOncePerLoopEntry(consumerOp, operand);
 
   // Skip if the consumer has to do with memory operations, cmerge networks or
   // if it is a conditional branch.
@@ -579,8 +625,8 @@ void ftd::addRegenOperandConsumer(mlir::OpBuilder &builder,
   for (unsigned i = 0; i < numberOfLoops; i++) {
 
     // If we are in the innermost loop (thus the iterator is at its end)
-    // and the consumer is a loop merge, stop
-    if (i == numberOfLoops - 1 && consumerOp->hasAttr(NEW_PHI))
+    // and the consumer takes the value once per entry of that loop, stop
+    if (i == numberOfLoops - 1 && oncePerLoopEntry)
       break;
 
     auto muxOp = createRegenMux(loops[i]);
@@ -770,6 +816,18 @@ LogicalResult experimental::ftd::addGsaGates(
 
   if (region.getBlocks().size() == 1)
     return success();
+
+  // A phi with a single operand is its operand, and no gate stands for it: its
+  // uses take the value of the operand. This is done before any multiplexer is
+  // created, so that a use moved onto the value of another gate is rerouted to
+  // that gate's multiplexer together with the gate's own uses.
+  for (Gate *phi : gsa.getSingleOperandPhis()) {
+    GateInput *operand = phi->operands.front();
+    Value replacement = operand->isTypeGate() ? operand->getGate()->result
+                                              : operand->getValue();
+    for (OpOperand &use : llvm::make_early_inc_range(phi->result.getUses()))
+      rewriter.modifyOpInPlace(use.getOwner(), [&]() { use.set(replacement); });
+  }
 
   // List of missing GSA functions
   SmallVector<MissingGsa> missingGsaList;
@@ -1105,6 +1163,8 @@ LogicalResult ftd::replaceMergeToGSA(handshake::FuncOp &funcOp,
     if (!merge->hasAttr(NEW_PHI))
       continue;
     gsa::GSAAnalysis gsa(merge, funcOp.getRegion());
+    if (gsa.hasFailed())
+      return failure();
     if (failed(ftd::addGsaGates(funcOp.getRegion(), rewriter, gsa, nullptr,
                                 false)))
       return failure();
