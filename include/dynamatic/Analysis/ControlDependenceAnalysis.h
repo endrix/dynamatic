@@ -17,7 +17,6 @@
 #include "dynamatic/Support/LLVM.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Pass/AnalysisManager.h"
-#include <optional>
 
 namespace dynamatic {
 
@@ -41,15 +40,19 @@ public:
   // Constructor for the analysis pass
   ControlDependenceAnalysis(Region &region);
 
-  // Given a BB, return all its control dependencies
-  std::optional<DenseSet<Block *>> getBlockAllControlDeps(Block *block) const;
+  /// Given a BB, return all its control dependencies, or null if the analysis
+  /// has no entry for it. The set is the analysis's own, valid as long as the
+  /// analysis is.
+  const DenseSet<Block *> *getBlockAllControlDeps(Block *block) const;
 
-  // Given a BB, return all its forward control dependencies
-  std::optional<DenseSet<Block *>>
-  getBlockForwardControlDeps(Block *block) const;
+  /// Given a BB, return all its forward control dependencies, or null if the
+  /// analysis has no entry for it. The set is the analysis's own, valid as
+  /// long as the analysis is.
+  const DenseSet<Block *> *getBlockForwardControlDeps(Block *block) const;
 
-  // Return the map of the control dependencies as
-  BlockControlDepsMap getAllBlockDeps() const;
+  /// Return the map of the control dependencies, as stored in the analysis:
+  /// a reference, valid as long as the analysis is.
+  const BlockControlDepsMap &getAllBlockDeps() const;
 
   /// Invalidation hook to keep the analysis cached across passes. Returns true
   /// if the analysis should be invalidated and fully reconstructed the next

@@ -219,26 +219,28 @@ void dynamatic::ControlDependenceAnalysis::identifyForwardControlDeps(
         blocksControlDeps[&block].forwardControlDeps.insert(oneDep);
 }
 
-std::optional<DenseSet<Block *>>
+const DenseSet<Block *> *
 dynamatic::ControlDependenceAnalysis::getBlockAllControlDeps(
     Block *block) const {
-  if (!blocksControlDeps.contains(block))
-    return std::nullopt;
+  auto it = blocksControlDeps.find(block);
+  if (it == blocksControlDeps.end())
+    return nullptr;
 
-  return blocksControlDeps.lookup(block).allControlDeps;
+  return &it->second.allControlDeps;
 }
 
-std::optional<DenseSet<Block *>>
+const DenseSet<Block *> *
 dynamatic::ControlDependenceAnalysis::getBlockForwardControlDeps(
     Block *block) const {
-  if (!blocksControlDeps.contains(block))
-    return std::nullopt;
+  auto it = blocksControlDeps.find(block);
+  if (it == blocksControlDeps.end())
+    return nullptr;
 
-  return blocksControlDeps.lookup(block).forwardControlDeps;
+  return &it->second.forwardControlDeps;
 }
 
 // Return the map of the control dependencies as stored in the class
-ControlDependenceAnalysis::BlockControlDepsMap
+const ControlDependenceAnalysis::BlockControlDepsMap &
 dynamatic::ControlDependenceAnalysis::getAllBlockDeps() const {
   return blocksControlDeps;
 }
