@@ -166,8 +166,16 @@ void dynamatic::ControlDependenceAnalysis::addDepsOfDeps(Region &region) {
       SmallVector<Block *, 4> currentDeps(blockDeps.begin(), blockDeps.end());
 
       for (Block *oneDep : currentDeps) {
-        DenseSet<Block *> &oneDepDeps =
-            blocksControlDeps[oneDep].allControlDeps;
+        // A lookup, not operator[]: `blockDeps` points into the map, and an
+        // insertion can grow the map and move every entry. A dependence may
+        // have no entry yet (a block that is itself control dependent on
+        // nothing, such as the latch of a bottom-tested loop, which comes
+        // after the blocks that depend on it), and it then has no dependences
+        // to add.
+        auto oneDepIt = blocksControlDeps.find(oneDep);
+        if (oneDepIt == blocksControlDeps.end())
+          continue;
+        DenseSet<Block *> &oneDepDeps = oneDepIt->second.allControlDeps;
         for (Block *oneDepDep : oneDepDeps) {
           if (blockDeps.insert(oneDepDep).second)
             changed = true; // Found a new dependency
