@@ -2238,11 +2238,14 @@ void ftd::insertDirectSuppression(mlir::OpBuilder &builder,
             continue;
           // Add this block and its all-dependency blocks to the dependency set
           // so path enumeration observes it.
+          // getAllBlockDeps() returns the map by value: the set is copied out
+          // of it before the map is destroyed (a range-for over a member of
+          // the temporary would read freed memory).
           locConsControlDepsFull.insert(condBlockLocal);
-          for (Block *dep :
-               locCDA.getAllBlockDeps()[condBlockLocal].allControlDeps) {
-            locConsControlDepsFull.insert(dep);
-          }
+          DenseSet<Block *> condBlockDeps =
+              locCDA.getAllBlockDeps()[condBlockLocal].allControlDeps;
+          locConsControlDepsFull.insert(condBlockDeps.begin(),
+                                        condBlockDeps.end());
 
           // Record the specific value required (True/False) to pass this Mux
           muxConstraints[condBlockLocal] = requiredVal;
@@ -2371,9 +2374,11 @@ void ftd::insertDirectSuppression(mlir::OpBuilder &builder,
   for (Block *muxCondOrigIR : muxConditionSet) {
     for (auto &[l0Block, l0Orig] : level0CFG->origMap) {
       if (l0Orig == muxCondOrigIR) {
+        // Copied out of the map getAllBlockDeps() returns by value, as above.
         level0Deps.insert(l0Block);
-        for (Block *dep : level0CDA.getAllBlockDeps()[l0Block].allControlDeps)
-          level0Deps.insert(dep);
+        DenseSet<Block *> l0BlockDeps =
+            level0CDA.getAllBlockDeps()[l0Block].allControlDeps;
+        level0Deps.insert(l0BlockDeps.begin(), l0BlockDeps.end());
         break;
       }
     }
