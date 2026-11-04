@@ -475,6 +475,82 @@ void experimental::gsa::GSAAnalysis::replaceGateInput(
   }
 }
 
+namespace {
+
+/// The sum of the conditions of the paths by which a phi takes an input.
+/// Minimizing builds the truth table of the sum, 2^n rows over its n
+/// conditions, so the sum is minimized once, after its last path, and not after
+/// each path: it is the same function either way, and its minimal cover has the
+/// same conditions (the ones the function depends on), which is all that
+/// `expandGammaTree` reads of it. It is minimized earlier only when a path
+/// would take its conditions past MINIMIZE_PAST_CONDITIONS and past twice
+/// those it kept when last minimized, or past the most a truth table has: the
+/// conditions that cancel (the two arms of a diamond rejoining before the
+/// sender) leave it then, so the table stays near the conditions of the
+/// function and of one path, where one table over all the conditions of the
+/// paths would double with each; and a sum whose conditions do not cancel is
+/// not minimized over and over as it grows. At 16 conditions a table has 2^16
+/// rows and costs milliseconds. The sum fails only when the conditions it kept
+/// and those a path brings are more than a truth table has.
+class SumOfPaths {
+public:
+  static constexpr unsigned MINIMIZE_PAST_CONDITIONS = 16;
+
+  /// Adds the condition of a path to the sum; fails if the sum must be
+  /// minimized first over more conditions than a truth table has.
+  LogicalResult add(BoolExpression *path) {
+    std::set<std::string> pathConditions = path->getVariables();
+    unsigned added = llvm::count_if(pathConditions, [&](const std::string &c) {
+      return !conditions.count(c);
+    });
+    unsigned threshold =
+        std::min(std::max(MINIMIZE_PAST_CONDITIONS, 2 * minimizedConditions),
+                 BoolExpression::MAX_TRUTH_TABLE_VARIABLES);
+    if (added && conditions.size() + added > threshold && !minimize())
+      return failure();
+    conditions.insert(pathConditions.begin(), pathConditions.end());
+    sum = BoolExpression::boolOr(path, sum);
+    minimized = false;
+    return success();
+  }
+
+  /// The minimized sum (zero if no path was added), or nullptr if the sum has
+  /// more conditions than a truth table has
+  BoolExpression *minimize() {
+    if (minimized)
+      return sum;
+    if (conditions.size() > BoolExpression::MAX_TRUTH_TABLE_VARIABLES)
+      return nullptr;
+    sum = sum->boolMinimize();
+    conditions = sum->getVariables();
+    minimizedConditions = conditions.size();
+    minimized = true;
+    return sum;
+  }
+
+  unsigned getNumConditions() const { return conditions.size(); }
+
+private:
+  BoolExpression *sum = BoolExpression::boolZero();
+  std::set<std::string> conditions;
+  unsigned minimizedConditions = 0;
+  bool minimized = true;
+};
+
+} // namespace
+
+/// Emits the error of a phi one of whose inputs is reached on paths over more
+/// conditions than a truth table has
+static void emitTooManyConditionsError(experimental::gsa::Gate *phi,
+                                       const SumOfPaths &sum) {
+  mlir::emitError(phi->result.getLoc())
+      << "fast token delivery cannot build the gamma tree of this block "
+         "argument: the paths to one of its inputs carry "
+      << sum.getNumConditions() << " branch conditions, more than the "
+      << BoolExpression::MAX_TRUTH_TABLE_VARIABLES
+      << " a truth table of their sum is built over";
+}
+
 experimental::gsa::ListExpressionsPerGate
 experimental::gsa::GSAAnalysis::getExpressionsFromSenders(
     Gate *phi, DenseSet<unsigned> &conditions, const BlockIndexing &bi,
@@ -507,6 +583,7 @@ experimental::gsa::GSAAnalysis::getExpressionsFromSenders(
   ListExpressionsPerGate expressions;
   for (GateInput *operand : phi->operands)
     expressions.emplace_back(BoolExpression::boolZero(), operand);
+  SmallVector<SumOfPaths> sums(expressions.size());
 
   for (std::vector<Block *> &path :
        findAllPaths(commonDominator, phi->getBlock(), bi)) {
@@ -522,11 +599,21 @@ experimental::gsa::GSAAnalysis::getExpressionsFromSenders(
       continue;
 
     // Sum the condition of the path to the expression of its operand
-    BoolExpression *pathCondition = getPathExpression(path, conditions, bi);
-    expression->first = BoolExpression::boolOr(pathCondition, expression->first)
-                            ->boolMinimize();
+    SumOfPaths &sum = sums[expression - expressions.begin()];
+    if (failed(sum.add(getPathExpression(path, conditions, bi)))) {
+      emitTooManyConditionsError(phi, sum);
+      return {};
+    }
   }
 
+  // Each sum minimized, once all its paths are in
+  for (auto [expression, sum] : llvm::zip(expressions, sums)) {
+    expression.first = sum.minimize();
+    if (!expression.first) {
+      emitTooManyConditionsError(phi, sum);
+      return {};
+    }
+  }
   return expressions;
 }
 
@@ -569,14 +656,18 @@ experimental::gsa::GSAAnalysis::getExpressionsFromProducers(
     auto paths = findAllPaths(commonDominator, phi->getBlock(), bi,
                               operand->getBlock(), blocksToAvoid);
 
-    BoolExpression *phiInputCondition = BoolExpression::boolZero();
-
-    // Sum all the conditions for each path
+    // Sum all the conditions for each path, and minimize the sum
+    SumOfPaths sum;
     for (std::vector<Block *> &path : paths) {
-      boolean::BoolExpression *condition =
-          getPathExpression(path, conditions, bi);
-      phiInputCondition = BoolExpression::boolOr(condition, phiInputCondition);
-      phiInputCondition = phiInputCondition->boolMinimize();
+      if (failed(sum.add(getPathExpression(path, conditions, bi)))) {
+        emitTooManyConditionsError(phi, sum);
+        return {};
+      }
+    }
+    BoolExpression *phiInputCondition = sum.minimize();
+    if (!phiInputCondition) {
+      emitTooManyConditionsError(phi, sum);
+      return {};
     }
 
     // Associate the expression to the phi operand
@@ -633,6 +724,10 @@ void experimental::gsa::GSAAnalysis::convertPhiToGamma(
                                           domInfo)
               : getExpressionsFromProducers(phi, blocksWithConditionInPath, bi,
                                             domInfo);
+      if (expressionsList.empty()) {
+        analysisFailed = true;
+        return;
+      }
       assert(llvm::none_of(expressionsList,
                            [](auto &e) {
                              return e.first->type == ExpressionType::Zero;

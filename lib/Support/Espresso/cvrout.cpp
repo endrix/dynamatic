@@ -123,6 +123,22 @@ void pls_label(pPLA PLA, FILE *fp) {
     }
 }
 
+/* Appends `s` to the equation `*output` of length `*length`, growing its
+   buffer of `*output_size` bytes first if it cannot hold it */
+static void eqn_append(char **output, size_t *output_size, size_t *length,
+                       const char *s) {
+  size_t len = strlen(s);
+  if (*length + len + 1 > *output_size) {
+    while (*length + len + 1 > *output_size)
+      *output_size *= 2;
+    *output = (char *)realloc(*output, *output_size);
+    if (*output == NULL)
+      fatal("out of memory in eqn_output");
+  }
+  memcpy(*output + *length, s, len + 1);
+  *length += len;
+}
+
 /*
     eqntott output mode -- output algebraic equations
 */
@@ -138,7 +154,7 @@ char *eqn_output(pPLA PLA) {
     fatal("Must have binary-valued function for EQNTOTT output mode");
   makeup_labels(PLA);
 
-  // Initial output size
+  // Initial output size (eqn_append grows the buffer before it writes)
   size_t output_size = 1024;
 
   char *output = (char *)malloc(output_size);
@@ -152,17 +168,8 @@ char *eqn_output(pPLA PLA) {
   for (i = 0; i < cube.part_size[cube.output]; i++) {
     // printf("%s = ", OUTLABEL(i));
     char temp[256];
-    int temp_length = snprintf(temp, sizeof(temp), "%s = ", OUTLABEL(i));
-    current_length += temp_length;
-    // Check if buffer needs to be resized
-    if (current_length >= output_size) {
-      output_size *= 2;
-      output = (char *)realloc(output, output_size);
-      if (output == NULL) {
-        return NULL; // Memory reallocation failed
-      }
-    }
-    strcat(output, temp);
+    snprintf(temp, sizeof(temp), "%s = ", OUTLABEL(i));
+    eqn_append(&output, &output_size, &current_length, temp);
 
     col = strlen(OUTLABEL(i)) + 3;
     firstor = TRUE;
@@ -171,9 +178,9 @@ char *eqn_output(pPLA PLA) {
     foreach_set(PLA->F, last,
                 p) if (is_in_set(p, i + cube.first_part[cube.output])) {
       if (firstor)
-        strcat(output, "("), col += 1;
+        eqn_append(&output, &output_size, &current_length, "("), col += 1;
       else
-        strcat(output, " | ("), col += 4;
+        eqn_append(&output, &output_size, &current_length, " | ("), col += 4;
       firstor = FALSE;
       firstand = TRUE;
 
@@ -182,35 +189,26 @@ char *eqn_output(pPLA PLA) {
         if ((x = GETINPUT(p, var)) != DASH) {
           len = strlen(INLABEL(var));
           if (col + len > 72) {
-            strcat(output, "\n    ");
+            eqn_append(&output, &output_size, &current_length, "\n    ");
             col = 4;
           }
           if (!firstand) {
-            strcat(output, "&");
+            eqn_append(&output, &output_size, &current_length, "&");
             col += 1;
           }
           firstand = FALSE;
           if (x == ZERO) {
-            strcat(output, "!");
+            eqn_append(&output, &output_size, &current_length, "!");
             col += 1;
           }
-          strcat(output, INLABEL(var));
+          eqn_append(&output, &output_size, &current_length, INLABEL(var));
           col += len;
-          current_length += len + (x == ZERO ? 1 : 0) + (firstand ? 0 : 1);
-          // Check if buffer needs to be resized
-          if (current_length >= output_size) {
-            output_size *= 2;
-            output = (char *)realloc(output, output_size);
-            if (output == NULL) {
-              return NULL; // Memory reallocation failed
-            }
-          }
         }
       }
-      strcat(output, ")");
+      eqn_append(&output, &output_size, &current_length, ")");
       col += 1;
     }
-    strcat(output, ";\n\n");
+    eqn_append(&output, &output_size, &current_length, ";\n\n");
   }
   return output;
 }
