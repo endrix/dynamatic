@@ -27,6 +27,10 @@
 
 namespace dynamatic {
 
+/// Erases the blocks no path reaches in every non-external function of the
+/// module, before the CFG is analyzed: the lowering asserts on them.
+void eraseUnreachableBlocksOfFunctions(mlir::ModuleOp modOp);
+
 /// Converts cf-level types to those expected by handshake-level IR. Right now
 /// these are the sames but this will change as soon as the new type system is
 /// integrated.

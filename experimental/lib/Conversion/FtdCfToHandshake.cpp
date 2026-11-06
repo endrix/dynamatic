@@ -417,7 +417,10 @@ struct FtdCfToHandshakePass
     MLIRContext *ctx = &getContext();
     ModuleOp modOp = getOperation();
 
-    // Before the CFG is captured and analyzed
+    // Before the CFG is captured and analyzed: no unreachable blocks (the
+    // lowering asserts on them, and the GSA analysis would read their
+    // arguments as inputs), and no edge sending two values.
+    eraseUnreachableBlocksOfFunctions(modOp);
     splitEdgesSendingTwoValues(modOp);
 
     CfToHandshakeTypeConverter converter;

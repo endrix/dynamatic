@@ -48,6 +48,7 @@
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Transforms/DialectConversion.h"
+#include "mlir/Transforms/RegionUtils.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/TypeSwitch.h"
@@ -1765,6 +1766,13 @@ bool FuncSSAStrategy::maximizeArgument(BlockArgument arg) {
   return !isa<mlir::MemRefType>(arg.getType());
 }
 
+void dynamatic::eraseUnreachableBlocksOfFunctions(ModuleOp modOp) {
+  IRRewriter rewriter(modOp.getContext());
+  for (auto funcOp : modOp.getOps<func::FuncOp>())
+    if (!funcOp.isExternal())
+      (void)mlir::eraseUnreachableBlocks(rewriter, funcOp.getBody());
+}
+
 namespace {
 
 /// FPGA18's elastic pass. Runs elastic pass on every function (func::FuncOp)
@@ -1776,6 +1784,12 @@ struct CfToHandshakePass
   void runDynamaticPass() override {
     MLIRContext *ctx = &getContext();
     ModuleOp modOp = getOperation();
+
+    // A block no path reaches has no control token and no predecessor to
+    // merge its arguments from: the lowering asserted on it (insertMerge,
+    // "block argument must have predecessors"). Nothing of it can ever run,
+    // so it goes before anything looks at the CFG.
+    eraseUnreachableBlocksOfFunctions(modOp);
 
     // Put all non-external functions into maximal SSA form
     for (auto funcOp : modOp.getOps<func::FuncOp>()) {
