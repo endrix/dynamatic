@@ -48,6 +48,7 @@
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Transforms/DialectConversion.h"
+#include "mlir/Transforms/RegionUtils.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/TypeSwitch.h"
@@ -1101,12 +1102,14 @@ LogicalResult LowerFuncToHandshake::flattenAndTerminate(
   // as we go
   SmallVector<SmallVector<Value>> returnsOperands;
   DenseSet<Operation *> erasedTerminators;
-  for (Block &block : funcOp) {
+  size_t singleReturnBlockID = 0;
+  for (auto [blockID, block] : llvm::enumerate(funcOp)) {
     Operation *termOp = &block.back();
     if (auto retOp = dyn_cast<func::ReturnOp>(termOp)) {
       auto &retOperands = returnsOperands.emplace_back();
       if (failed(rewriter.getRemappedValues(retOp->getOperands(), retOperands)))
         return failure();
+      singleReturnBlockID = blockID;
     }
     erasedTerminators.insert(termOp);
     rewriter.eraseOp(termOp);
@@ -1116,10 +1119,14 @@ LogicalResult LowerFuncToHandshake::flattenAndTerminate(
   // When identifying basic blocks, the end node is either put in the same
   // block as the function's single return statement or, in the case of
   // multiple return statements, it is put in a "fake block" along with the
-  // merges that feed it its data inputs
+  // merges that feed it its data inputs. The single return's block is the one
+  // that holds it, which need not be the last block of the region: tagging
+  // the end with the last block put it in a block the return's values never
+  // reach, and a lowering that reads the tag (fast token delivery's
+  // suppression) then steered them wrong.
   size_t exitBlockID = funcOp.getBlocks().size();
   if (returnsOperands.size() == 1)
-    exitBlockID -= 1;
+    exitBlockID = singleReturnBlockID;
 
   // Inline all non-entry blocks into the entry block, erasing them as we go
   Operation *lastOp = &funcOp.front().back();
@@ -1759,6 +1766,13 @@ bool FuncSSAStrategy::maximizeArgument(BlockArgument arg) {
   return !isa<mlir::MemRefType>(arg.getType());
 }
 
+void dynamatic::eraseUnreachableBlocksOfFunctions(ModuleOp modOp) {
+  IRRewriter rewriter(modOp.getContext());
+  for (auto funcOp : modOp.getOps<func::FuncOp>())
+    if (!funcOp.isExternal())
+      (void)mlir::eraseUnreachableBlocks(rewriter, funcOp.getBody());
+}
+
 namespace {
 
 /// FPGA18's elastic pass. Runs elastic pass on every function (func::FuncOp)
@@ -1770,6 +1784,12 @@ struct CfToHandshakePass
   void runDynamaticPass() override {
     MLIRContext *ctx = &getContext();
     ModuleOp modOp = getOperation();
+
+    // A block no path reaches has no control token and no predecessor to
+    // merge its arguments from: the lowering asserted on it (insertMerge,
+    // "block argument must have predecessors"). Nothing of it can ever run,
+    // so it goes before anything looks at the CFG.
+    eraseUnreachableBlocksOfFunctions(modOp);
 
     // Put all non-external functions into maximal SSA form
     for (auto funcOp : modOp.getOps<func::FuncOp>()) {

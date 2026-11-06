@@ -537,6 +537,7 @@ static void captureCFGTopology(handshake::FuncOp funcOp, unsigned &numBlocks,
   numBlocks = blockToIdx.size();
   edges.resize(numBlocks);
 
+  SmallVector<unsigned> returnBlocks;
   for (auto [idx, block] : llvm::enumerate(region)) {
     CapturedEdgeInfo &edge = edges[idx];
     Operation *term = block.getTerminator();
@@ -548,6 +549,18 @@ static void captureCFGTopology(handshake::FuncOp funcOp, unsigned &numBlocks,
     } else if (auto br = dyn_cast<cf::BranchOp>(term)) {
       edge.hasSuccessors = true;
       edge.uncondSuccIdx = blockToIdx.lookup(br.getDest());
+    } else if (isa<func::ReturnOp>(term)) {
+      returnBlocks.push_back(idx);
+    }
+  }
+  // The lowering's "fake" exit block of several returns (see
+  // ftd::captureCFGTopology): every returning block branches to it.
+  if (returnBlocks.size() > 1) {
+    unsigned exitIdx = numBlocks++;
+    edges.emplace_back();
+    for (unsigned idx : returnBlocks) {
+      edges[idx].hasSuccessors = true;
+      edges[idx].uncondSuccIdx = exitIdx;
     }
   }
 

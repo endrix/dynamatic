@@ -202,9 +202,9 @@ OriginalCFGInfo ftd::captureCFGTopology(func::FuncOp funcOp) {
   info.numBlocks = blockIdx.size();
   info.blockEdges.resize(info.numBlocks);
 
-  for (auto &[block, idx] : blockIdx) {
+  for (auto [idx, block] : llvm::enumerate(region)) {
     BlockEdgeInfo &edge = info.blockEdges[idx];
-    Operation *term = block->getTerminator();
+    Operation *term = block.getTerminator();
 
     if (auto condBr = dyn_cast<cf::CondBranchOp>(term)) {
       edge.isConditional = true;
@@ -214,6 +214,25 @@ OriginalCFGInfo ftd::captureCFGTopology(func::FuncOp funcOp) {
     } else if (auto br = dyn_cast<cf::BranchOp>(term)) {
       edge.hasSuccessors = true;
       edge.uncondSuccIdx = blockIdx.lookup(br.getDest());
+    } else if (isa<func::ReturnOp>(term)) {
+      info.returnBlocks.push_back(idx);
+    }
+  }
+
+  // A function of several returns gets, from the lowering, a "fake" exit
+  // block numbered one past its last block, holding the end and the merges
+  // of the returned values (flattenAndTerminate). Those ops read their
+  // block index like every other, so the shadow has that block too: every
+  // returning block branches to it. Without it the first consumer tagged with
+  // it asked the shadow for a block it did not have and aborted.
+  if (info.returnBlocks.size() > 1) {
+    unsigned exitIdx = info.numBlocks++;
+    info.blockEdges.emplace_back();
+    info.hasExitBlock = true;
+    for (unsigned idx : info.returnBlocks) {
+      BlockEdgeInfo &edge = info.blockEdges[idx];
+      edge.hasSuccessors = true;
+      edge.uncondSuccIdx = exitIdx;
     }
   }
   return info;
@@ -292,6 +311,30 @@ void ftd::completeFastTokenDelivery(handshake::FuncOp funcOp,
 
   if (info.numBlocks <= 1)
     return;
+
+  // The merges of the fake exit block take one value from each returning
+  // block, and every path reaches that block, so the suppression would
+  // deliver all of them: a function of two returns returned both values. Each
+  // operand goes through a pass-through branch tagged with its own return
+  // block, which the suppression then feeds only when that block ran, and the
+  // merge sees one token per run.
+  if (info.hasExitBlock) {
+    unsigned exitIdx = info.numBlocks - 1;
+    for (auto mergeOp : funcOp.getOps<handshake::MergeOp>()) {
+      auto bbAttr = mergeOp->getAttrOfType<IntegerAttr>("handshake.bb");
+      if (!bbAttr || bbAttr.getUInt() != exitIdx ||
+          mergeOp.getNumOperands() != info.returnBlocks.size())
+        continue;
+      builder.setInsertionPoint(mergeOp);
+      for (auto [i, operand] : llvm::enumerate(mergeOp.getOperands())) {
+        auto passOp =
+            handshake::BranchOp::create(builder, mergeOp.getLoc(), operand);
+        passOp->setAttr("handshake.bb",
+                        builder.getUI32IntegerAttr(info.returnBlocks[i]));
+        mergeOp.setOperand(i, passOp.getResult());
+      }
+    }
+  }
 
   // Build the shadow CFG — one struct, everything inside.
   ftd::ShadowCFG shadow = buildShadowCFG(builder, funcOp, info);
@@ -374,7 +417,10 @@ struct FtdCfToHandshakePass
     MLIRContext *ctx = &getContext();
     ModuleOp modOp = getOperation();
 
-    // Before the CFG is captured and analyzed
+    // Before the CFG is captured and analyzed: no unreachable blocks (the
+    // lowering asserts on them, and the GSA analysis would read their
+    // arguments as inputs), and no edge sending two values.
+    eraseUnreachableBlocksOfFunctions(modOp);
     splitEdgesSendingTwoValues(modOp);
 
     CfToHandshakeTypeConverter converter;

@@ -1,2 +1,3 @@
+add_subdirectory(BooleanLogic)
 add_subdirectory(ConstraintProgramming)
 add_subdirectory(TimingModels)

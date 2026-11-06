@@ -42,6 +42,7 @@
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Transforms/DialectConversion.h"
+#include "llvm/Support/ErrorHandling.h"
 using namespace mlir;
 using namespace dynamatic;
 using namespace dynamatic::experimental;
@@ -814,7 +815,17 @@ static Value boolExpressionToCircuit(
     return val;
   }
 
-  // Case 2: Constant
+  // Case 2: Constant. Nothing else may reach a leaf: the BDD keeps the
+  // expression as a leaf when no listed variable remains, and a leaf still
+  // holding a variable (one whose block the local region does not rank) would
+  // otherwise be lowered as a constant, a wrong suppression nothing reports.
+  if (expr->type != ExpressionType::One && expr->type != ExpressionType::Zero) {
+    llvm::errs() << "[FTD Error] Suppression leaf '" << expr->toString()
+                 << "' is not a literal: a variable of the condition is not "
+                    "in the BDD's variable order.\n";
+    llvm::report_fatal_error(
+        "suppression condition with an unordered variable");
+  }
   auto sourceOp = handshake::SourceOp::create(builder, block->front().getLoc());
   auto intType = builder.getIntegerType(1);
   int constVal = (expr->type == ExpressionType::One ? 1 : 0);

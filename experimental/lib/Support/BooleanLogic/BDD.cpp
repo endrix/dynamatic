@@ -15,6 +15,7 @@
 #include "experimental/Support/BooleanLogic/BoolExpression.h"
 
 #include <iterator>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -58,8 +59,18 @@ BDD *dynamatic::experimental::boolean::buildBDD(
       exp->type == ExpressionType::Zero || exp->type == ExpressionType::One)
     return new BDD(exp);
 
-  // Get the next variable to expand
-  const std::string &var = variableList[0];
+  // Expand the next variable the expression depends on. A variable the
+  // expression does not contain gets no node: its two cofactors would be the
+  // same expression, and the node would be a decision taken on a condition the
+  // function does not depend on, so that its path contexts, and the circuit
+  // built from them, would carry a variable this path never evaluated.
+  std::set<std::string> variables = exp->getVariables();
+  size_t next = 0;
+  while (next < variableList.size() && !variables.count(variableList[next]))
+    ++next;
+  if (next == variableList.size())
+    return new BDD(exp);
+  const std::string &var = variableList[next];
 
   // Get a boolean expression in which `var` is substituted with false
   BoolExpression *restrictedNegative = exp->deepCopy();
@@ -72,8 +83,9 @@ BDD *dynamatic::experimental::boolean::buildBDD(
   restrictedPositive = restrictedPositive->boolMinimize();
 
   // Get a list of the next variables to expand
-  std::vector<std::string> subList(std::next(variableList.begin()),
-                                   variableList.end());
+  std::vector<std::string> subList(
+      std::next(variableList.begin(), static_cast<long>(next) + 1),
+      variableList.end());
 
   // Recursively build the left and right sub-trees
   BDD *negativeInput = buildBDD(restrictedNegative, subList);
