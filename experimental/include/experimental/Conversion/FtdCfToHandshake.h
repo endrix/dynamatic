@@ -86,6 +86,13 @@ struct BlockEdgeInfo {
 struct OriginalCFGInfo {
   unsigned numBlocks = 0;
   llvm::SmallVector<BlockEdgeInfo> blockEdges;
+  /// The blocks ending in a return, in region order (the order of the exit
+  /// merges' operands).
+  llvm::SmallVector<unsigned> returnBlocks;
+  /// Several returns: the last block (index numBlocks - 1) is the lowering's
+  /// "fake" exit block, which holds the end and the merges of the returned
+  /// values and which every returning block branches to.
+  bool hasExitBlock = false;
 };
 
 /// The CFG topology of one function, read before the conversion erases its
