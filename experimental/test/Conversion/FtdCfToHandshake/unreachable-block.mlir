@@ -2,9 +2,14 @@
 
 // A block no path reaches is erased before the CFG is captured: the lowering
 // asserted on it, and the GSA analysis would have read its argument as a
-// third input of the join.
+// third input of the join. The join is a gamma of the two live values, and
+// nothing reads the dead block's value (the function's fourth argument).
 
 // CHECK-LABEL:   handshake.func @unreachable(
+// CHECK-SAME:      attributes {
+// CHECK-NOT:       %arg3
+// CHECK:           mux %arg0 [%{{.*}}, %{{.*}}] {ftd.GAMMA
+// CHECK-NOT:       %arg3
 // CHECK:           end
 func.func @unreachable(%p: i1, %x0: i64, %x1: i64, %x2: i64) -> i64 {
   cf.cond_br %p, ^b1, ^b2
