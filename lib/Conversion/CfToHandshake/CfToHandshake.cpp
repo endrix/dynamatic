@@ -1101,12 +1101,14 @@ LogicalResult LowerFuncToHandshake::flattenAndTerminate(
   // as we go
   SmallVector<SmallVector<Value>> returnsOperands;
   DenseSet<Operation *> erasedTerminators;
-  for (Block &block : funcOp) {
+  size_t singleReturnBlockID = 0;
+  for (auto [blockID, block] : llvm::enumerate(funcOp)) {
     Operation *termOp = &block.back();
     if (auto retOp = dyn_cast<func::ReturnOp>(termOp)) {
       auto &retOperands = returnsOperands.emplace_back();
       if (failed(rewriter.getRemappedValues(retOp->getOperands(), retOperands)))
         return failure();
+      singleReturnBlockID = blockID;
     }
     erasedTerminators.insert(termOp);
     rewriter.eraseOp(termOp);
@@ -1116,10 +1118,14 @@ LogicalResult LowerFuncToHandshake::flattenAndTerminate(
   // When identifying basic blocks, the end node is either put in the same
   // block as the function's single return statement or, in the case of
   // multiple return statements, it is put in a "fake block" along with the
-  // merges that feed it its data inputs
+  // merges that feed it its data inputs. The single return's block is the one
+  // that holds it, which need not be the last block of the region: tagging
+  // the end with the last block put it in a block the return's values never
+  // reach, and a lowering that reads the tag (fast token delivery's
+  // suppression) then steered them wrong.
   size_t exitBlockID = funcOp.getBlocks().size();
   if (returnsOperands.size() == 1)
-    exitBlockID -= 1;
+    exitBlockID = singleReturnBlockID;
 
   // Inline all non-entry blocks into the entry block, erasing them as we go
   Operation *lastOp = &funcOp.front().back();
