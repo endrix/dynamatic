@@ -444,11 +444,19 @@ static void removeNetworkCMerges(handshake::FuncOp &funcOp,
   if (!hasReturnValue)
     return;
 
-  // The FTD circuit introduces no branch operations, so the ones in the circuit
-  // are only related to the network of cmerges
-  auto branchOps = funcOp.getOps<handshake::BranchOp>();
-
-  if (branchOps.empty())
+  // The network of cmerges carries the control token, so its branches are the
+  // ones of control type. The FTD circuit has branches of its own now: the
+  // exit merges of several returns take each operand through a pass-through
+  // branch of the value's type (branchExitMergeOperands), and seeding the
+  // traversal with one of those replaced a returned value by the start.
+  handshake::BranchOp seed;
+  for (auto brOp : funcOp.getOps<handshake::BranchOp>()) {
+    if (isa<handshake::ControlType>(brOp.getResult().getType())) {
+      seed = brOp;
+      break;
+    }
+  }
+  if (!seed)
     return;
 
   // Operations that needs to be removed
@@ -457,7 +465,7 @@ static void removeNetworkCMerges(handshake::FuncOp &funcOp,
   SmallVector<Operation *> operationsToTraverse;
 
   // Insert in both the sets the list of
-  operationsToTraverse.push_back((Operation *)(*branchOps.begin()));
+  operationsToTraverse.push_back(seed.getOperation());
   operationsToRemove.insert(operationsToTraverse.front());
 
   auto startValue = (Value)funcOp.getArguments().back();
@@ -537,7 +545,10 @@ static void captureCFGTopology(handshake::FuncOp funcOp, unsigned &numBlocks,
   numBlocks = blockToIdx.size();
   edges.resize(numBlocks);
 
-  SmallVector<unsigned> returnBlocks;
+  // The restored CFG has the lowering's exit block of several returns as a
+  // block of its own, the successor of every returning block (annotateCFG
+  // records the edges), so one block returns here and the shadow needs no
+  // block the region does not have.
   for (auto [idx, block] : llvm::enumerate(region)) {
     CapturedEdgeInfo &edge = edges[idx];
     Operation *term = block.getTerminator();
@@ -549,18 +560,6 @@ static void captureCFGTopology(handshake::FuncOp funcOp, unsigned &numBlocks,
     } else if (auto br = dyn_cast<cf::BranchOp>(term)) {
       edge.hasSuccessors = true;
       edge.uncondSuccIdx = blockToIdx.lookup(br.getDest());
-    } else if (isa<func::ReturnOp>(term)) {
-      returnBlocks.push_back(idx);
-    }
-  }
-  // The lowering's "fake" exit block of several returns (see
-  // ftd::captureCFGTopology): every returning block branches to it.
-  if (returnBlocks.size() > 1) {
-    unsigned exitIdx = numBlocks++;
-    edges.emplace_back();
-    for (unsigned idx : returnBlocks) {
-      edges[idx].hasSuccessors = true;
-      edges[idx].uncondSuccIdx = exitIdx;
     }
   }
 
