@@ -305,6 +305,35 @@ static ftd::ShadowCFG buildShadowCFG(OpBuilder &builder,
   return shadow;
 }
 
+void ftd::branchExitMergeOperands(handshake::FuncOp funcOp,
+                                  mlir::OpBuilder &builder,
+                                  ArrayRef<unsigned> returnBlocks) {
+  // The exit merges are the merges the lowering made for the function's
+  // results (mergeFuncResults): the end's leading operands, one per result.
+  // Nothing else identifies them: the end-control merge of the memory
+  // interfaces sits in the same block with the same operand count, and a
+  // match on block and shape would wrap it too, or miss a merge of another
+  // shape.
+  auto endOps = funcOp.getOps<handshake::EndOp>();
+  if (endOps.empty())
+    return;
+  handshake::EndOp endOp = *endOps.begin();
+  unsigned numResults = funcOp.getResultTypes().size();
+  for (Value result : endOp.getOperands().take_front(numResults)) {
+    auto mergeOp = result.getDefiningOp<handshake::MergeOp>();
+    if (!mergeOp || mergeOp.getNumOperands() != returnBlocks.size())
+      continue;
+    builder.setInsertionPoint(mergeOp);
+    for (auto [i, operand] : llvm::enumerate(mergeOp.getOperands())) {
+      auto passOp =
+          handshake::BranchOp::create(builder, mergeOp.getLoc(), operand);
+      passOp->setAttr("handshake.bb",
+                      builder.getUI32IntegerAttr(returnBlocks[i]));
+      mergeOp.setOperand(i, passOp.getResult());
+    }
+  }
+}
+
 void ftd::completeFastTokenDelivery(handshake::FuncOp funcOp,
                                     const OriginalCFGInfo &info) {
   mlir::OpBuilder builder(funcOp.getContext());
@@ -318,23 +347,8 @@ void ftd::completeFastTokenDelivery(handshake::FuncOp funcOp,
   // operand goes through a pass-through branch tagged with its own return
   // block, which the suppression then feeds only when that block ran, and the
   // merge sees one token per run.
-  if (info.hasExitBlock) {
-    unsigned exitIdx = info.numBlocks - 1;
-    for (auto mergeOp : funcOp.getOps<handshake::MergeOp>()) {
-      auto bbAttr = mergeOp->getAttrOfType<IntegerAttr>("handshake.bb");
-      if (!bbAttr || bbAttr.getUInt() != exitIdx ||
-          mergeOp.getNumOperands() != info.returnBlocks.size())
-        continue;
-      builder.setInsertionPoint(mergeOp);
-      for (auto [i, operand] : llvm::enumerate(mergeOp.getOperands())) {
-        auto passOp =
-            handshake::BranchOp::create(builder, mergeOp.getLoc(), operand);
-        passOp->setAttr("handshake.bb",
-                        builder.getUI32IntegerAttr(info.returnBlocks[i]));
-        mergeOp.setOperand(i, passOp.getResult());
-      }
-    }
-  }
+  if (info.hasExitBlock)
+    branchExitMergeOperands(funcOp, builder, info.returnBlocks);
 
   // Build the shadow CFG — one struct, everything inside.
   ftd::ShadowCFG shadow = buildShadowCFG(builder, funcOp, info);
