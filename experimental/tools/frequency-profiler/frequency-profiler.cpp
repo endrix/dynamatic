@@ -23,7 +23,9 @@
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
+#include "mlir/IR/PatternMatch.h"
 #include "mlir/Parser/Parser.h"
+#include "mlir/Transforms/RegionUtils.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/SourceMgr.h"
@@ -130,6 +132,16 @@ int main(int argc, char **argv) {
   if (!funcOp) {
     errs() << "Top-level function " << toplevelFunction << " not found!\n";
     return 1;
+  }
+
+  // The profile numbers the blocks by position, as the lowering does, and the
+  // lowering erases the blocks no path reaches before it numbers the rest
+  // (eraseUnreachableBlocksOfFunctions). The profiler erases them too, or
+  // every block after an unreachable one is numbered one higher here than in
+  // the circuit, and the transitions of the profile name the wrong blocks.
+  {
+    mlir::IRRewriter rewriter(&context);
+    (void)mlir::eraseUnreachableBlocks(rewriter, funcOp.getBody());
   }
 
   // Run the std-level simulator
