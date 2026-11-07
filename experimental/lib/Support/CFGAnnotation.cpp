@@ -199,15 +199,15 @@ static cfg::CFGAnnotation getCFGEdges(Region &funcRegion, NameAnalysis &namer) {
 
   // Several returns: the lowering puts the end and the merges of the returned
   // values in a "fake" exit block numbered one past the last block
-  // (flattenAndTerminate), and tags them with it. The annotation has that
-  // block as every returning block's successor, so that restoreCfStructure
-  // rebuilds it as a block of its own; without the edges the returning blocks
-  // were not in the restored CFG at all, and the first branch to one of them
-  // aborted the straight-to-queue pass.
-  if (returnBlocks.size() > 1) {
-    unsigned exitID = funcRegion.getBlocks().size();
+  // (flattenAndTerminate, by getReturnBlocks' rule), and tags them with it.
+  // The annotation has that block as every returning block's successor, so
+  // that restoreCfStructure rebuilds it as a block of its own; without the
+  // edges the returning blocks were not in the restored CFG at all, and the
+  // first branch to one of them aborted the straight-to-queue pass.
+  ReturnBlocks returns = getReturnBlocks(funcRegion);
+  if (returns.hasExitBlock()) {
     for (unsigned blockID : returnBlocks)
-      edgeMap.insert({blockID, cfg::CFGNode(exitID)});
+      edgeMap.insert({blockID, cfg::CFGNode(returns.exitBlockID)});
   }
 
   return edgeMap;
@@ -293,11 +293,11 @@ dynamatic::experimental::cfg::restoreCfStructure(handshake::FuncOp &funcOp,
   CFGAnnotation &edges = *failureOrEdges;
 
   // The original blocks of the CFG: the entry, every source and every
-  // successor of an edge, and every block an operation is tagged with. A block
-  // without an outgoing edge (the return's, or the exit block of several
-  // returns) is only a successor, and a return block need not be the last:
-  // listing the sources and one past the last of them rebuilt such a function
-  // with its return block missing and a phantom block after the last.
+  // successor of an edge. A block without an outgoing edge (the return's, or
+  // the exit block of several returns) is only a successor, and a return
+  // block need not be the last: listing the sources and one past the last of
+  // them rebuilt such a function with its return block missing and a phantom
+  // block after the last.
   std::set<unsigned> blockIndices{0};
   for (auto &[source, edge] : edges) {
     blockIndices.insert(source);
@@ -308,49 +308,37 @@ dynamatic::experimental::cfg::restoreCfStructure(handshake::FuncOp &funcOp,
       blockIndices.insert(edge.getSuccessor());
     }
   }
-  for (Operation &op : funcOp.getOps())
-    if (std::optional<unsigned> bb = getLogicBB(&op))
-      blockIndices.insert(*bb);
   SmallVector<unsigned> blocksList(blockIndices.begin(), blockIndices.end());
 
-  // Maintains the current block under analysis: all the operations in block 0
-  // are maintained in the same location, while the others operations are
-  // inserted in the new blocks
-  Block *currentBlock = &funcOp.getBlocks().front();
+  // The operations of each block, in program order. An operation that is not
+  // annotated (the end, the memory interfaces) stays in the entry block. One
+  // tagged with a block no edge names is an error: a block invented for it
+  // gave the restored CFG a second exit, and a shadow CFG that no block
+  // post-dominates.
+  DenseMap<unsigned, SmallVector<Operation *>> opsByBlock;
+  for (Operation &op : funcOp.getOps()) {
+    std::optional<unsigned> bb = getLogicBB(&op);
+    if (!bb && !cannotBelongToCFG(&op))
+      op.emitError() << "Operation should have basic block attribute.";
+    unsigned opBlock = bb.value_or(0);
+    if (!blockIndices.count(opBlock))
+      return op.emitError() << "the operation is tagged with block " << opBlock
+                            << ", which no edge of the CFG annotation names";
+    opsByBlock[opBlock].push_back(&op);
+  }
 
-  // Keep a mapping between each index and each block. Since the block 0 is kept
-  // as it is, it can be inserted already in the map.
+  // The entry block is kept, with its operations; every other index gets a
+  // new block, in ascending order of index, and its operations moved there.
+  Block *currentBlock = &funcOp.getBlocks().front();
   DenseMap<unsigned, Block *> indexToBlock;
   indexToBlock.insert({0, currentBlock});
-
-  // Temporary store all the operations in the original function
-  SmallVector<Operation *> originalOps;
-  for (auto &op : funcOp.getOps())
-    originalOps.push_back(&op);
-
-  for (auto blockIndex : blocksList) {
-
-    // The entry block is kept; every other index gets a new block, in
-    // ascending order of index.
+  for (unsigned blockIndex : blocksList) {
     if (blockIndex != 0) {
       currentBlock = funcOp.addBlock();
       indexToBlock.insert({blockIndex, currentBlock});
     }
-
-    // For each operation
-    for (auto *op : originalOps) {
-
-      if (!cannotBelongToCFG(op) && !getLogicBB(op))
-        op->emitError() << "Operation should have basic block attribute.";
-
-      // Get block ID of the current operation. If it is not annotated (end
-      // operation/LSQ/memory operation) then use the block 0.
-      unsigned opBlock = getLogicBB(op).value_or(0);
-
-      // Move the current operation at the end of the block
-      if (opBlock == blockIndex)
-        op->moveBefore(currentBlock, currentBlock->end());
-    }
+    for (Operation *op : opsByBlock[blockIndex])
+      op->moveBefore(currentBlock, currentBlock->end());
   }
 
   // Once we are done creating the blocks, we need to insert the terminators
