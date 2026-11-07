@@ -114,6 +114,15 @@ captureAllCFGTopologies(mlir::ModuleOp moduleOp);
 void completeFastTokenDelivery(handshake::FuncOp funcOp,
                                const OriginalCFGInfo &info);
 
+/// Passes each operand of the function's exit merges (the merges the lowering
+/// made for the results of several returns, which feed the end) through a
+/// branch tagged with the operand's return block, `returnBlocks[i]` for
+/// operand i, so that the suppression delivers it only when that block ran.
+/// Every path reaches the exit block, and without the branches the merges
+/// received every return's value.
+void branchExitMergeOperands(handshake::FuncOp funcOp, mlir::OpBuilder &builder,
+                             llvm::ArrayRef<unsigned> returnBlocks);
+
 } // namespace ftd
 } // namespace experimental
 } // namespace dynamatic
