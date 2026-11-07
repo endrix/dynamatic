@@ -39,6 +39,13 @@ llvm_config.with_environment("PATH", config.llvm_tools_dir, append_path=True)
 
 tool_dirs = [config.dynamatic_tools_dir,
              config.mlir_tools_dir, config.llvm_tools_dir]
-tools = ["dynamatic-opt", "exp-frequency-profiler"]
+tools = ["dynamatic-opt"]
 
 llvm_config.add_tool_substitutions(tools, tool_dirs)
+
+# The frequency profiler is a tool of its own; its tests require it, so that
+# the suite still runs on a build of dynamatic-opt alone.
+profiler = lit.util.which("exp-frequency-profiler", config.dynamatic_tools_dir)
+if profiler:
+    config.available_features.add("exp-frequency-profiler")
+    config.substitutions.append(("exp-frequency-profiler", profiler))

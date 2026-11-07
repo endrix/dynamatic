@@ -88,9 +88,15 @@ profile_cf() {
   "$F_PROFILER_BIN" > "$F_PROFILER_INPUTS"
   exit_on_fail "Failed to kernel for profiling" "Ran kernel for profiling"
 
+  # The profile numbers the blocks as the lowering that follows does, and the
+  # fast token delivery lowering rewrites the CFG before numbering it.
+  local PROFILER_FLOW_FLAG=""
+  if [[ $FAST_TOKEN_DELIVERY -ne 0 ]]; then
+    PROFILER_FLOW_FLAG="--ftd"
+  fi
   "$DYNAMATIC_PROFILER_BIN" "$F_CF_DYN_TRANSFORMED_MEM_DEP_MARKED" \
     --top-level-function="$KERNEL_NAME" --input-args-file="$F_PROFILER_INPUTS" \
-    > $F_FREQUENCIES
+    $PROFILER_FLOW_FLAG > $F_FREQUENCIES
   exit_on_fail "Failed to profile cf-level" "Profiled cf-level"
 }
 
