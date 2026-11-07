@@ -214,25 +214,29 @@ OriginalCFGInfo ftd::captureCFGTopology(func::FuncOp funcOp) {
     } else if (auto br = dyn_cast<cf::BranchOp>(term)) {
       edge.hasSuccessors = true;
       edge.uncondSuccIdx = blockIdx.lookup(br.getDest());
-    } else if (isa<func::ReturnOp>(term)) {
-      info.returnBlocks.push_back(idx);
     }
   }
 
   // A function of several returns gets, from the lowering, a "fake" exit
   // block numbered one past its last block, holding the end and the merges
-  // of the returned values (flattenAndTerminate). Those ops read their
-  // block index like every other, so the shadow has that block too: every
-  // returning block branches to it. Without it the first consumer tagged with
-  // it asked the shadow for a block it did not have and aborted.
-  if (info.returnBlocks.size() > 1) {
-    unsigned exitIdx = info.numBlocks++;
+  // of the returned values (flattenAndTerminate, by getReturnBlocks' rule).
+  // Those ops read their block index like every other, so the shadow has that
+  // block too: every returning block branches to it. Without it the first
+  // consumer tagged with it asked the shadow for a block it did not have and
+  // aborted.
+  ReturnBlocks returns = getReturnBlocks(region);
+  info.returnBlocks = returns.blocks;
+  info.numResults = funcOp.getNumResults();
+  if (returns.hasExitBlock()) {
+    assert(returns.exitBlockID == info.numBlocks &&
+           "the exit block is the one past the last block");
+    info.numBlocks++;
     info.blockEdges.emplace_back();
     info.hasExitBlock = true;
     for (unsigned idx : info.returnBlocks) {
       BlockEdgeInfo &edge = info.blockEdges[idx];
       edge.hasSuccessors = true;
-      edge.uncondSuccIdx = exitIdx;
+      edge.uncondSuccIdx = returns.exitBlockID;
     }
   }
   return info;
@@ -305,24 +309,37 @@ static ftd::ShadowCFG buildShadowCFG(OpBuilder &builder,
   return shadow;
 }
 
-void ftd::branchExitMergeOperands(handshake::FuncOp funcOp,
-                                  mlir::OpBuilder &builder,
-                                  ArrayRef<unsigned> returnBlocks) {
+LogicalResult ftd::branchExitMergeOperands(handshake::FuncOp funcOp,
+                                           mlir::OpBuilder &builder,
+                                           unsigned numResults,
+                                           ArrayRef<unsigned> returnBlocks) {
   // The exit merges are the merges the lowering made for the function's
-  // results (mergeFuncResults): the end's leading operands, one per result.
-  // Nothing else identifies them: the end-control merge of the memory
-  // interfaces sits in the same block with the same operand count, and a
-  // match on block and shape would wrap it too, or miss a merge of another
-  // shape.
+  // results (mergeFuncResults): the end's leading operands, one per result of
+  // the original function. Nothing else identifies them: the end-control
+  // merge of the memory interfaces sits in the same block with the same
+  // operand count, and a match on block and shape would wrap it too, or miss
+  // a merge of another shape. The count is the original function's, not the
+  // lowered signature's, whose results are padded with the memory and start
+  // controls (and differently by another lowering built on the pattern).
   auto endOps = funcOp.getOps<handshake::EndOp>();
   if (endOps.empty())
-    return;
+    return success();
   handshake::EndOp endOp = *endOps.begin();
-  unsigned numResults = funcOp.getResultTypes().size();
+  if (endOp.getNumOperands() < numResults)
+    return endOp.emitError() << "the end has " << endOp.getNumOperands()
+                             << " operands, fewer than the function's "
+                             << numResults << " results";
   for (Value result : endOp.getOperands().take_front(numResults)) {
     auto mergeOp = result.getDefiningOp<handshake::MergeOp>();
-    if (!mergeOp || mergeOp.getNumOperands() != returnBlocks.size())
-      continue;
+    if (!mergeOp || mergeOp.getNumOperands() != returnBlocks.size()) {
+      Operation *producer = result.getDefiningOp();
+      InFlightDiagnostic diag =
+          producer ? producer->emitError() : endOp.emitError();
+      return diag << "a result of a function of " << returnBlocks.size()
+                  << " returns must be a merge of one operand per return, "
+                     "which the fast token delivery steers by return block; "
+                     "left as it is, every return's value would be delivered";
+    }
     builder.setInsertionPoint(mergeOp);
     for (auto [i, operand] : llvm::enumerate(mergeOp.getOperands())) {
       auto passOp =
@@ -332,14 +349,15 @@ void ftd::branchExitMergeOperands(handshake::FuncOp funcOp,
       mergeOp.setOperand(i, passOp.getResult());
     }
   }
+  return success();
 }
 
-void ftd::completeFastTokenDelivery(handshake::FuncOp funcOp,
-                                    const OriginalCFGInfo &info) {
+LogicalResult ftd::completeFastTokenDelivery(handshake::FuncOp funcOp,
+                                             const OriginalCFGInfo &info) {
   mlir::OpBuilder builder(funcOp.getContext());
 
   if (info.numBlocks <= 1)
-    return;
+    return success();
 
   // The merges of the fake exit block take one value from each returning
   // block, and every path reaches that block, so the suppression would
@@ -347,8 +365,10 @@ void ftd::completeFastTokenDelivery(handshake::FuncOp funcOp,
   // operand goes through a pass-through branch tagged with its own return
   // block, which the suppression then feeds only when that block ran, and the
   // merge sees one token per run.
-  if (info.hasExitBlock)
-    branchExitMergeOperands(funcOp, builder, info.returnBlocks);
+  if (info.hasExitBlock &&
+      failed(branchExitMergeOperands(funcOp, builder, info.numResults,
+                                     info.returnBlocks)))
+    return failure();
 
   // Build the shadow CFG — one struct, everything inside.
   ftd::ShadowCFG shadow = buildShadowCFG(builder, funcOp, info);
@@ -392,6 +412,7 @@ void ftd::completeFastTokenDelivery(handshake::FuncOp funcOp,
   ftd::finalizeCondPlaceholders(funcOp);
 
   shadow.destroy();
+  return success();
 }
 
 /// The GSA analysis tells the inputs of a phi apart by the predecessor which
@@ -528,7 +549,8 @@ struct FtdCfToHandshakePass
       auto topoIt = cfgTopologies.find(funcOp.getName());
       if (topoIt == cfgTopologies.end())
         continue;
-      ftd::completeFastTokenDelivery(funcOp, topoIt->second);
+      if (failed(ftd::completeFastTokenDelivery(funcOp, topoIt->second)))
+        return signalPassFailure();
     }
   }
 };

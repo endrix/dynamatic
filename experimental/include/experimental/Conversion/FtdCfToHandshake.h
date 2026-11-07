@@ -93,6 +93,10 @@ struct OriginalCFGInfo {
   /// "fake" exit block, which holds the end and the merges of the returned
   /// values and which every returning block branches to.
   bool hasExitBlock = false;
+  /// The number of results of the original function: the end's leading
+  /// operands, which the exit merges feed. Read here rather than from the
+  /// lowered signature, whose results a lowering pads as it likes.
+  unsigned numResults = 0;
 };
 
 /// The CFG topology of one function, read before the conversion erases its
@@ -110,18 +114,24 @@ captureAllCFGTopologies(mlir::ModuleOp moduleOp);
 /// condition placeholder, the placeholders resolved, regeneration and
 /// suppression added, the placeholders finalized. A function of one block
 /// needs none of it and is left as it is. Exposed so that another lowering
-/// built on the pattern finishes the same way.
-void completeFastTokenDelivery(handshake::FuncOp funcOp,
-                               const OriginalCFGInfo &info);
+/// built on the pattern finishes the same way. Fails, with an error on the
+/// operation, when the function's exit merges are not the shape the lowering
+/// makes (branchExitMergeOperands).
+mlir::LogicalResult completeFastTokenDelivery(handshake::FuncOp funcOp,
+                                              const OriginalCFGInfo &info);
 
 /// Passes each operand of the function's exit merges (the merges the lowering
-/// made for the results of several returns, which feed the end) through a
-/// branch tagged with the operand's return block, `returnBlocks[i]` for
-/// operand i, so that the suppression delivers it only when that block ran.
-/// Every path reaches the exit block, and without the branches the merges
-/// received every return's value.
-void branchExitMergeOperands(handshake::FuncOp funcOp, mlir::OpBuilder &builder,
-                             llvm::ArrayRef<unsigned> returnBlocks);
+/// made for the results of several returns, which feed the end: the end's
+/// first `numResults` operands) through a branch tagged with the operand's
+/// return block, `returnBlocks[i]` for operand i, so that the suppression
+/// delivers it only when that block ran. Every path reaches the exit block,
+/// and without the branches the merges received every return's value. An end
+/// result that is not a merge of one operand per return is an error: left as
+/// it is, the function would return one value per return again.
+mlir::LogicalResult
+branchExitMergeOperands(handshake::FuncOp funcOp, mlir::OpBuilder &builder,
+                        unsigned numResults,
+                        llvm::ArrayRef<unsigned> returnBlocks);
 
 } // namespace ftd
 } // namespace experimental
