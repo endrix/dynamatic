@@ -15,6 +15,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "Simulator.h"
+#include "experimental/Support/FtdSupport.h"
 #include "experimental/Support/StdProfiler.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlow.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -23,7 +24,9 @@
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
+#include "mlir/IR/PatternMatch.h"
 #include "mlir/Parser/Parser.h"
+#include "mlir/Transforms/RegionUtils.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/SourceMgr.h"
@@ -62,6 +65,14 @@ static cl::opt<std::string>
     toplevelFunction("top-level-function", cl::Optional,
                      cl::desc("The top-level function to execute"),
                      cl::init("main"), cl::cat(mainCategory));
+
+static cl::opt<bool>
+    ftdFlow("ftd", cl::Optional,
+            cl::desc("Number the blocks as the fast token delivery lowering "
+                     "(--ftd-lower-cf-to-handshake) does: a conditional "
+                     "branch reaching one block on both edges with different "
+                     "operands gets a block after its own for its true edge"),
+            cl::init(false), cl::cat(mainCategory));
 
 /// Reads argument from a file instead of from the command line.
 static SmallVector<std::string> fetchArgsFromFile() {
@@ -131,6 +142,20 @@ int main(int argc, char **argv) {
     errs() << "Top-level function " << toplevelFunction << " not found!\n";
     return 1;
   }
+
+  // The profile numbers the blocks by position, as the lowering does, and the
+  // lowering rewrites the CFG before it numbers the rest: it erases the blocks
+  // no path reaches (eraseUnreachableBlocksOfFunctions), and the fast token
+  // delivery lowering then splits the edges sending two values, which adds a
+  // block after the branching one. The profiler does the same, or every block
+  // after an erased or added one is numbered differently here than in the
+  // circuit, and the transitions of the profile name the wrong blocks.
+  {
+    mlir::IRRewriter rewriter(&context);
+    (void)mlir::eraseUnreachableBlocks(rewriter, funcOp.getBody());
+  }
+  if (ftdFlow)
+    ftd::splitEdgesSendingTwoValues(funcOp.getBody());
 
   // Run the std-level simulator
   dynamatic::experimental::StdProfiler prof(funcOp);

@@ -213,6 +213,17 @@ IntegerAttr getBBIndexAttr(MLIRContext *ctx, unsigned bbIdx);
 /// exists. Tagged with FTD_COND_VAR and FTD_OP_TO_SKIP so that FTD skips it.
 Value getOrCreateCondPlaceholder(Block *condBlock, OpBuilder &builder);
 
+/// The GSA analysis tells the inputs of a phi apart by the predecessor which
+/// sends them, and a path by its blocks. A conditional branch reaching one
+/// block on both of its edges, with different operands, sends two values from
+/// one predecessor along two paths of the same blocks. Its true edge is routed
+/// through a new block, placed right after its own, which forwards the true
+/// operands: each value then has a predecessor of its own. The fast token
+/// delivery lowering does this to every function before it numbers the
+/// blocks, and the frequency profiler of that flow does the same, so that the
+/// profile's block numbers are the circuit's.
+void splitEdgesSendingTwoValues(Region &region);
+
 } // namespace ftd
 } // namespace experimental
 } // namespace dynamatic

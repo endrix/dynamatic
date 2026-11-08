@@ -9,6 +9,7 @@ set(DYNAMATIC_TEST_DEPENDS
   FileCheck count not
   split-file
   dynamatic-opt
+  exp-frequency-profiler
   )
 
 add_lit_testsuite(check-dynamatic-experimental "Running the Dynamatic regression tests for experimental work"

@@ -24,6 +24,27 @@ using namespace mlir;
 using namespace dynamatic;
 using namespace dynamatic::experimental;
 
+void ftd::splitEdgesSendingTwoValues(Region &region) {
+  SmallVector<cf::CondBranchOp> condBranches;
+  region.walk([&](cf::CondBranchOp condBr) {
+    if (condBr.getTrueDest() == condBr.getFalseDest() &&
+        !llvm::equal(condBr.getTrueOperands(), condBr.getFalseOperands()))
+      condBranches.push_back(condBr);
+  });
+
+  for (cf::CondBranchOp condBr : condBranches) {
+    Block *pred = condBr->getBlock();
+    Block *forward = new Block();
+    pred->getParent()->getBlocks().insertAfter(pred->getIterator(), forward);
+    OpBuilder builder(condBr->getContext());
+    builder.setInsertionPointToEnd(forward);
+    cf::BranchOp::create(builder, condBr.getLoc(), condBr.getTrueDest(),
+                         condBr.getTrueOperands());
+    condBr.getTrueDestOperandsMutable().clear();
+    condBr->setSuccessor(forward, 0);
+  }
+}
+
 // ===--------------------------------------------------------------------=== //
 // BlockIndexing
 // ===--------------------------------------------------------------------=== //
