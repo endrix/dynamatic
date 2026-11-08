@@ -329,6 +329,9 @@ LogicalResult ftd::branchExitMergeOperands(handshake::FuncOp funcOp,
     return endOp.emitError() << "the end has " << endOp.getNumOperands()
                              << " operands, fewer than the function's "
                              << numResults << " results";
+  // A merge two results share is branched once; a second pass would chain
+  // another branch behind each of its operands.
+  llvm::SmallPtrSet<Operation *, 4> branched;
   for (Value result : endOp.getOperands().take_front(numResults)) {
     auto mergeOp = result.getDefiningOp<handshake::MergeOp>();
     if (!mergeOp || mergeOp.getNumOperands() != returnBlocks.size()) {
@@ -340,6 +343,8 @@ LogicalResult ftd::branchExitMergeOperands(handshake::FuncOp funcOp,
                      "which the fast token delivery steers by return block; "
                      "left as it is, every return's value would be delivered";
     }
+    if (!branched.insert(mergeOp).second)
+      continue;
     builder.setInsertionPoint(mergeOp);
     for (auto [i, operand] : llvm::enumerate(mergeOp.getOperands())) {
       auto passOp =

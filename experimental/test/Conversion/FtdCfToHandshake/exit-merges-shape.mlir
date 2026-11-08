@@ -11,15 +11,33 @@
 // return block; the end-control merge after the results is left as it is.
 
 // CHECK-LABEL:   handshake.func @twoReturns(
-// CHECK:           %[[X:.*]] = br %{{.*}} {handshake.bb = 1 : ui32} : <i32>
-// CHECK:           %[[Y:.*]] = br %{{.*}} {handshake.bb = 2 : ui32} : <i32>
+// CHECK-SAME:      %[[A:[a-z0-9_]+]]: !handshake.channel<i32>, %[[B:[a-z0-9_]+]]: !handshake.channel<i32>, %[[S:[a-z0-9_]+]]: !handshake.control<>
+// CHECK:           %[[X:.*]] = br %[[A]] {handshake.bb = 1 : ui32} : <i32>
+// CHECK:           %[[Y:.*]] = br %[[B]] {handshake.bb = 2 : ui32} : <i32>
 // CHECK:           %[[R:.*]] = merge %[[X]], %[[Y]] {handshake.bb = 3 : ui32} : <i32>
 // CHECK-NOT:       br
-// CHECK:           end {handshake.bb = 3 : ui32} %[[R]], %{{.*}} : <i32>, <>
+// CHECK:           %[[C:.*]] = merge %[[S]], %[[S]] {handshake.bb = 3 : ui32} : <>
+// CHECK:           end {handshake.bb = 3 : ui32} %[[R]], %[[C]] : <i32>, <>
 handshake.func @twoReturns(%a: !handshake.channel<i32>, %b: !handshake.channel<i32>, %start: !handshake.control<>) -> (!handshake.channel<i32>, !handshake.control<>) attributes {test.ftd_num_results = 1 : i32, test.ftd_return_blocks = array<i32: 1, 2>} {
   %r = merge %a, %b {handshake.bb = 3 : ui32} : <i32>
   %c = merge %start, %start {handshake.bb = 3 : ui32} : <>
   end {handshake.bb = 3 : ui32} %r, %c : <i32>, <>
+}
+
+// -----
+
+// Two results that share one merge: its operands are branched once.
+
+// CHECK-LABEL:   handshake.func @sharedMerge(
+// CHECK-SAME:      %[[A:[a-z0-9_]+]]: !handshake.channel<i32>, %[[B:[a-z0-9_]+]]: !handshake.channel<i32>
+// CHECK:           %[[X:.*]] = br %[[A]] {handshake.bb = 1 : ui32} : <i32>
+// CHECK:           %[[Y:.*]] = br %[[B]] {handshake.bb = 2 : ui32} : <i32>
+// CHECK:           %[[R:.*]] = merge %[[X]], %[[Y]] {handshake.bb = 3 : ui32} : <i32>
+// CHECK-NOT:       br
+// CHECK:           end {handshake.bb = 3 : ui32} %[[R]], %[[R]] : <i32>, <i32>
+handshake.func @sharedMerge(%a: !handshake.channel<i32>, %b: !handshake.channel<i32>, %start: !handshake.control<>) -> (!handshake.channel<i32>, !handshake.channel<i32>) attributes {test.ftd_num_results = 2 : i32, test.ftd_return_blocks = array<i32: 1, 2>} {
+  %r = merge %a, %b {handshake.bb = 3 : ui32} : <i32>
+  end {handshake.bb = 3 : ui32} %r, %r : <i32>, <i32>
 }
 
 // -----
