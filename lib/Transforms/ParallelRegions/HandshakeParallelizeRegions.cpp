@@ -396,10 +396,63 @@ LogicalResult HandshakeParallelizeRegionsPass::parallelize(
     }
   }
 
+  // Whether the back edges of a mux or merge of region `from` hand it its own
+  // value back. Followed through wires (branches, forks, buffers), each must
+  // lead to the mux again, or to another mux or merge of the region (an inner
+  // loop's, the next block's) that carries the value in turn: every operand
+  // of that one must lead back the same way. Then whatever leaves through
+  // the mux is its loop-entry operand. A back edge that leads anywhere else
+  // brings a value the loop made, and what leaves is the last of those.
+  auto carriesItself = [&](Operation *mux, unsigned from) -> LogicalResult {
+    auto inRegion = [&](Operation *op) {
+      Place p = placeOf(getLogicBB(op), places);
+      return p.kind == Place::REGION && p.region == from;
+    };
+    auto throughWires = [&](Value val) {
+      while (Operation *def = val.getDefiningOp()) {
+        if (!inRegion(def))
+          break;
+        if (auto condBr = dyn_cast<ConditionalBranchOp>(def))
+          val = condBr.getDataOperand();
+        else if (auto br = dyn_cast<BranchOp>(def))
+          val = br.getOperand();
+        else if (auto fork = dyn_cast<ForkOp>(def))
+          val = fork.getOperand();
+        else if (auto buf = dyn_cast<BufferOp>(def))
+          val = buf.getOperand();
+        else
+          break;
+      }
+      return val;
+    };
+    SmallPtrSet<Operation *, 8> carriers = {mux};
+    SmallVector<Value> pending;
+    for (Value data : cast<MergeLikeOpInterface>(mux).getDataOperands())
+      if (isBackedge(data, mux))
+        pending.push_back(data);
+    while (!pending.empty()) {
+      Operation *src = throughWires(pending.pop_back_val()).getDefiningOp();
+      if (src && carriers.contains(src))
+        continue;
+      if (src && isa<MuxOp, MergeOp>(src) && inRegion(src)) {
+        carriers.insert(src);
+        llvm::append_range(pending,
+                           cast<MergeLikeOpInterface>(src).getDataOperands());
+        continue;
+      }
+      return mux->emitError() << "cannot run the regions of '" << REGIONS_ATTR
+                              << "' in parallel: region " << from
+                              << "'s loop updates this value and region "
+                              << from + 1 << " uses it";
+    }
+    return success();
+  };
+
   // Follow a value that leaves region `from` back to where it came in. Only
-  // wires (branches, forks, buffers) and loop-carried muxes may lie on the
-  // way; anything else computes the value inside the region, which makes it
-  // a live-out the next region genuinely waits for.
+  // wires (branches, forks, buffers) and loop-carried muxes that carry it
+  // unchanged may lie on the way; anything else computes the value inside
+  // the region, which makes it a live-out the next region genuinely waits
+  // for.
   auto resolve = [&](Value val, unsigned from, Source &src) -> LogicalResult {
     Value cur = val;
     while (true) {
@@ -454,6 +507,8 @@ LogicalResult HandshakeParallelizeRegionsPass::parallelize(
         }
         if (!init)
           return def->emitError() << "merge has no loop entry operand";
+        if (failed(carriesItself(def, from)))
+          return failure();
         cur = init;
         continue;
       }

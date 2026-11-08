@@ -109,12 +109,16 @@ For each group:
   meet in a `join` in the successor block, which replaces the serial input of
   the successor's control merge.
 - A value a later region received through an earlier region's exit branch is
-  followed back through that region (branches, forks, buffers and
-  loop-carried muxes are transparent) to where it came in. A value the entry
-  block provided is used from the entry directly; a constant the lowering
-  materialized inside the earlier region is re-made in the entry block,
-  driven by the function's start. Anything else is a live-out and the group
-  is refused.
+  followed back through that region to where it came in. Branches, forks
+  and buffers are transparent, and so is a mux or merge with one loop-entry
+  operand whose back edges hand it its own value: each leads, through those
+  wires, back to the mux, or to another mux or merge of the region (an inner
+  loop's) whose operands all lead back the same way. A mux whose back edge
+  brings a value the loop computed holds that value when the region exits,
+  not its loop-entry operand. A value the entry block provided is used from
+  the entry directly; a constant the lowering materialized inside the
+  earlier region is re-made in the entry block, driven by the function's
+  start. Anything else is a live-out and the group is refused.
 - The wires that only carried those values out of a region -- the exit
   branch, and behind it the constants, forks and muxes that threaded them
   through the loop -- are erased.
@@ -193,4 +197,9 @@ what that block costs.
   read ports.
 - Regions with more than one exit, groups inside an enclosing loop, and
   regions that are not loop nests.
-- The flow: neither pass is in `compile.sh` yet.
+- Declining a group. A group the transformation refuses fails the pass,
+  so a flow that runs it must not hand it one it would refuse. The analysis
+  keeps the values a region hands on to the last region, but it cannot see
+  edges a later lowering makes: a value of the last region that a block
+  after the successor reads, handed over directly rather than through the
+  successor, is refused.
