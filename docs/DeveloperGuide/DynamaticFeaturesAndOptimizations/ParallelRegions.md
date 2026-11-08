@@ -27,11 +27,15 @@ the next loop's constants, a lookahead's first reads), so every unit of
 the chain holds a loop. Two units are dependent when:
 
 - a value one computes reaches the other, through the branch into its
-  first block or by direct use (dominance allows it). A constant does not
-  count, nor does a block argument the unit only carries around unchanged,
-  back to a free origin: the lowering re-makes constants and the later
-  pass re-sources such values from the entry. A value handed to a block
-  argument nothing reads carries nothing;
+  first block or by direct use (dominance allows it), or through a block
+  argument of a unit in between that carries it on. A constant does not
+  count, nor does a block argument the unit only carries around unchanged
+  from one origin that is itself free: the lowering re-makes constants and
+  the later pass re-sources such values from the entry. A block argument
+  two different values reach (a loop-carried value the loop updates, a
+  flag it sets to a constant on every iteration) holds whatever the unit's
+  control flow chose last, and counts. A value handed to a block argument
+  nothing reads carries nothing;
 - a recorded memory dependence (`handshake.deps`) connects an access of
   one to an access of the other;
 - they touch a common memory (function arguments and allocations are
@@ -54,11 +58,18 @@ Regions are made within a range of consecutive units: everything before
 the range is done when it starts, so only dependences inside the range
 order anything. Within a range, dependent units merge into one region with
 everything between them, and what is left is a run of regions no two of
-which share a dependence. A unit that depends only on the last region
-joins it. One that depends on an earlier region ends the range: the range
-becomes a group when it holds two regions or more; when it holds one, a
-new range starts right after the last unit the newcomer depends on, so
-that the tail can still pair with it.
+which share a dependence. A unit whose value is read after the range, by a
+later unit, by the chain's successor or by any block after it, merges with
+everything up to the end of the range: the lowering threads that value
+through every block between the unit and its reader, and only the last
+region of a group may hand a value to what comes after the group (the
+transformation would otherwise take the value from the entry block, where
+it is not computed yet). A unit that depends only on the last region joins
+it. One that depends on an earlier region, which is then a dependence
+through memory, ends the range: the range becomes a group when it holds
+two regions or more; when it holds one, a new range starts right after the
+last unit the newcomer depends on, so that the tail can still pair with
+it.
 
 Each group becomes one entry of the attribute, in the block ids the
 lowering will assign (position in the function), and a remark names it.
