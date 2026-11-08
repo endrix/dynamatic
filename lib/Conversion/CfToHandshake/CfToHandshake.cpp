@@ -339,8 +339,7 @@ LowerFuncToHandshake::deriveNewAttributes(func::FuncOp funcOp) const {
 
 void LowerFuncToHandshake::setupEntryBlockConversion(
     Block *entryBlock, unsigned numMemories, PatternRewriter &rewriter,
-    const TypeConverter *typeConv,
-    TypeConverter::SignatureConversion &conv) {
+    const TypeConverter *typeConv, TypeConverter::SignatureConversion &conv) {
   // All func-level function arguments map one-to-one to the handshake-level
   // function arguments and get channelified in the process.
   //
@@ -1016,10 +1015,13 @@ LogicalResult LowerFuncToHandshake::verifyAndCreateMemInterfaces(
         handshake::MergeOp::create(rewriter, lastRetOp.getLoc(), controls);
     ctrlEnd = mergeOp.getResult();
 
-    // The merge goes into an extra "end block" after all others, this will be
-    // where the function end terminator will be located as well
+    // The merge belongs to the extra "end block" after all others, where the
+    // function's end goes as well; it sits in the last return's block for
+    // want of a better place, and the block numbering (idBasicBlocks) leaves
+    // this tag, the one index no region block has, alone.
     mergeOp->setAttr(BB_ATTR_NAME,
-                     rewriter.getUI32IntegerAttr(funcOp.getBlocks().size()));
+                     rewriter.getUI32IntegerAttr(
+                         getReturnBlocks(funcOp.getBody()).exitBlockID));
   }
 
   // Create a mapping between each block and its control value in the right
@@ -1084,13 +1086,23 @@ LogicalResult LowerFuncToHandshake::verifyAndCreateMemInterfaces(
 
 void LowerFuncToHandshake::idBasicBlocks(
     handshake::FuncOp funcOp, ConversionPatternRewriter &rewriter) const {
+  size_t numBlocks = funcOp.getBlocks().size();
   for (auto [blockID, block] : llvm::enumerate(funcOp)) {
     for (Operation &op : block) {
-      if (!isa<handshake::MemoryOpInterface>(op)) {
-        // Memory interfaces do not naturally belong to any block, so they do
-        // not get an attribute
-        op.setAttr(BB_ATTR_NAME, rewriter.getUI32IntegerAttr(blockID));
-      }
+      // Memory interfaces do not naturally belong to any block, so they do
+      // not get an attribute
+      if (isa<handshake::MemoryOpInterface>(op))
+        continue;
+      // An operation already tagged with the index past the last block is in
+      // the "end block" of several returns, which no region block is: the
+      // memory interfaces' end-control merge (verifyAndCreateMemInterfaces),
+      // inserted in the last return's block for want of a better place. It
+      // keeps its tag; numbering it with the block it sits in put it in a
+      // block it is not in. Only that one index is left alone: any other tag
+      // is from before the lowering and is renumbered like the rest.
+      if (std::optional<unsigned> bb = getLogicBB(&op); bb && *bb == numBlocks)
+        continue;
+      op.setAttr(BB_ATTR_NAME, rewriter.getUI32IntegerAttr(blockID));
     }
   }
 }
@@ -1100,22 +1112,6 @@ LogicalResult LowerFuncToHandshake::flattenAndTerminate(
     const ArgReplacements &argReplacements) const {
   // Erase all cf-level terminators, accumulating operands to func-level returns
   // as we go
-  SmallVector<SmallVector<Value>> returnsOperands;
-  DenseSet<Operation *> erasedTerminators;
-  size_t singleReturnBlockID = 0;
-  for (auto [blockID, block] : llvm::enumerate(funcOp)) {
-    Operation *termOp = &block.back();
-    if (auto retOp = dyn_cast<func::ReturnOp>(termOp)) {
-      auto &retOperands = returnsOperands.emplace_back();
-      if (failed(rewriter.getRemappedValues(retOp->getOperands(), retOperands)))
-        return failure();
-      singleReturnBlockID = blockID;
-    }
-    erasedTerminators.insert(termOp);
-    rewriter.eraseOp(termOp);
-  }
-  assert(!returnsOperands.empty() && "function must have at least one return");
-
   // When identifying basic blocks, the end node is either put in the same
   // block as the function's single return statement or, in the case of
   // multiple return statements, it is put in a "fake block" along with the
@@ -1123,10 +1119,23 @@ LogicalResult LowerFuncToHandshake::flattenAndTerminate(
   // that holds it, which need not be the last block of the region: tagging
   // the end with the last block put it in a block the return's values never
   // reach, and a lowering that reads the tag (fast token delivery's
-  // suppression) then steered them wrong.
-  size_t exitBlockID = funcOp.getBlocks().size();
-  if (returnsOperands.size() == 1)
-    exitBlockID = singleReturnBlockID;
+  // suppression) then steered them wrong. The rule is getReturnBlocks', which
+  // the readers of the tag share.
+  unsigned exitBlockID = getReturnBlocks(funcOp.getBody()).exitBlockID;
+
+  SmallVector<SmallVector<Value>> returnsOperands;
+  DenseSet<Operation *> erasedTerminators;
+  for (Block &block : funcOp) {
+    Operation *termOp = &block.back();
+    if (auto retOp = dyn_cast<func::ReturnOp>(termOp)) {
+      auto &retOperands = returnsOperands.emplace_back();
+      if (failed(rewriter.getRemappedValues(retOp->getOperands(), retOperands)))
+        return failure();
+    }
+    erasedTerminators.insert(termOp);
+    rewriter.eraseOp(termOp);
+  }
+  assert(!returnsOperands.empty() && "function must have at least one return");
 
   // Inline all non-entry blocks into the entry block, erasing them as we go
   Operation *lastOp = &funcOp.front().back();
@@ -1482,8 +1491,8 @@ ConvertCalls::matchAndRewrite(func::CallOp callOp, OpAdaptor adaptor,
     // role-named arguments as its argument names; a plain function does not,
     // and is refused here as it is above, whatever the order of the two.
     bool placeholder = false;
-    if (auto argNames = calledHandshakeFuncOp->getAttrOfType<ArrayAttr>(
-            "argNames")) {
+    if (auto argNames =
+            calledHandshakeFuncOp->getAttrOfType<ArrayAttr>("argNames")) {
       for (Attribute attr : argNames) {
         StringRef name = cast<StringAttr>(attr).getValue();
         if (name.starts_with("input_") || name.starts_with("output_") ||

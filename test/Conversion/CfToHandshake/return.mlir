@@ -58,7 +58,7 @@ func.func @multipleReturns(%arg0 : i1) -> i32 {
 // CHECK:           %[[VAL_12:.*]], %[[VAL_13:.*]] = cond_br %[[VAL_0]], %[[VAL_7]] {handshake.bb = 0 : ui32} : <i1>, <i32>
 // CHECK:           %[[VAL_14:.*]] = merge %[[VAL_8]] {handshake.bb = 1 : ui32} : <i32>
 // CHECK:           %[[VAL_15:.*]], %[[VAL_16:.*]] = control_merge [%[[VAL_10]]]  {handshake.bb = 1 : ui32} : [<>] to <>, <i1>
-// CHECK:           %[[VAL_17:.*]] = merge %[[VAL_15]], %[[VAL_18:.*]] {handshake.bb = 2 : ui32} : <>
+// CHECK:           %[[VAL_17:.*]] = merge %[[VAL_15]], %[[VAL_18:.*]] {handshake.bb = 3 : ui32} : <>
 // CHECK:           %[[VAL_19:.*]] = merge %[[VAL_13]] {handshake.bb = 2 : ui32} : <i32>
 // CHECK:           %[[VAL_18]], %[[VAL_20:.*]] = control_merge [%[[VAL_11]]]  {handshake.bb = 2 : ui32} : [<>] to <>, <i1>
 // CHECK:           %[[VAL_21:.*]] = merge %[[VAL_14]], %[[VAL_19]] {handshake.bb = 3 : ui32} : <i32>

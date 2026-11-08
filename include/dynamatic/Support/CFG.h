@@ -66,6 +66,26 @@ bool inheritBBFromValue(Value val, Operation *dstOp);
 /// Thin wrapper around an attribute access to the "bb" attribute.
 std::optional<unsigned> getLogicBB(Operation *op);
 
+/// The returns of a function still in CFG form, and the block the lowering
+/// gives their results: the return's own block for one return and, for
+/// several, an "exit block" numbered one past the last block of the region,
+/// which no region block is, where the end and the merges of the returned
+/// values go and which every returning block is taken to branch to. Every
+/// reader of the exit block (the lowering, the fast token delivery's shadow
+/// CFG, the CFG annotation) derives it from here, so that they agree.
+struct ReturnBlocks {
+  /// The blocks ending in a return, by index in region order.
+  SmallVector<unsigned> blocks;
+  /// The block the end and the function's results are tagged with.
+  unsigned exitBlockID = 0;
+  /// Whether the exit block is the extra block of several returns.
+  bool hasExitBlock() const { return blocks.size() > 1; }
+};
+
+/// Reads the returns of a region whose blocks end in CFG terminators (a block
+/// ending in a return-like operation is a returning block).
+ReturnBlocks getReturnBlocks(Region &region);
+
 /// A pair of BB IDs to represent the blocks that a channel connects. In case of
 /// an inner channel, these blocks may be identical.
 struct BBEndpoints {

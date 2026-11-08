@@ -12,6 +12,7 @@
 
 #include "dynamatic/Support/CFG.h"
 #include "dynamatic/Dialect/Handshake/HandshakeOps.h"
+#include "mlir/Interfaces/ControlFlowInterfaces.h"
 #include "mlir/Support/LogicalResult.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/TypeSwitch.h"
@@ -57,6 +58,21 @@ std::optional<unsigned> dynamatic::getLogicBB(Operation *op) {
   if (auto bb = op->getAttrOfType<mlir::IntegerAttr>(BB_ATTR_NAME))
     return bb.getUInt();
   return {};
+}
+
+dynamatic::ReturnBlocks dynamatic::getReturnBlocks(Region &region) {
+  ReturnBlocks returns;
+  for (auto [idx, block] : llvm::enumerate(region)) {
+    if (block.empty())
+      continue;
+    if (block.back().hasTrait<OpTrait::ReturnLike>())
+      returns.blocks.push_back(idx);
+  }
+  if (returns.blocks.size() == 1)
+    returns.exitBlockID = returns.blocks.front();
+  else
+    returns.exitBlockID = region.getBlocks().size();
+  return returns;
 }
 
 /// Determines whether all operations are in the same basic block. If any

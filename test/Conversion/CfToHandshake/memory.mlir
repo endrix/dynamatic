@@ -98,7 +98,7 @@ func.func @forwardLoadToBB(%arg0 : i1, %arg1 : index, %arg2: memref<4xi32>) {
 // CHECK:           %[[VAL_8]], %[[VAL_30:.*]] = load{{\[}}%[[VAL_28]]] %[[VAL_6]] {handshake.bb = 1 : ui32} : <i32>, <i32>
 // CHECK:           %[[VAL_16]], %[[VAL_17]] = store{{\[}}%[[VAL_28]]] %[[VAL_30]] {handshake.bb = 1 : ui32} : <i32>, <i32>
 // CHECK:           %[[VAL_9]] = constant %[[VAL_31:.*]] {handshake.bb = 2 : ui32, value = 1 : i32} : <>, <i32>
-// CHECK:           %[[VAL_12]] = merge %[[VAL_27]], %[[VAL_31]] {handshake.bb = 2 : ui32} : <>
+// CHECK:           %[[VAL_12]] = merge %[[VAL_27]], %[[VAL_31]] {handshake.bb = 3 : ui32} : <>
 // CHECK:           %[[VAL_32:.*]] = merge %[[VAL_26]] {handshake.bb = 2 : ui32} : <i32>
 // CHECK:           %[[VAL_31]], %[[VAL_33:.*]] = control_merge [%[[VAL_24]]]  {handshake.bb = 2 : ui32} : [<>] to <>, <i1>
 // CHECK:           %[[VAL_18]], %[[VAL_34:.*]] = load{{\[}}%[[VAL_32]]] %[[VAL_13]] {handshake.bb = 2 : ui32} : <i32>, <i32>
