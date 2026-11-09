@@ -208,11 +208,15 @@ def HandshakeParallelizeRegions : DynamaticPass<"handshake-parallelize-regions">
     inside the earlier region is re-made in the entry block. Memory
     interfaces, `end` and block ids are untouched.
 
-    The pass refuses a group (with an error) when a memory dependence crosses
-    two of its regions, when two regions share an LSQ, when a region computes
-    a value another region uses, or when a region has more than one exit; it
-    does not check that the regions are independent beyond that, which is the
-    job of the analysis that writes the attribute. The result is not
+    The pass declines a group when a memory dependence crosses two of its
+    regions, when two regions share an LSQ, when a region computes a value
+    another region uses (a loop-carried value its loop updates among them), or
+    when the circuit does not have the sequential shape it rewires (a region
+    with more than one exit, say): a warning names the reason, the group's
+    regions run one after the other as the lowering built them, and the group
+    leaves the attribute. An attribute it cannot read is an error. It does
+    not check that the regions are independent beyond that, which is the job
+    of the analysis that writes the attribute. The result is not
     materialized: run `handshake-materialize` afterwards. Run it after
     `handshake-deactivate-mem-dependencies`, which reasons over the
     sequential CFG. If the function carries a `handshake.frequencies`

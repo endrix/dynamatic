@@ -99,8 +99,14 @@ Whoever writes the attribute is responsible for independence: no value flows
 between the regions, no memory dependence crosses them, no LSQ serves two of
 them. The pass checks what it can see in the Handshake IR (a live-out, a
 `handshake.deps` edge between regions, an LSQ with inputs from two regions,
-a second exit) and refuses the group with an error; it cannot see aliasing
-that the analysis missed.
+a second exit, a circuit that does not have the sequential shape it
+rewires) and declines the group: a warning on the function names the
+reason (and a note the operation where it shows), the group's regions run
+one after the other as the lowering built them, and the group leaves the
+attribute, so that nothing after the pass takes it for parallel. Nothing is
+changed before every check has passed. An attribute the pass cannot read,
+or a group that names a block twice, is an error. The pass cannot see
+aliasing that the analysis missed.
 
 ## What the pass does
 
@@ -113,16 +119,22 @@ For each group:
   meet in a `join` in the successor block, which replaces the serial input of
   the successor's control merge.
 - A value a later region received through an earlier region's exit branch is
-  followed back through that region to where it came in. Branches, forks
-  and buffers are transparent, and so is a mux or merge with one loop-entry
-  operand whose back edges hand it its own value: each leads, through those
-  wires, back to the mux, or to another mux or merge of the region (an inner
-  loop's) whose operands all lead back the same way. A mux whose back edge
-  brings a value the loop computed holds that value when the region exits,
-  not its loop-entry operand. A value the entry block provided is used from
-  the entry directly; a constant the lowering materialized inside the
-  earlier region is re-made in the entry block, driven by the function's
-  start. Anything else is a live-out and the group is refused.
+  followed back through that region, and through the regions before it
+  that it came through, to where it came in. Wires are transparent: a
+  branch, a fork, a buffer, a one-input merge, a blocker's forwarded (first)
+  operand, a channel taken apart and put together again
+  (`bundle(unbundle(x))`). So is a mux or merge with one loop-entry operand
+  whose back edges hand it the value that operand brings: each leads,
+  through wires, back to the mux, or to another mux or merge of the region
+  (an inner loop's, a join block's) whose operands all lead back the same
+  way or bring the same value in (the entry's value through a ring of its
+  own, a copy of the same constant). A mux whose back edge brings a value
+  the loop computed holds that value when the region exits, not its
+  loop-entry operand. A value the entry block, or a block before the group,
+  provided is used from there directly; a constant the lowering
+  materialized inside the earlier region is re-made in the entry block,
+  driven by the function's start. Anything else is a live-out and the group
+  is declined.
 - The wires that only carried those values out of a region -- the exit
   branch, and behind it the constants, forks and muxes that threaded them
   through the loop -- are erased.
@@ -201,9 +213,9 @@ what that block costs.
   read ports.
 - Regions with more than one exit, groups inside an enclosing loop, and
   regions that are not loop nests.
-- Declining a group. A group the transformation refuses fails the pass,
-  so a flow that runs it must not hand it one it would refuse. The analysis
+- Groups the analysis names but the transformation declines. The analysis
   keeps the values a region hands on to the last region, but it cannot see
   edges a later lowering makes: a value of the last region that a block
   after the successor reads, handed over directly rather than through the
-  successor, is refused.
+  successor, and a region whose control merge takes the entry's control
+  through another unit (a join) are declined, and run one after the other.
