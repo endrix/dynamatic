@@ -34,6 +34,7 @@
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/Value.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
@@ -88,9 +89,8 @@ struct Refusal {
   std::string why;
 };
 
-/// What became of a group: rewired, left sequential (with a warning), or an
-/// attribute the pass cannot read (an error).
-enum class Outcome { DONE, DECLINED, FAILED };
+/// What became of a group: rewired, or left sequential (with a warning).
+enum class Outcome { DONE, DECLINED };
 
 struct HandshakeParallelizeRegionsPass
     : public dynamatic::impl::HandshakeParallelizeRegionsBase<
@@ -180,15 +180,17 @@ static Place placeOf(std::optional<unsigned> bb,
 }
 
 /// One step back along a path that hands every token on unchanged, and when
-/// it comes: a branch (either side of a conditional one), a fork or lazy
-/// fork, a buffer, a one-input merge, a blocker of one input, or a channel
-/// taken apart and put together again (`bundle(unbundle(x))`). Null where the
-/// step is anything else. A value a region hands the next is rewired past
-/// such steps only, and what only they took is erased after.
+/// it comes: a branch (either side of a conditional one), a fork, a lazy fork
+/// of one output, a buffer, a one-input merge, a blocker of one input, or a
+/// channel taken apart and put together again (`bundle(unbundle(x))`). Null
+/// where the step is anything else. A value a region hands the next is
+/// rewired past such steps only, and what only they took is erased after.
 static Value passedOn(Operation *op) {
   if (auto condBr = dyn_cast<ConditionalBranchOp>(op))
     return condBr.getDataOperand();
-  if (isa<BranchOp, ForkOp, LazyForkOp, BufferOp>(op))
+  if (isa<BranchOp, ForkOp, BufferOp>(op))
+    return op->getOperand(0);
+  if (isa<LazyForkOp>(op) && op->getNumResults() == 1)
     return op->getOperand(0);
   if (isa<MergeOp, BlockerOp>(op) && op->getNumOperands() == 1)
     return op->getOperand(0);
@@ -208,13 +210,24 @@ static Value passedOn(Operation *op) {
 }
 
 /// The same, and a blocker's forwarded (first) operand whatever else it waits
-/// for: what a value is, not when it comes. A back edge through such a
-/// blocker still hands its mux the mux's value; a later region that took the
-/// value past it would no longer wait for the blocker's other inputs.
+/// for, and a lazy fork's input whichever outputs it waits for: what a value
+/// is, not when it comes. A back edge through such a unit still hands its mux
+/// the mux's value; a later region that took the value past it would no
+/// longer wait with it.
 static Value sameValueAs(Operation *op) {
-  if (isa<BlockerOp>(op))
+  if (isa<BlockerOp, LazyForkOp>(op))
     return op->getOperand(0);
   return passedOn(op);
+}
+
+/// Whether a data value comes from a block before the group's entry: a value
+/// of the firing, like one of the entry block, which a region may read
+/// directly.
+static bool beforeTheGroup(Value val, unsigned entry,
+                           const llvm::DenseMap<unsigned, Place> &places) {
+  std::optional<unsigned> bb = blockOf(val);
+  return bb && placeOf(bb, places).kind == Place::OUTSIDE && *bb < entry &&
+         !isa<handshake::ControlType>(val.getType());
 }
 
 namespace {
@@ -246,7 +259,7 @@ public:
   /// came in.
   FailureOr<Source> resolveCrossing(Value val, unsigned from) {
     user = from + 1;
-    return resolve(val, from, /*filtered=*/false);
+    return resolve(val, from, Filters());
   }
 
   Refusal refusal;
@@ -260,7 +273,7 @@ private:
   /// The muxes whose loop-entry operand is being followed: one met again is
   /// a cycle no loop entry breaks.
   SmallPtrSet<Operation *, 8> resolving;
-  /// What `resolve` found, by (value, 2 * region + filtered).
+  /// What `resolve` found, by (value, 4 * region + filters).
   llvm::DenseMap<std::pair<Value, unsigned>, Source> resolved;
   /// The muxes found to carry their loop-entry value, and where it came in.
   llvm::DenseMap<Operation *, Source> carried;
@@ -280,8 +293,18 @@ private:
   FailureOr<Walk> throughWires(Value val, unsigned at,
                                Value (*step)(Operation *));
 
-  FailureOr<Source> resolve(Value val, unsigned at, bool filtered);
-  FailureOr<Source> resolveUncached(Value val, unsigned at, bool filtered);
+  /// What may have chosen which tokens of a source go on, on the way back
+  /// to it: a conditional branch since the last mux whose loop entry the
+  /// walk followed (`direct`: the branch takes the source's own tokens, not
+  /// a loop's copies of one), and a branch or a mux's loop entry anywhere on
+  /// the way (`any`).
+  struct Filters {
+    bool direct = false;
+    bool any = false;
+  };
+
+  FailureOr<Source> resolve(Value val, unsigned at, Filters filters);
+  FailureOr<Source> resolveUncached(Value val, unsigned at, Filters filters);
   LogicalResult carriesItself(Operation *mux, unsigned at, const Source &init);
 
   LogicalResult refuse(Operation *at, const Twine &why) {
@@ -352,39 +375,46 @@ FailureOr<Resolver::Walk> Resolver::throughWires(Value val, unsigned at,
   return walk;
 }
 
-FailureOr<Source> Resolver::resolve(Value val, unsigned at, bool filtered) {
-  auto key = std::make_pair(val, 2 * at + (filtered ? 1 : 0));
+FailureOr<Source> Resolver::resolve(Value val, unsigned at, Filters filters) {
+  auto key = std::make_pair(val, 4 * at + (filters.any ? 2 : 0) +
+                                     (filters.direct ? 1 : 0));
   if (auto it = resolved.find(key); it != resolved.end())
     return it->second;
-  FailureOr<Source> src = resolveUncached(val, at, filtered);
+  FailureOr<Source> src = resolveUncached(val, at, filters);
   if (succeeded(src))
     resolved[key] = *src;
   return src;
 }
 
 FailureOr<Source> Resolver::resolveUncached(Value val, unsigned at,
-                                            bool filtered) {
+                                            Filters filters) {
   Value cur = val;
   while (true) {
     FailureOr<Walk> walk = throughWires(cur, at, passedOn);
     if (failed(walk))
       return failure();
     cur = walk->val;
-    filtered |= walk->filtered;
+    filters.direct |= walk->filtered;
+    filters.any |= walk->filtered;
+    // A function argument belongs to block 0, the entry or a block before it.
     Operation *def = cur.getDefiningOp();
-    if (!def)
+    Place p = placeOf(blockOf(cur), places);
+    // A value of the entry block comes once per firing of the group, as the
+    // crossing had it, unless a branch of the region took its own tokens
+    // (rather than a loop's copies of one).
+    if (p.kind == Place::ENTRY) {
+      if (filters.direct)
+        return refuse(def, "region " + Twine(user) +
+                               " would take a value of the entry block past "
+                               "a branch of a region that chooses its tokens");
       return Source{cur, {}};
-    std::optional<unsigned> bb = getLogicBB(def);
-    Place p = placeOf(bb, places);
-    if (p.kind == Place::ENTRY)
-      return Source{cur, {}};
+    }
     // A value from a block BEFORE the group is a value of the firing, like
     // one from the entry (the regions may read it directly; see the edges
     // parallelize admits), but only as the crossing had it: a branch or a mux
     // on the way chose which of its tokens went on.
-    if (p.kind == Place::OUTSIDE && *bb < entry &&
-        !isa<handshake::ControlType>(cur.getType())) {
-      if (filtered)
+    if (beforeTheGroup(cur, entry, places)) {
+      if (filters.any)
         return refuse(def, "region " + Twine(user) +
                                " would take a value of a block before the "
                                "group past the branches and muxes of a "
@@ -395,10 +425,10 @@ FailureOr<Source> Resolver::resolveUncached(Value val, unsigned at,
     // came into that one.
     if (p.kind == Place::REGION && p.region + 1 == at) {
       at = p.region;
-      filtered = true;
+      filters.any = true;
       continue;
     }
-    if (p.kind != Place::REGION || p.region != at)
+    if (!def || p.kind != Place::REGION || p.region != at)
       return refuse(def, "a value region " + Twine(user) +
                              " uses comes from neither the entry block nor "
                              "region " +
@@ -412,6 +442,11 @@ FailureOr<Source> Resolver::resolveUncached(Value val, unsigned at,
                              Twine(at) +
                              ", which also waits for its other "
                              "inputs");
+    if (isa<LazyForkOp>(def))
+      return refuse(def, "region " + Twine(user) +
+                             " would take this value past a lazy fork of "
+                             "region " +
+                             Twine(at) + ", which waits for all its outputs");
     if (isa<MuxOp, MergeOp>(def)) {
       if (auto it = carried.find(def); it != carried.end())
         return it->second;
@@ -429,7 +464,8 @@ FailureOr<Source> Resolver::resolveUncached(Value val, unsigned at,
         return refuse(def, "this merge has no loop entry operand");
       if (!resolving.insert(def).second)
         return refuse(def, "this merge's loop entry leads back to it");
-      FailureOr<Source> src = resolve(init, at, /*filtered=*/true);
+      FailureOr<Source> src =
+          resolve(init, at, {/*direct=*/false, /*any=*/true});
       if (succeeded(src) && failed(carriesItself(def, at, *src)))
         src = failure();
       resolving.erase(def);
@@ -474,16 +510,68 @@ LogicalResult Resolver::carriesItself(Operation *mux, unsigned at,
                          cast<MergeLikeOpInterface>(src).getDataOperands());
       continue;
     }
-    FailureOr<Source> other = resolve(walk->val, at, /*filtered=*/true);
-    if (succeeded(other)) {
-      if (!initRoot)
-        initRoot = rootOf(init);
-      if (sameRoot(rootOf(*other), *initRoot))
-        continue;
-    }
+    // Anything else brings a value in: where it cannot be told, that reason
+    // stands; where it can, it must be the loop-entry operand's.
+    FailureOr<Source> other =
+        resolve(walk->val, at, {/*direct=*/walk->filtered, /*any=*/true});
+    if (failed(other))
+      return failure();
+    if (!initRoot)
+      initRoot = rootOf(init);
+    if (sameRoot(rootOf(*other), *initRoot))
+      continue;
     return refuse(mux, "region " + Twine(at) +
                            "'s loop updates this value and region " +
                            Twine(user) + " uses it");
+  }
+  return success();
+}
+
+/// The blocks a group names, in the order the attribute names them: the
+/// entry, the regions' blocks, the successor.
+static SmallVector<unsigned> blocksOf(const RegionGroup &group) {
+  SmallVector<unsigned> blocks = {group.entry};
+  for (const SmallVector<unsigned> &region : group.regions)
+    llvm::append_range(blocks, region);
+  blocks.push_back(group.successor);
+  return blocks;
+}
+
+/// Whether the function's groups fit it: every block a group names, named
+/// once in that group, holds an operation, and every memory dependence of an
+/// access in a region names an access. Checked for all of them before any is
+/// rewired, so that an error never finds the function half rewired; the
+/// first offender in the attribute's order is the one named.
+static LogicalResult checkGroups(handshake::FuncOp funcOp,
+                                 ArrayRef<RegionGroup> groups,
+                                 NameAnalysis &names) {
+  LogicBBs bbs = getLogicBBs(funcOp);
+  for (const RegionGroup &group : groups) {
+    llvm::SmallDenseSet<unsigned, 16> seen;
+    for (unsigned bb : blocksOf(group)) {
+      if (!seen.insert(bb).second)
+        return funcOp->emitError() << "block " << bb << " appears twice in a '"
+                                   << REGIONS_ATTR << "' group";
+      if (!bbs.blocks.contains(bb))
+        return funcOp->emitError() << "block " << bb << " named in '"
+                                   << REGIONS_ATTR << "' has no operation";
+    }
+  }
+  for (const RegionGroup &group : groups) {
+    for (const SmallVector<unsigned> &region : group.regions) {
+      for (unsigned bb : region) {
+        for (Operation *op : bbs.blocks.lookup(bb)) {
+          auto deps = getDialectAttr<MemDependenceArrayAttr>(op);
+          if (!deps)
+            continue;
+          for (MemDependenceAttr dep : deps.getDependencies())
+            if (!names.getOp(dep.getDstAccess()))
+              return op->emitError()
+                     << "memory dependence names an unknown access '"
+                     << dep.getDstAccess() << "'";
+        }
+      }
+    }
   }
   return success();
 }
@@ -506,31 +594,20 @@ Outcome HandshakeParallelizeRegionsPass::parallelize(
     return Outcome::DECLINED;
   };
 
-  // Place every block of the group; a block named twice is a malformed group.
+  // Place every block of the group (checkGroups made sure that each is
+  // named once and holds an operation, before any group was rewired; one an
+  // earlier group's rewiring emptied is declined).
   llvm::DenseMap<unsigned, Place> places;
-  auto place = [&](unsigned bb, Place p) -> LogicalResult {
-    if (!places.insert({bb, p}).second)
-      return funcOp->emitError() << "block " << bb << " appears twice in a '"
-                                 << REGIONS_ATTR << "' group";
-    return success();
-  };
-  if (failed(place(group.entry, {Place::ENTRY, 0})))
-    return Outcome::FAILED;
+  places.insert({group.entry, {Place::ENTRY, 0}});
   for (auto [i, blocks] : llvm::enumerate(group.regions))
     for (unsigned bb : blocks)
-      if (failed(place(bb, {Place::REGION, (unsigned)i})))
-        return Outcome::FAILED;
-  if (failed(place(group.successor, {Place::SUCCESSOR, 0})))
-    return Outcome::FAILED;
+      places.insert({bb, {Place::REGION, (unsigned)i}});
+  places.insert({group.successor, {Place::SUCCESSOR, 0}});
 
   LogicBBs bbs = getLogicBBs(funcOp);
-  for (auto &[bb, p] : places) {
-    if (!bbs.blocks.contains(bb)) {
-      funcOp->emitError() << "block " << bb << " named in '" << REGIONS_ATTR
-                          << "' has no operation";
-      return Outcome::FAILED;
-    }
-  }
+  for (unsigned bb : blocksOf(group))
+    if (!bbs.blocks.contains(bb))
+      return decline(nullptr, "block " + Twine(bb) + " has no operation");
 
   // Walk every edge that lands in a block of the group and classify it. The
   // sequential shape admits exactly one control edge from the entry into the
@@ -632,7 +709,7 @@ Outcome HandshakeParallelizeRegionsPass::parallelize(
             // arrays in one loop, then push each array in its own). Control
             // from outside, and anything from a block after the group, is a
             // shape this pass does not know.
-            if (!isCtrl && blockOf(val) && *blockOf(val) < group.entry)
+            if (beforeTheGroup(val, group.entry, places))
               break;
             return refuse("a block outside the group feeds region " + Twine(i));
           case Place::NONE:
@@ -702,11 +779,9 @@ Outcome HandshakeParallelizeRegionsPass::parallelize(
       for (MemDependenceAttr dep : deps.getDependencies()) {
         StringRef dstName = dep.getDstAccess();
         Operation *dstOp = names.getOp(dstName);
-        if (!dstOp) {
-          op->emitError() << "memory dependence names an unknown access '"
-                          << dstName << "'";
-          return Outcome::FAILED;
-        }
+        if (!dstOp)
+          return decline(op, "a memory dependence names an unknown access '" +
+                                 dstName + "'");
         std::optional<unsigned> dstRegion = regionOf(dstOp);
         if (dstRegion && *dstRegion != *region)
           return decline(op, "a memory dependence with '" + dstName +
@@ -745,9 +820,11 @@ Outcome HandshakeParallelizeRegionsPass::parallelize(
     resolved.push_back({opd, *src});
   }
 
-  // Rewire the data, then the control.
+  // Rewire the data, then the control. A constant re-made in the entry fires
+  // on the entry's control into the first region, once per firing of the
+  // group (the function's start comes once per call, and the group may sit
+  // in an outer loop).
   OpBuilder builder(funcOp.getContext());
-  Value start = funcOp.getArguments().back();
   llvm::DenseMap<Operation *, Value> entryConstants;
   SmallVector<Operation *> maybeDead;
   for (auto &[opd, src] : resolved) {
@@ -755,9 +832,12 @@ Outcome HandshakeParallelizeRegionsPass::parallelize(
     if (src.constant) {
       Value &clone = entryConstants[src.constant];
       if (!clone) {
-        builder.setInsertionPointToStart(funcOp.getBodyBlock());
+        if (Operation *def = entryCtrl.getDefiningOp())
+          builder.setInsertionPointAfter(def);
+        else
+          builder.setInsertionPointToStart(funcOp.getBodyBlock());
         auto cst = ConstantOp::create(builder, src.constant.getLoc(),
-                                      src.constant.getValue(), start);
+                                      src.constant.getValue(), entryCtrl);
         setBB(cst, group.entry);
         clone = cst.getResult();
       }
@@ -873,6 +953,11 @@ void HandshakeParallelizeRegionsPass::runDynamaticPass() {
       haveArchs = true;
     }
 
+    // An attribute that does not fit the function fails the pass before any
+    // group is rewired.
+    if (failed(checkGroups(funcOp, groups, getAnalysis<NameAnalysis>())))
+      return signalPassFailure();
+
     // A declined group leaves the attribute: nothing after this pass may take
     // its regions for parallel ones.
     SmallVector<Attribute> kept;
@@ -883,8 +968,6 @@ void HandshakeParallelizeRegionsPass::runDynamaticPass() {
         break;
       case Outcome::DECLINED:
         break;
-      case Outcome::FAILED:
-        return signalPassFailure();
       }
     }
     if (kept.empty())

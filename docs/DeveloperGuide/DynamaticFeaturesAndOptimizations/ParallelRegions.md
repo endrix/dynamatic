@@ -104,9 +104,11 @@ rewires) and declines the group: a warning on the function names the
 reason (and a note the operation where it shows), the group's regions run
 one after the other as the lowering built them, and the group leaves the
 attribute, so that nothing after the pass takes it for parallel. Nothing is
-changed before every check has passed. An attribute the pass cannot read,
-or a group that names a block twice or a block with no operation, is an
-error. The pass cannot see
+changed before every check has passed. An attribute that does not fit the
+function -- one the pass cannot read, a group that names a block twice or
+a block with no operation, a memory dependence that names an unknown
+access -- is an error, found for all of the function's groups before any
+is rewired. The pass cannot see
 aliasing that the analysis missed.
 
 ## What the pass does
@@ -122,13 +124,14 @@ For each group:
 - A value a later region received through an earlier region's exit branch is
   followed back through that region, and through the regions before it
   that it came through, to where it came in. Wires, which hand every
-  token on unchanged and when it comes, are transparent: a branch, a fork
-  or lazy fork, a buffer, a one-input merge, a blocker of one input, a
-  channel taken apart and put together again (`bundle(unbundle(x))`). A
-  blocker of several inputs forwards its first but also waits for the
-  others, and a later region taken past it would not: the value may not be
-  rewired through one, but a back edge through one still hands its mux the
-  same value. A mux or merge with one loop-entry operand is transparent
+  token on unchanged and when it comes, are transparent: a branch, a fork,
+  a lazy fork of one output, a buffer, a one-input merge, a blocker of one
+  input, a channel taken apart and put together again
+  (`bundle(unbundle(x))`). A blocker of several inputs forwards its first
+  but also waits for the others, and a lazy fork of several outputs waits
+  for all its successors; a later region taken past either would not wait
+  with it: the value may not be rewired through one, but a back edge
+  through one still hands its mux the same value. A mux or merge with one loop-entry operand is transparent
   when its back edges hand it the value that operand brings: each leads,
   through wires or such blockers, back to the mux, or to another mux or
   merge of the region (an inner loop's, a join block's) whose operands all
@@ -136,11 +139,14 @@ For each group:
   through a ring of its own, a copy of the same constant). A mux whose back
   edge brings a value the loop computed holds that value when the region
   exits, not its loop-entry operand. A value the entry block provided is
-  used from there directly, and so is one of a block before the group when
-  no branch or mux of a region on the way chose which of its tokens went
-  on; a constant the lowering materialized inside the earlier region is
-  re-made in the entry block, driven by the function's start. Anything else
-  is a live-out, a ring of wires among them, and the group is declined.
+  used from there directly, unless a branch of a region took its tokens
+  itself (rather than a loop's copies of one, after a mux), and so is one
+  of a block before the group when no branch or mux of a region on the way
+  chose which of its tokens went on; a constant the lowering materialized
+  inside the earlier region is re-made in the entry block, driven by the
+  entry's control into the first region, once per firing of the group (the
+  group may sit in an outer loop). Anything else is a live-out, a ring of
+  wires among them, and the group is declined.
 - The wires that only carried those values out of a region -- the exit
   branch, and behind it the constants, forks and muxes that threaded them
   through the loop -- are erased, as far as nothing else uses them: what the
