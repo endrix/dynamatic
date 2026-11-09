@@ -102,22 +102,38 @@ private:
 
 } // namespace
 
-/// Whether the value is a block argument of, or produced inside, the segment.
-static bool definedIn(Value val, const Segment &seg) {
+/// Whether a block is one of a unit's, as a lookup rather than a scan of its
+/// blocks: the walks below ask it for every value and every use.
+using InUnit = llvm::function_ref<bool(Block *)>;
+
+/// Whether the value is a block argument of, or produced inside, the unit.
+static bool definedIn(Value val, InUnit inUnit) {
   if (auto arg = dyn_cast<BlockArgument>(val))
-    return seg.contains(arg.getOwner());
-  return seg.contains(val.getDefiningOp()->getBlock());
+    return inUnit(arg.getOwner());
+  return inUnit(val.getDefiningOp()->getBlock());
+}
+
+/// Whether two origins of a block argument are one value: the same value, or
+/// two constants of one value and type (push-constants gives every block its
+/// own copy of a literal).
+static bool sameOrigin(Value a, Value b) {
+  if (a == b)
+    return true;
+  auto ca = a.getDefiningOp<arith::ConstantOp>();
+  auto cb = b.getDefiningOp<arith::ConstantOp>();
+  return ca && cb && ca.getValue() == cb.getValue();
 }
 
 /// Whether a value that leaves `seg` costs the next region nothing: a
 /// constant, which the lowering re-makes wherever it is needed, or a block
 /// argument the segment only carries around unchanged from ONE origin that is
-/// itself free (a value from before the segment, or a constant). A block
-/// argument two different values reach -- a loop-carried value the loop
-/// updates, a flag it resets to a constant -- holds whichever the control
-/// flow inside the segment chose last, so the segment computes it: anything
-/// computed inside the segment is a live-out.
-static bool isFreeToLeave(Value val, const Segment &seg) {
+/// itself free (a value from before the segment, or a constant; two copies of
+/// one constant are one origin). A block argument two different values reach
+/// -- a loop-carried value the loop updates, a flag it sets to a constant
+/// other than its first -- holds whichever the control flow inside the
+/// segment chose last, so the segment computes it: anything computed inside
+/// the segment is a live-out.
+static bool isFreeToLeave(Value val, InUnit inUnit) {
   Value origin;
   SmallVector<Value> worklist = {val};
   // A cycle among block arguments means the value only ever copies itself.
@@ -125,8 +141,8 @@ static bool isFreeToLeave(Value val, const Segment &seg) {
   while (!worklist.empty()) {
     Value cur = worklist.pop_back_val();
     Operation *def = cur.getDefiningOp();
-    if (!definedIn(cur, seg) || isa_and_nonnull<arith::ConstantOp>(def)) {
-      if (origin && origin != cur)
+    if (!definedIn(cur, inUnit) || isa_and_nonnull<arith::ConstantOp>(def)) {
+      if (origin && !sameOrigin(origin, cur))
         return false;
       origin = cur;
       continue;
@@ -162,17 +178,17 @@ static bool isFreeToLeave(Value val, const Segment &seg) {
 /// from it. The lowering threads such a value through every block between
 /// the segment and its reader, so the reader is where the segment's result
 /// is waited for.
-static void collectReaders(const Segment &seg, Region &body,
+static void collectReaders(const Segment &seg, InUnit inUnit, Region &body,
                            SmallPtrSetImpl<Block *> &readers) {
   SmallVector<Value> worklist;
   for (Block *block : seg.blocks) {
     for (BlockArgument arg : block->getArguments())
-      if (!isFreeToLeave(arg, seg))
+      if (!isFreeToLeave(arg, inUnit))
         worklist.push_back(arg);
+    // A result is the unit's own, and free only when it is a constant.
     for (Operation &op : *block)
-      for (Value res : op.getResults())
-        if (!isFreeToLeave(res, seg))
-          worklist.push_back(res);
+      if (!isa<arith::ConstantOp>(op))
+        llvm::append_range(worklist, op.getResults());
   }
   SmallPtrSet<Value, 16> seen(worklist.begin(), worklist.end());
   while (!worklist.empty()) {
@@ -194,7 +210,7 @@ static void collectReaders(const Segment &seg, Region &body,
             worklist.push_back(*arg);
         }
       }
-      if (!seg.contains(reader))
+      if (!inUnit(reader))
         readers.insert(reader);
     }
   }
@@ -315,9 +331,10 @@ static void collectAccesses(Operation &op, Segment &seg) {
 /// depends only on the last region joins it. One that depends on an earlier
 /// region ends the range (through memory: a value it reads has merged its
 /// unit into the last region already): the range so far becomes a group when
-/// it holds two regions or more; when it holds one, a new range starts right
-/// after the last unit the newcomer depends on, so that the tail can still
-/// pair with it.
+/// it holds two regions or more, and the newcomer, its successor, runs alone
+/// after it, the next range starting after the newcomer; when the range holds
+/// one region, a new range starts right after the last unit the newcomer
+/// depends on, so that the tail can still pair with it.
 static void groupChain(func::FuncOp funcOp, BlockIndex &index,
                        NameAnalysis &names, bool trustMC, Block *entry,
                        SmallVectorImpl<Segment> &segments, Block *successor,
@@ -351,41 +368,42 @@ static void groupChain(func::FuncOp funcOp, BlockIndex &index,
   if (n < 2)
     return;
 
-  // Who reads what each unit computes: a later unit (liveOut), or, as
-  // `lastReader`, the furthest one, n for a block in no unit (the chain's
-  // successor, anything after it).
+  // Dependences, once. First who reads what each unit computes: a later
+  // unit, which depends on it, and, as `lastReader`, the furthest one, n for
+  // a block in no unit (the chain's successor, anything after it).
   llvm::DenseMap<Block *, unsigned> unitOf;
   for (auto [u, unit] : llvm::enumerate(units))
     for (Block *block : unit.blocks)
       unitOf[block] = u;
-  SmallVector<SmallVector<bool>> liveOut(n, SmallVector<bool>(n, false));
+  SmallVector<SmallVector<bool>> dep(n, SmallVector<bool>(n, false));
   SmallVector<unsigned> lastReader(n, 0);
   for (unsigned i = 0; i < n; ++i) {
+    auto inUnit = [&](Block *block) {
+      auto it = unitOf.find(block);
+      return it != unitOf.end() && it->second == i;
+    };
     SmallPtrSet<Block *, 8> readers;
-    collectReaders(units[i], funcOp.getBody(), readers);
+    collectReaders(units[i], inUnit, funcOp.getBody(), readers);
     for (Block *block : readers) {
       auto it = unitOf.find(block);
       // A reader in no unit, or (which a chain should not have) in an earlier
       // one, is after the chain as far as the grouping goes.
       unsigned u = it == unitOf.end() || it->second < i ? n : it->second;
       if (u < n)
-        liveOut[i][u] = true;
+        dep[i][u] = true;
       lastReader[i] = std::max(lastReader[i], u);
     }
   }
-
-  // Dependences, once.
-  SmallVector<SmallVector<bool>> dep(n, SmallVector<bool>(n, false));
   for (unsigned i = 0; i < n; ++i) {
     for (unsigned j = i + 1; j < n; ++j) {
       bool memory = memoryIndependent(units[i], units[j], names, trustMC);
       LLVM_DEBUG(llvm::dbgs()
                  << "units at blocks " << index[units[i].blocks.front()]
                  << " and " << index[units[j].blocks.front()] << ": "
-                 << (liveOut[i][j] ? "a live-out" : "no live-out") << ", "
+                 << (dep[i][j] ? "a live-out" : "no live-out") << ", "
                  << (memory ? "memory independent" : "memory dependent")
                  << "\n");
-      dep[i][j] = liveOut[i][j] || !memory;
+      dep[i][j] = dep[i][j] || !memory;
     }
   }
 
@@ -469,8 +487,13 @@ static void groupChain(func::FuncOp funcOp, BlockIndex &index,
         --lastRegion;
       if (*firstDep >= lastRegion)
         continue;
+      // The newcomer is the group's successor: its first block takes the
+      // group's join. It runs after the group, alone, and the next range
+      // starts after it, so that no group's entry lies in another group's
+      // regions (the second would find the first's join in its first region
+      // and could not be rewired).
       closeRange(rangeStart, j - 1);
-      rangeStart = j;
+      rangeStart = j + 1;
     } else if (*lastDep + 1 < j) {
       rangeStart = *lastDep + 1;
     }

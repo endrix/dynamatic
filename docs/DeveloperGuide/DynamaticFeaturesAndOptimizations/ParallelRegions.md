@@ -30,12 +30,13 @@ the chain holds a loop. Two units are dependent when:
   first block or by direct use (dominance allows it), or through a block
   argument of a unit in between that carries it on. A constant does not
   count, nor does a block argument the unit only carries around unchanged
-  from one origin that is itself free: the lowering re-makes constants and
-  the later pass re-sources such values from the entry. A block argument
-  two different values reach (a loop-carried value the loop updates, a
-  flag it sets to a constant on every iteration) holds whatever the unit's
-  control flow chose last, and counts. A value handed to a block argument
-  nothing reads carries nothing;
+  from one origin that is itself free (two copies of one constant, which
+  `push-constants` makes per block, are one origin): the lowering re-makes
+  constants and the later pass re-sources such values from the entry. A
+  block argument two different values reach (a loop-carried value the loop
+  updates, a flag it sets to another constant on every iteration) holds
+  whatever the unit's control flow chose last, and counts. A value handed
+  to a block argument nothing reads carries nothing;
 - a recorded memory dependence (`handshake.deps`) connects an access of
   one to an access of the other;
 - they touch a common memory (function arguments and allocations are
@@ -67,9 +68,12 @@ transformation would otherwise take the value from the entry block, where
 it is not computed yet). A unit that depends only on the last region joins
 it. One that depends on an earlier region, which is then a dependence
 through memory, ends the range: the range becomes a group when it holds
-two regions or more; when it holds one, a new range starts right after the
-last unit the newcomer depends on, so that the tail can still pair with
-it.
+two regions or more, and the newcomer, the group's successor, whose first
+block takes the group's join, runs alone after it, the next range starting
+after the newcomer (a group whose entry lay in another group's last region
+would find that group's join in its own first region); when the range holds
+one region, a new range starts right after the last unit the newcomer
+depends on, so that the tail can still pair with it.
 
 Each group becomes one entry of the attribute, in the block ids the
 lowering will assign (position in the function), and a remark names it.
