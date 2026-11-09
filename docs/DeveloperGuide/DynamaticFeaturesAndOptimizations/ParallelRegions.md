@@ -105,7 +105,8 @@ reason (and a note the operation where it shows), the group's regions run
 one after the other as the lowering built them, and the group leaves the
 attribute, so that nothing after the pass takes it for parallel. Nothing is
 changed before every check has passed. An attribute the pass cannot read,
-or a group that names a block twice, is an error. The pass cannot see
+or a group that names a block twice or a block with no operation, is an
+error. The pass cannot see
 aliasing that the analysis missed.
 
 ## What the pass does
@@ -120,24 +121,31 @@ For each group:
   the successor's control merge.
 - A value a later region received through an earlier region's exit branch is
   followed back through that region, and through the regions before it
-  that it came through, to where it came in. Wires are transparent: a
-  branch, a fork, a buffer, a one-input merge, a blocker's forwarded (first)
-  operand, a channel taken apart and put together again
-  (`bundle(unbundle(x))`). So is a mux or merge with one loop-entry operand
-  whose back edges hand it the value that operand brings: each leads,
-  through wires, back to the mux, or to another mux or merge of the region
-  (an inner loop's, a join block's) whose operands all lead back the same
-  way or bring the same value in (the entry's value through a ring of its
-  own, a copy of the same constant). A mux whose back edge brings a value
-  the loop computed holds that value when the region exits, not its
-  loop-entry operand. A value the entry block, or a block before the group,
-  provided is used from there directly; a constant the lowering
-  materialized inside the earlier region is re-made in the entry block,
-  driven by the function's start. Anything else is a live-out and the group
-  is declined.
+  that it came through, to where it came in. Wires, which hand every
+  token on unchanged and when it comes, are transparent: a branch, a fork
+  or lazy fork, a buffer, a one-input merge, a blocker of one input, a
+  channel taken apart and put together again (`bundle(unbundle(x))`). A
+  blocker of several inputs forwards its first but also waits for the
+  others, and a later region taken past it would not: the value may not be
+  rewired through one, but a back edge through one still hands its mux the
+  same value. A mux or merge with one loop-entry operand is transparent
+  when its back edges hand it the value that operand brings: each leads,
+  through wires or such blockers, back to the mux, or to another mux or
+  merge of the region (an inner loop's, a join block's) whose operands all
+  lead back the same way or bring the same value in (the entry's value
+  through a ring of its own, a copy of the same constant). A mux whose back
+  edge brings a value the loop computed holds that value when the region
+  exits, not its loop-entry operand. A value the entry block provided is
+  used from there directly, and so is one of a block before the group when
+  no branch or mux of a region on the way chose which of its tokens went
+  on; a constant the lowering materialized inside the earlier region is
+  re-made in the entry block, driven by the function's start. Anything else
+  is a live-out, a ring of wires among them, and the group is declined.
 - The wires that only carried those values out of a region -- the exit
   branch, and behind it the constants, forks and muxes that threaded them
-  through the loop -- are erased.
+  through the loop -- are erased, as far as nothing else uses them: what the
+  values were rewired past, with the same notion of a wire, and muxes,
+  merges and constants.
 - If the function carries `handshake.frequencies`, or the `frequencies`
   option names the profiler's CSV, the archs are rewritten to the new shape:
   the serial edges between regions dropped, an edge from the entry into

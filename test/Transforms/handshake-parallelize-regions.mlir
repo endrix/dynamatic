@@ -465,3 +465,261 @@ handshake.func @reset_to_the_same_constant(%arg0: !handshake.control<>, ...) -> 
   %c3, %ci3 = control_merge [%f_ctrl2]  {handshake.bb = 3 : ui32, handshake.name = "merge3"} : [<>] to <>, <i1>
   end {handshake.bb = 3 : ui32, handshake.name = "end0"} %f_j, %c3 : <i32>, <>
 }
+
+// -----
+
+// The constant block 1 makes for block 2 reaches block 2 through one branch
+// whose exit feeds two muxes: two crossings from one operation. Both are
+// re-made in the entry, and the branch and the constant, unused, are erased
+// once.
+// CHECK-LABEL:   handshake.func @one_branch_two_crossings(
+// CHECK:           %[[ZERO:.*]] = constant %arg0 {handshake.bb = 0 : ui32, {{.*}}value = 0 : i32}
+// CHECK-NOT:       loop_zero
+// CHECK:           mux %{{.*}} [%[[ZERO]], %{{.*}}] {handshake.bb = 2 : ui32, handshake.name = "mux_j"}
+// CHECK:           mux %{{.*}} [%[[ZERO]], %{{.*}}] {handshake.bb = 2 : ui32, handshake.name = "mux_m"}
+// CHECK:           join
+handshake.func @one_branch_two_crossings(%arg0: !handshake.control<>, ...) -> (!handshake.channel<i32>, !handshake.control<>) attributes {argNames = ["start"], resNames = ["out", "end"], handshake.parallel_regions = [{entry = 0 : ui32, regions = [[1], [2]], successor = 3 : ui32}]} {
+  %0 = constant %arg0 {handshake.bb = 0 : ui32, handshake.name = "zero", value = 0 : i32} : <>, <i32>
+  %1 = br %0 {handshake.bb = 0 : ui32, handshake.name = "br_zero"} : <i32>
+  %2 = br %arg0 {handshake.bb = 0 : ui32, handshake.name = "br_ctrl"} : <>
+  %result, %index = control_merge [%2, %t_c1]  {handshake.bb = 1 : ui32, handshake.name = "merge1"} : [<>, <>] to <>, <i1>
+  %i = mux %index [%1, %t_i] {handshake.bb = 1 : ui32, handshake.name = "mux_i"} : <i1>, [<i32>, <i32>] to <i32>
+  %one = constant %result {handshake.bb = 1 : ui32, handshake.name = "one", value = 1 : i32} : <>, <i32>
+  %i1 = addi %i, %one {handshake.bb = 1 : ui32, handshake.name = "inc_i"} : <i32>
+  %ten = constant %result {handshake.bb = 1 : ui32, handshake.name = "ten", value = 10 : i32} : <>, <i32>
+  %lt = cmpi ult, %i1, %ten {handshake.bb = 1 : ui32, handshake.name = "cmp1"} : <i32>
+  %t_i, %f_i = cond_br %lt, %i1 {handshake.bb = 1 : ui32, handshake.name = "loop_i"} : <i1>, <i32>
+  %t_c1, %f_c1 = cond_br %lt, %result {handshake.bb = 1 : ui32, handshake.name = "exit1"} : <i1>, <>
+  %z = constant %result {handshake.bb = 1 : ui32, handshake.name = "zero_for_j", value = 0 : i32} : <>, <i32>
+  %t_z, %f_z = cond_br %lt, %z {handshake.bb = 1 : ui32, handshake.name = "loop_zero"} : <i1>, <i32>
+  %result_2, %index_2 = control_merge [%f_c1, %t_c2]  {handshake.bb = 2 : ui32, handshake.name = "merge2"} : [<>, <>] to <>, <i1>
+  %j = mux %index_2 [%f_z, %t_j] {handshake.bb = 2 : ui32, handshake.name = "mux_j"} : <i1>, [<i32>, <i32>] to <i32>
+  %m = mux %index_2 [%f_z, %t_m] {handshake.bb = 2 : ui32, handshake.name = "mux_m"} : <i1>, [<i32>, <i32>] to <i32>
+  %one2 = constant %result_2 {handshake.bb = 2 : ui32, handshake.name = "one2", value = 1 : i32} : <>, <i32>
+  %j1 = addi %j, %one2 {handshake.bb = 2 : ui32, handshake.name = "inc_j"} : <i32>
+  %m1 = addi %m, %j {handshake.bb = 2 : ui32, handshake.name = "acc_m"} : <i32>
+  %ten2 = constant %result_2 {handshake.bb = 2 : ui32, handshake.name = "ten2", value = 10 : i32} : <>, <i32>
+  %lt2 = cmpi ult, %j1, %ten2 {handshake.bb = 2 : ui32, handshake.name = "cmp2"} : <i32>
+  %t_j, %f_j = cond_br %lt2, %j1 {handshake.bb = 2 : ui32, handshake.name = "loop_j"} : <i1>, <i32>
+  %t_m, %f_m = cond_br %lt2, %m1 {handshake.bb = 2 : ui32, handshake.name = "loop_m"} : <i1>, <i32>
+  %t_c2, %f_c2 = cond_br %lt2, %result_2 {handshake.bb = 2 : ui32, handshake.name = "exit2"} : <i1>, <>
+  %result_3, %index_3 = control_merge [%f_c2]  {handshake.bb = 3 : ui32, handshake.name = "merge3"} : [<>] to <>, <i1>
+  end {handshake.bb = 3 : ui32, handshake.name = "end0"} %f_m, %result_3 : <i32>, <>
+}
+
+// -----
+
+// v comes from block 0, before the group, and block 2's loop hands it on
+// through a branch of its own (filter_v), which chooses which of v's tokens
+// block 3 receives. Taking v from block 0 would drop that choice: declined.
+// CHECK-LABEL:   handshake.func @before_the_group_filtered(
+// CHECK-NOT:       handshake.parallel_regions
+// CHECK:           %{{.*}}, %[[V:.*]] = cond_br %{{.*}}, %{{.*}} {handshake.bb = 2 : ui32, handshake.name = "filter_v"}
+// CHECK:           mux %{{.*}} [%[[V]], %{{.*}}] {handshake.bb = 3 : ui32, handshake.name = "mux_v"}
+// CHECK-NOT:       join
+// expected-warning @below {{the regions of group 0 of 'handshake.parallel_regions' run one after the other: region 1 would take a value of a block before the group past the branches and muxes of a region that choose its tokens}}
+handshake.func @before_the_group_filtered(%arg0: !handshake.channel<i32>, %arg1: !handshake.control<>, ...) -> (!handshake.channel<i32>, !handshake.control<>) attributes {argNames = ["n", "start"], resNames = ["out", "end"], handshake.parallel_regions = [{entry = 1 : ui32, regions = [[2], [3]], successor = 4 : ui32}]} {
+  // expected-note @below {{here}}
+  %v = addi %arg0, %arg0 {handshake.bb = 0 : ui32, handshake.name = "v"} : <i32>
+  %c0 = br %arg1 {handshake.bb = 0 : ui32, handshake.name = "br_ctrl0"} : <>
+  %e, %ei = control_merge [%c0]  {handshake.bb = 1 : ui32, handshake.name = "merge1"} : [<>] to <>, <i1>
+  %zero = constant %e {handshake.bb = 1 : ui32, handshake.name = "zero", value = 0 : i32} : <>, <i32>
+  %bz = br %zero {handshake.bb = 1 : ui32, handshake.name = "br_zero"} : <i32>
+  %c1 = br %e {handshake.bb = 1 : ui32, handshake.name = "br_ctrl1"} : <>
+  %result, %index = control_merge [%c1, %t_c2]  {handshake.bb = 2 : ui32, handshake.name = "merge2"} : [<>, <>] to <>, <i1>
+  %i = mux %index [%bz, %t_i] {handshake.bb = 2 : ui32, handshake.name = "mux_i"} : <i1>, [<i32>, <i32>] to <i32>
+  %one = constant %result {handshake.bb = 2 : ui32, handshake.name = "one", value = 1 : i32} : <>, <i32>
+  %i1 = addi %i, %one {handshake.bb = 2 : ui32, handshake.name = "inc_i"} : <i32>
+  %ten = constant %result {handshake.bb = 2 : ui32, handshake.name = "ten", value = 10 : i32} : <>, <i32>
+  %lt = cmpi ult, %i1, %ten {handshake.bb = 2 : ui32, handshake.name = "cmp1"} : <i32>
+  %t_i, %f_i = cond_br %lt, %i1 {handshake.bb = 2 : ui32, handshake.name = "loop_i"} : <i1>, <i32>
+  %t_v, %f_v = cond_br %lt, %v {handshake.bb = 2 : ui32, handshake.name = "filter_v"} : <i1>, <i32>
+  sink %t_v {handshake.bb = 2 : ui32, handshake.name = "sink_v"} : <i32>
+  %t_c2, %f_c2 = cond_br %lt, %result {handshake.bb = 2 : ui32, handshake.name = "exit2"} : <i1>, <>
+  %result_3, %index_3 = control_merge [%f_c2, %t_c3]  {handshake.bb = 3 : ui32, handshake.name = "merge3"} : [<>, <>] to <>, <i1>
+  %w = mux %index_3 [%f_v, %t_w] {handshake.bb = 3 : ui32, handshake.name = "mux_v"} : <i1>, [<i32>, <i32>] to <i32>
+  %w1 = addi %w, %w {handshake.bb = 3 : ui32, handshake.name = "dbl"} : <i32>
+  %hundred = constant %result_3 {handshake.bb = 3 : ui32, handshake.name = "hundred", value = 100 : i32} : <>, <i32>
+  %lt3 = cmpi ult, %w1, %hundred {handshake.bb = 3 : ui32, handshake.name = "cmp3"} : <i32>
+  %t_w, %f_w = cond_br %lt3, %w1 {handshake.bb = 3 : ui32, handshake.name = "loop_w"} : <i1>, <i32>
+  %t_c3, %f_c3 = cond_br %lt3, %result_3 {handshake.bb = 3 : ui32, handshake.name = "exit3"} : <i1>, <>
+  %result_4, %index_4 = control_merge [%f_c3]  {handshake.bb = 4 : ui32, handshake.name = "merge4"} : [<>] to <>, <i1>
+  end {handshake.bb = 4 : ui32, handshake.name = "end0"} %f_w, %result_4 : <i32>, <>
+}
+
+// -----
+
+// Block 2 receives k through a blocker that also waits for block 1's last
+// induction value (hold_k): block 2 waits for block 1 there. Taking k from
+// the entry would take it past that wait: declined.
+// CHECK-LABEL:   handshake.func @blocker_on_the_crossing(
+// CHECK-NOT:       handshake.parallel_regions
+// CHECK:           %[[HELD:.*]] = blocker %{{.*}}, %{{.*}} {handshake.bb = 1 : ui32, handshake.name = "hold_k"}
+// CHECK:           mux %{{.*}} [%[[HELD]], %{{.*}}] {handshake.bb = 2 : ui32, handshake.name = "mux_k2"}
+// CHECK-NOT:       join
+// expected-warning @below {{the regions of group 0 of 'handshake.parallel_regions' run one after the other: region 1 would take this value past a blocker of region 0, which also waits for its other inputs}}
+handshake.func @blocker_on_the_crossing(%arg0: !handshake.channel<i32>, %arg1: !handshake.control<>, ...) -> (!handshake.channel<i32>, !handshake.control<>) attributes {argNames = ["k", "start"], resNames = ["out", "end"], handshake.parallel_regions = [{entry = 0 : ui32, regions = [[1], [2]], successor = 3 : ui32}]} {
+  %0 = constant %arg1 {handshake.bb = 0 : ui32, handshake.name = "zero", value = 0 : i32} : <>, <i32>
+  %1 = br %0 {handshake.bb = 0 : ui32, handshake.name = "br_zero"} : <i32>
+  %2 = br %arg0 {handshake.bb = 0 : ui32, handshake.name = "br_k"} : <i32>
+  %3 = br %arg1 {handshake.bb = 0 : ui32, handshake.name = "br_ctrl"} : <>
+  %result, %index = control_merge [%3, %t_c1]  {handshake.bb = 1 : ui32, handshake.name = "merge1"} : [<>, <>] to <>, <i1>
+  %i = mux %index [%1, %t_i] {handshake.bb = 1 : ui32, handshake.name = "mux_i"} : <i1>, [<i32>, <i32>] to <i32>
+  %k = mux %index [%2, %t_k] {handshake.bb = 1 : ui32, handshake.name = "mux_k1"} : <i1>, [<i32>, <i32>] to <i32>
+  %one = constant %result {handshake.bb = 1 : ui32, handshake.name = "one", value = 1 : i32} : <>, <i32>
+  %i1 = addi %i, %one {handshake.bb = 1 : ui32, handshake.name = "inc_i"} : <i32>
+  %ten = constant %result {handshake.bb = 1 : ui32, handshake.name = "ten", value = 10 : i32} : <>, <i32>
+  %lt = cmpi ult, %i1, %ten {handshake.bb = 1 : ui32, handshake.name = "cmp1"} : <i32>
+  %t_i, %f_i = cond_br %lt, %i1 {handshake.bb = 1 : ui32, handshake.name = "loop_i"} : <i1>, <i32>
+  %t_k, %f_k = cond_br %lt, %k {handshake.bb = 1 : ui32, handshake.name = "loop_k1"} : <i1>, <i32>
+  // expected-note @below {{here}}
+  %held = blocker %f_k, %f_i {handshake.bb = 1 : ui32, handshake.name = "hold_k"} : <i32>
+  %t_c1, %f_c1 = cond_br %lt, %result {handshake.bb = 1 : ui32, handshake.name = "exit1"} : <i1>, <>
+  %result_2, %index_2 = control_merge [%f_c1, %t_c2]  {handshake.bb = 2 : ui32, handshake.name = "merge2"} : [<>, <>] to <>, <i1>
+  %k2 = mux %index_2 [%held, %t_k2] {handshake.bb = 2 : ui32, handshake.name = "mux_k2"} : <i1>, [<i32>, <i32>] to <i32>
+  %k3 = addi %k2, %k2 {handshake.bb = 2 : ui32, handshake.name = "dbl"} : <i32>
+  %hundred = constant %result_2 {handshake.bb = 2 : ui32, handshake.name = "hundred", value = 100 : i32} : <>, <i32>
+  %lt2 = cmpi ult, %k3, %hundred {handshake.bb = 2 : ui32, handshake.name = "cmp2"} : <i32>
+  %t_k2, %f_k2 = cond_br %lt2, %k3 {handshake.bb = 2 : ui32, handshake.name = "loop_k2"} : <i1>, <i32>
+  %t_c2, %f_c2 = cond_br %lt2, %result_2 {handshake.bb = 2 : ui32, handshake.name = "exit2"} : <i1>, <>
+  %result_3, %index_3 = control_merge [%f_c2]  {handshake.bb = 3 : ui32, handshake.name = "merge3"} : [<>] to <>, <i1>
+  end {handshake.bb = 3 : ui32, handshake.name = "end0"} %f_k2, %result_3 : <i32>, <>
+}
+
+// -----
+
+// The constant block 1 makes for block 2 leaves through a lazy fork (one
+// output sunk). Re-made in the entry, it leaves the fork, the branch and the
+// constant unused, and they go.
+// CHECK-LABEL:   handshake.func @lazy_fork_on_the_crossing(
+// CHECK-NOT:       lazy_fork
+// CHECK-NOT:       loop_zero
+// CHECK:           join
+handshake.func @lazy_fork_on_the_crossing(%arg0: !handshake.control<>, ...) -> (!handshake.channel<i32>, !handshake.control<>) attributes {argNames = ["start"], resNames = ["out", "end"], handshake.parallel_regions = [{entry = 0 : ui32, regions = [[1], [2]], successor = 3 : ui32}]} {
+  %0 = constant %arg0 {handshake.bb = 0 : ui32, handshake.name = "zero", value = 0 : i32} : <>, <i32>
+  %1 = br %0 {handshake.bb = 0 : ui32, handshake.name = "br_zero"} : <i32>
+  %2 = br %arg0 {handshake.bb = 0 : ui32, handshake.name = "br_ctrl"} : <>
+  %result, %index = control_merge [%2, %t_c1]  {handshake.bb = 1 : ui32, handshake.name = "merge1"} : [<>, <>] to <>, <i1>
+  %i = mux %index [%1, %t_i] {handshake.bb = 1 : ui32, handshake.name = "mux_i"} : <i1>, [<i32>, <i32>] to <i32>
+  %one = constant %result {handshake.bb = 1 : ui32, handshake.name = "one", value = 1 : i32} : <>, <i32>
+  %i1 = addi %i, %one {handshake.bb = 1 : ui32, handshake.name = "inc_i"} : <i32>
+  %ten = constant %result {handshake.bb = 1 : ui32, handshake.name = "ten", value = 10 : i32} : <>, <i32>
+  %lt = cmpi ult, %i1, %ten {handshake.bb = 1 : ui32, handshake.name = "cmp1"} : <i32>
+  %t_i, %f_i = cond_br %lt, %i1 {handshake.bb = 1 : ui32, handshake.name = "loop_i"} : <i1>, <i32>
+  %t_c1, %f_c1 = cond_br %lt, %result {handshake.bb = 1 : ui32, handshake.name = "exit1"} : <i1>, <>
+  %z = constant %result {handshake.bb = 1 : ui32, handshake.name = "zero_for_j", value = 0 : i32} : <>, <i32>
+  %t_z, %f_z = cond_br %lt, %z {handshake.bb = 1 : ui32, handshake.name = "loop_zero"} : <i1>, <i32>
+  %lz:2 = lazy_fork [2] %f_z {handshake.bb = 1 : ui32, handshake.name = "lazy_zero"} : <i32>
+  sink %lz#1 {handshake.bb = 1 : ui32, handshake.name = "sink_zero"} : <i32>
+  %result_2, %index_2 = control_merge [%f_c1, %t_c2]  {handshake.bb = 2 : ui32, handshake.name = "merge2"} : [<>, <>] to <>, <i1>
+  %j = mux %index_2 [%lz#0, %t_j] {handshake.bb = 2 : ui32, handshake.name = "mux_j"} : <i1>, [<i32>, <i32>] to <i32>
+  %one2 = constant %result_2 {handshake.bb = 2 : ui32, handshake.name = "one2", value = 1 : i32} : <>, <i32>
+  %j1 = addi %j, %one2 {handshake.bb = 2 : ui32, handshake.name = "inc_j"} : <i32>
+  %ten2 = constant %result_2 {handshake.bb = 2 : ui32, handshake.name = "ten2", value = 10 : i32} : <>, <i32>
+  %lt2 = cmpi ult, %j1, %ten2 {handshake.bb = 2 : ui32, handshake.name = "cmp2"} : <i32>
+  %t_j, %f_j = cond_br %lt2, %j1 {handshake.bb = 2 : ui32, handshake.name = "loop_j"} : <i1>, <i32>
+  %t_c2, %f_c2 = cond_br %lt2, %result_2 {handshake.bb = 2 : ui32, handshake.name = "exit2"} : <i1>, <>
+  %result_3, %index_3 = control_merge [%f_c2]  {handshake.bb = 3 : ui32, handshake.name = "merge3"} : [<>] to <>, <i1>
+  end {handshake.bb = 3 : ui32, handshake.name = "end0"} %f_j, %result_3 : <i32>, <>
+}
+
+// -----
+
+// Block 2 receives a value that, followed back, only goes round a ring of
+// wires in block 1 (a one-input merge and its branch): declined, rather
+// than followed forever.
+// CHECK-LABEL:   handshake.func @ring_of_wires(
+// CHECK-NOT:       handshake.parallel_regions
+// CHECK-NOT:       join
+// expected-warning @below {{the regions of group 0 of 'handshake.parallel_regions' run one after the other: this value only goes round a ring of wires in region 0, and region 1 uses it}}
+handshake.func @ring_of_wires(%arg0: !handshake.control<>, ...) -> (!handshake.channel<i32>, !handshake.control<>) attributes {argNames = ["start"], resNames = ["out", "end"], handshake.parallel_regions = [{entry = 0 : ui32, regions = [[1], [2]], successor = 3 : ui32}]} {
+  %0 = constant %arg0 {handshake.bb = 0 : ui32, handshake.name = "zero", value = 0 : i32} : <>, <i32>
+  %1 = br %0 {handshake.bb = 0 : ui32, handshake.name = "br_zero"} : <i32>
+  %2 = br %arg0 {handshake.bb = 0 : ui32, handshake.name = "br_ctrl"} : <>
+  %result, %index = control_merge [%2, %t_c1]  {handshake.bb = 1 : ui32, handshake.name = "merge1"} : [<>, <>] to <>, <i1>
+  %i = mux %index [%1, %t_i] {handshake.bb = 1 : ui32, handshake.name = "mux_i"} : <i1>, [<i32>, <i32>] to <i32>
+  %one = constant %result {handshake.bb = 1 : ui32, handshake.name = "one", value = 1 : i32} : <>, <i32>
+  %i1 = addi %i, %one {handshake.bb = 1 : ui32, handshake.name = "inc_i"} : <i32>
+  %ten = constant %result {handshake.bb = 1 : ui32, handshake.name = "ten", value = 10 : i32} : <>, <i32>
+  %lt = cmpi ult, %i1, %ten {handshake.bb = 1 : ui32, handshake.name = "cmp1"} : <i32>
+  %t_i, %f_i = cond_br %lt, %i1 {handshake.bb = 1 : ui32, handshake.name = "loop_i"} : <i1>, <i32>
+  %r = merge %t_r {handshake.bb = 1 : ui32, handshake.name = "ring"} : <i32>
+  // expected-note @below {{here}}
+  %t_r, %f_r = cond_br %lt, %r {handshake.bb = 1 : ui32, handshake.name = "loop_r"} : <i1>, <i32>
+  %t_c1, %f_c1 = cond_br %lt, %result {handshake.bb = 1 : ui32, handshake.name = "exit1"} : <i1>, <>
+  %result_2, %index_2 = control_merge [%f_c1, %t_c2]  {handshake.bb = 2 : ui32, handshake.name = "merge2"} : [<>, <>] to <>, <i1>
+  %j = mux %index_2 [%f_r, %t_j] {handshake.bb = 2 : ui32, handshake.name = "mux_j"} : <i1>, [<i32>, <i32>] to <i32>
+  %one2 = constant %result_2 {handshake.bb = 2 : ui32, handshake.name = "one2", value = 1 : i32} : <>, <i32>
+  %j1 = addi %j, %one2 {handshake.bb = 2 : ui32, handshake.name = "inc_j"} : <i32>
+  %ten2 = constant %result_2 {handshake.bb = 2 : ui32, handshake.name = "ten2", value = 10 : i32} : <>, <i32>
+  %lt2 = cmpi ult, %j1, %ten2 {handshake.bb = 2 : ui32, handshake.name = "cmp2"} : <i32>
+  %t_j, %f_j = cond_br %lt2, %j1 {handshake.bb = 2 : ui32, handshake.name = "loop_j"} : <i1>, <i32>
+  %t_c2, %f_c2 = cond_br %lt2, %result_2 {handshake.bb = 2 : ui32, handshake.name = "exit2"} : <i1>, <>
+  %result_3, %index_3 = control_merge [%f_c2]  {handshake.bb = 3 : ui32, handshake.name = "merge3"} : [<>] to <>, <i1>
+  end {handshake.bb = 3 : ui32, handshake.name = "end0"} %f_j, %result_3 : <i32>, <>
+}
+
+// -----
+
+// Three regions; block 1 sums into mux_s, block 2 carries the sum on
+// (mux_s1) and block 3 reads it (mux_s2). Block 3's ops come first, so its
+// crossing, from region 1, is followed first: through region 1 into region 0,
+// whose loop updates the sum. The warning names the crossing's region, 2,
+// not the region the walk got to.
+// CHECK-LABEL:   handshake.func @names_the_crossing(
+// CHECK-NOT:       handshake.parallel_regions
+// CHECK-NOT:       join
+// expected-warning @below {{the regions of group 0 of 'handshake.parallel_regions' run one after the other: region 0's loop updates this value and region 2 uses it}}
+handshake.func @names_the_crossing(%arg0: !handshake.control<>, ...) -> (!handshake.channel<i32>, !handshake.control<>) attributes {argNames = ["start"], resNames = ["sum", "end"], handshake.parallel_regions = [{entry = 0 : ui32, regions = [[1], [2], [3]], successor = 4 : ui32}]} {
+  %r3, %i3 = control_merge [%f_c2, %t_c3]  {handshake.bb = 3 : ui32, handshake.name = "merge3"} : [<>, <>] to <>, <i1>
+  %s2 = mux %i3 [%f_s1, %t_s2] {handshake.bb = 3 : ui32, handshake.name = "mux_s2"} : <i1>, [<i32>, <i32>] to <i32>
+  %s2n = addi %s2, %s2 {handshake.bb = 3 : ui32, handshake.name = "dbl"} : <i32>
+  %h3 = constant %r3 {handshake.bb = 3 : ui32, handshake.name = "hundred", value = 100 : i32} : <>, <i32>
+  %lt3 = cmpi ult, %s2n, %h3 {handshake.bb = 3 : ui32, handshake.name = "cmp3"} : <i32>
+  %t_s2, %f_s2 = cond_br %lt3, %s2n {handshake.bb = 3 : ui32, handshake.name = "loop_s2"} : <i1>, <i32>
+  %t_c3, %f_c3 = cond_br %lt3, %r3 {handshake.bb = 3 : ui32, handshake.name = "exit3"} : <i1>, <>
+  %0 = constant %arg0 {handshake.bb = 0 : ui32, handshake.name = "zero", value = 0 : i32} : <>, <i32>
+  %1 = br %0 {handshake.bb = 0 : ui32, handshake.name = "br_zero"} : <i32>
+  %2 = br %0 {handshake.bb = 0 : ui32, handshake.name = "br_sum"} : <i32>
+  %3 = br %arg0 {handshake.bb = 0 : ui32, handshake.name = "br_ctrl"} : <>
+  %r1, %i1 = control_merge [%3, %t_c1]  {handshake.bb = 1 : ui32, handshake.name = "merge1"} : [<>, <>] to <>, <i1>
+  %i = mux %i1 [%1, %t_i] {handshake.bb = 1 : ui32, handshake.name = "mux_i"} : <i1>, [<i32>, <i32>] to <i32>
+  // expected-note @below {{here}}
+  %s = mux %i1 [%2, %t_s] {handshake.bb = 1 : ui32, handshake.name = "mux_s"} : <i1>, [<i32>, <i32>] to <i32>
+  %one = constant %r1 {handshake.bb = 1 : ui32, handshake.name = "one", value = 1 : i32} : <>, <i32>
+  %in = addi %i, %one {handshake.bb = 1 : ui32, handshake.name = "inc_i"} : <i32>
+  %sn = addi %s, %i {handshake.bb = 1 : ui32, handshake.name = "acc_s"} : <i32>
+  %ten = constant %r1 {handshake.bb = 1 : ui32, handshake.name = "ten", value = 10 : i32} : <>, <i32>
+  %lt = cmpi ult, %in, %ten {handshake.bb = 1 : ui32, handshake.name = "cmp1"} : <i32>
+  %t_i, %f_i = cond_br %lt, %in {handshake.bb = 1 : ui32, handshake.name = "loop_i"} : <i1>, <i32>
+  %t_s, %f_sx = cond_br %lt, %sn {handshake.bb = 1 : ui32, handshake.name = "loop_s"} : <i1>, <i32>
+  %t_sy, %f_s = cond_br %lt, %s {handshake.bb = 1 : ui32, handshake.name = "exit_s"} : <i1>, <i32>
+  %t_c1, %f_c1 = cond_br %lt, %r1 {handshake.bb = 1 : ui32, handshake.name = "exit1"} : <i1>, <>
+  %z = constant %r1 {handshake.bb = 1 : ui32, handshake.name = "zero_for_j", value = 0 : i32} : <>, <i32>
+  %t_z, %f_z = cond_br %lt, %z {handshake.bb = 1 : ui32, handshake.name = "loop_zero"} : <i1>, <i32>
+  %r2, %i2 = control_merge [%f_c1, %t_c2]  {handshake.bb = 2 : ui32, handshake.name = "merge2"} : [<>, <>] to <>, <i1>
+  %j = mux %i2 [%f_z, %t_j] {handshake.bb = 2 : ui32, handshake.name = "mux_j"} : <i1>, [<i32>, <i32>] to <i32>
+  %s1 = mux %i2 [%f_s, %t_s1] {handshake.bb = 2 : ui32, handshake.name = "mux_s1"} : <i1>, [<i32>, <i32>] to <i32>
+  %one2 = constant %r2 {handshake.bb = 2 : ui32, handshake.name = "one2", value = 1 : i32} : <>, <i32>
+  %jn = addi %j, %one2 {handshake.bb = 2 : ui32, handshake.name = "inc_j"} : <i32>
+  %ten2 = constant %r2 {handshake.bb = 2 : ui32, handshake.name = "ten2", value = 10 : i32} : <>, <i32>
+  %lt2 = cmpi ult, %jn, %ten2 {handshake.bb = 2 : ui32, handshake.name = "cmp2"} : <i32>
+  %t_j, %f_j = cond_br %lt2, %jn {handshake.bb = 2 : ui32, handshake.name = "loop_j"} : <i1>, <i32>
+  %t_s1, %f_s1 = cond_br %lt2, %s1 {handshake.bb = 2 : ui32, handshake.name = "loop_s1"} : <i1>, <i32>
+  %t_c2, %f_c2 = cond_br %lt2, %r2 {handshake.bb = 2 : ui32, handshake.name = "exit2"} : <i1>, <>
+  %r4, %i4 = control_merge [%f_c3]  {handshake.bb = 4 : ui32, handshake.name = "merge4"} : [<>] to <>, <i1>
+  end {handshake.bb = 4 : ui32, handshake.name = "end0"} %f_s2, %r4 : <i32>, <>
+}
+
+// -----
+
+// The group names block 7, which holds no operation: an attribute that does
+// not fit the function is an error.
+// expected-error @below {{block 7 named in 'handshake.parallel_regions' has no operation}}
+handshake.func @no_such_block(%arg0: !handshake.control<>, ...) -> !handshake.control<> attributes {argNames = ["start"], resNames = ["end"], handshake.parallel_regions = [{entry = 0 : ui32, regions = [[1], [7]], successor = 2 : ui32}]} {
+  %0 = br %arg0 {handshake.bb = 0 : ui32, handshake.name = "br_ctrl"} : <>
+  %result, %index = control_merge [%0]  {handshake.bb = 1 : ui32, handshake.name = "merge1"} : [<>] to <>, <i1>
+  %1 = br %result {handshake.bb = 1 : ui32, handshake.name = "br1"} : <>
+  %result_2, %index_2 = control_merge [%1]  {handshake.bb = 2 : ui32, handshake.name = "merge2"} : [<>] to <>, <i1>
+  end {handshake.bb = 2 : ui32, handshake.name = "end0"} %result_2 : <>
+}

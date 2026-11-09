@@ -179,18 +179,18 @@ static Place placeOf(std::optional<unsigned> bb,
   return {Place::OUTSIDE, 0};
 }
 
-/// One step back along a path that hands a token on with its data
-/// unchanged: a branch (either side of a conditional one), a fork, a buffer,
-/// a one-input merge, a blocker's forwarded (first) operand, or a channel
-/// taken apart and put together again (`bundle(unbundle(x))`). Null where
-/// the step is anything else. Every walk below steps through here, so that
-/// they all agree on what a wire is.
+/// One step back along a path that hands every token on unchanged, and when
+/// it comes: a branch (either side of a conditional one), a fork or lazy
+/// fork, a buffer, a one-input merge, a blocker of one input, or a channel
+/// taken apart and put together again (`bundle(unbundle(x))`). Null where the
+/// step is anything else. A value a region hands the next is rewired past
+/// such steps only, and what only they took is erased after.
 static Value passedOn(Operation *op) {
   if (auto condBr = dyn_cast<ConditionalBranchOp>(op))
     return condBr.getDataOperand();
-  if (isa<BranchOp, ForkOp, LazyForkOp, BufferOp, BlockerOp>(op))
+  if (isa<BranchOp, ForkOp, LazyForkOp, BufferOp>(op))
     return op->getOperand(0);
-  if (isa<MergeOp>(op) && op->getNumOperands() == 1)
+  if (isa<MergeOp, BlockerOp>(op) && op->getNumOperands() == 1)
     return op->getOperand(0);
   if (auto bundle = dyn_cast<BundleOp>(op)) {
     if (bundle->getNumOperands() != 2 || bundle->getNumResults() != 1)
@@ -207,101 +207,170 @@ static Value passedOn(Operation *op) {
   return {};
 }
 
+/// The same, and a blocker's forwarded (first) operand whatever else it waits
+/// for: what a value is, not when it comes. A back edge through such a
+/// blocker still hands its mux the mux's value; a later region that took the
+/// value past it would no longer wait for the blocker's other inputs.
+static Value sameValueAs(Operation *op) {
+  if (isa<BlockerOp>(op))
+    return op->getOperand(0);
+  return passedOn(op);
+}
+
 namespace {
+
+/// Where a source comes from, for comparing two: followed back through what
+/// keeps a value (sameValueAs), the value it reaches and the conditional
+/// branches on the way (condition, side), or the constant it reaches. Not
+/// `known` on a ring of wires.
+struct Root {
+  Value value;
+  handshake::ConstantOp constant;
+  SmallVector<std::pair<Value, unsigned>> filters;
+  bool known = true;
+};
 
 /// Follows a value that leaves a region back to where it came in: the entry
 /// block, a block before the group, or a constant inside a region. Only
 /// wires (passedOn) and loop-carried muxes that carry the value unchanged may
 /// lie on the way; anything else computes the value inside the region, which
 /// makes it a live-out the next region genuinely waits for, and `refusal`
-/// says so.
+/// says so. Every refusal declines the group, so the results it caches are
+/// all successes.
 class Resolver {
 public:
   Resolver(const llvm::DenseMap<unsigned, Place> &places, unsigned entry)
       : places(places), entry(entry) {}
 
-  /// Where `val`, a value of region `at`, came in.
-  FailureOr<Source> resolve(Value val, unsigned at);
+  /// Where the value region `from` hands region `from + 1` through `val`
+  /// came in.
+  FailureOr<Source> resolveCrossing(Value val, unsigned from) {
+    user = from + 1;
+    return resolve(val, from, /*filtered=*/false);
+  }
 
   Refusal refusal;
 
 private:
   const llvm::DenseMap<unsigned, Place> &places;
   unsigned entry;
+  /// The region the crossing being resolved goes into, which the refusals
+  /// name.
+  unsigned user = 0;
   /// The muxes whose loop-entry operand is being followed: one met again is
   /// a cycle no loop entry breaks.
   SmallPtrSet<Operation *, 8> resolving;
+  /// What `resolve` found, by (value, 2 * region + filtered).
+  llvm::DenseMap<std::pair<Value, unsigned>, Source> resolved;
+  /// The muxes found to carry their loop-entry value, and where it came in.
+  llvm::DenseMap<Operation *, Source> carried;
 
   bool inRegion(Operation *op, unsigned at) const {
     Place p = placeOf(getLogicBB(op), places);
     return p.kind == Place::REGION && p.region == at;
   }
 
-  /// Back through the wires of region `at`.
-  Value throughWires(Value val, unsigned at) const {
-    while (Operation *def = val.getDefiningOp()) {
-      if (!inRegion(def, at))
-        break;
-      Value prev = passedOn(def);
-      if (!prev)
-        break;
-      val = prev;
-    }
-    return val;
-  }
+  /// A walk back through the wires of one region: where it stopped, and
+  /// whether it stepped through a conditional branch, which chooses the
+  /// tokens it hands on.
+  struct Walk {
+    Value val;
+    bool filtered = false;
+  };
+  FailureOr<Walk> throughWires(Value val, unsigned at,
+                               Value (*step)(Operation *));
 
-  FailureOr<Source> refuse(Operation *at, const Twine &why) {
+  FailureOr<Source> resolve(Value val, unsigned at, bool filtered);
+  FailureOr<Source> resolveUncached(Value val, unsigned at, bool filtered);
+  LogicalResult carriesItself(Operation *mux, unsigned at, const Source &init);
+
+  LogicalResult refuse(Operation *at, const Twine &why) {
     refusal = {at, why.str()};
     return failure();
   }
-
-  LogicalResult carriesItself(Operation *mux, unsigned at, const Source &init);
 };
 
 } // namespace
 
-/// Whether two sources are one value. Followed back through wires, they meet
-/// at one value through the same branches taken the same way (the same
-/// tokens), or at two constants of one value and type.
-static bool sameSource(const Source &a, const Source &b) {
-  struct Root {
-    Value value;
-    handshake::ConstantOp constant;
-    SmallVector<std::pair<Value, unsigned>> filters;
-  };
-  auto rootOf = [](const Source &src) {
-    Root root;
-    if (src.constant) {
-      root.constant = src.constant;
+static Root rootOf(const Source &src) {
+  Root root;
+  if (src.constant) {
+    root.constant = src.constant;
+    return root;
+  }
+  Value val = src.value;
+  SmallPtrSet<Operation *, 8> seen;
+  while (Operation *def = val.getDefiningOp()) {
+    Value prev = sameValueAs(def);
+    if (!prev)
+      break;
+    if (!seen.insert(def).second) {
+      root.known = false;
       return root;
     }
-    Value val = src.value;
-    while (Operation *def = val.getDefiningOp()) {
-      if (auto condBr = dyn_cast<ConditionalBranchOp>(def))
-        root.filters.push_back({condBr.getConditionOperand(),
-                                cast<OpResult>(val).getResultNumber()});
-      Value prev = passedOn(def);
-      if (!prev)
-        break;
-      val = prev;
-    }
-    root.constant = val.getDefiningOp<handshake::ConstantOp>();
-    root.value = val;
-    return root;
-  };
-  Root ra = rootOf(a), rb = rootOf(b);
-  if (ra.constant || rb.constant)
-    return ra.constant && rb.constant &&
-           ra.constant.getValue() == rb.constant.getValue() &&
-           ra.constant.getResult().getType() ==
-               rb.constant.getResult().getType();
-  return ra.value == rb.value && ra.filters == rb.filters;
+    if (auto condBr = dyn_cast<ConditionalBranchOp>(def))
+      root.filters.push_back({condBr.getConditionOperand(),
+                              cast<OpResult>(val).getResultNumber()});
+    val = prev;
+  }
+  root.constant = val.getDefiningOp<handshake::ConstantOp>();
+  root.value = val;
+  return root;
 }
 
-FailureOr<Source> Resolver::resolve(Value val, unsigned at) {
+/// Whether two sources are one value: they meet at one value through the
+/// same branches taken the same way (the same tokens), or at two constants
+/// of one value and type.
+static bool sameRoot(Root a, Root b) {
+  if (!a.known || !b.known)
+    return false;
+  if (a.constant || b.constant)
+    return a.constant && b.constant &&
+           a.constant.getValue() == b.constant.getValue() &&
+           a.constant.getResult().getType() == b.constant.getResult().getType();
+  return a.value == b.value && a.filters == b.filters;
+}
+
+FailureOr<Resolver::Walk> Resolver::throughWires(Value val, unsigned at,
+                                                 Value (*step)(Operation *)) {
+  Walk walk{val};
+  SmallPtrSet<Operation *, 8> seen;
+  while (Operation *def = walk.val.getDefiningOp()) {
+    if (!inRegion(def, at))
+      break;
+    Value prev = step(def);
+    if (!prev)
+      break;
+    if (!seen.insert(def).second)
+      return refuse(def, "this value only goes round a ring of wires in "
+                         "region " +
+                             Twine(at) + ", and region " + Twine(user) +
+                             " uses it");
+    walk.filtered |= isa<ConditionalBranchOp>(def);
+    walk.val = prev;
+  }
+  return walk;
+}
+
+FailureOr<Source> Resolver::resolve(Value val, unsigned at, bool filtered) {
+  auto key = std::make_pair(val, 2 * at + (filtered ? 1 : 0));
+  if (auto it = resolved.find(key); it != resolved.end())
+    return it->second;
+  FailureOr<Source> src = resolveUncached(val, at, filtered);
+  if (succeeded(src))
+    resolved[key] = *src;
+  return src;
+}
+
+FailureOr<Source> Resolver::resolveUncached(Value val, unsigned at,
+                                            bool filtered) {
   Value cur = val;
   while (true) {
-    cur = throughWires(cur, at);
+    FailureOr<Walk> walk = throughWires(cur, at, passedOn);
+    if (failed(walk))
+      return failure();
+    cur = walk->val;
+    filtered |= walk->filtered;
     Operation *def = cur.getDefiningOp();
     if (!def)
       return Source{cur, {}};
@@ -311,24 +380,41 @@ FailureOr<Source> Resolver::resolve(Value val, unsigned at) {
       return Source{cur, {}};
     // A value from a block BEFORE the group is a value of the firing, like
     // one from the entry (the regions may read it directly; see the edges
-    // parallelize admits).
+    // parallelize admits), but only as the crossing had it: a branch or a mux
+    // on the way chose which of its tokens went on.
     if (p.kind == Place::OUTSIDE && *bb < entry &&
-        !isa<handshake::ControlType>(cur.getType()))
+        !isa<handshake::ControlType>(cur.getType())) {
+      if (filtered)
+        return refuse(def, "region " + Twine(user) +
+                               " would take a value of a block before the "
+                               "group past the branches and muxes of a "
+                               "region that choose its tokens");
       return Source{cur, {}};
+    }
     // Region `at` received it through the previous region's exit: where it
     // came into that one.
     if (p.kind == Place::REGION && p.region + 1 == at) {
       at = p.region;
+      filtered = true;
       continue;
     }
     if (p.kind != Place::REGION || p.region != at)
-      return refuse(def, "a value region " + Twine(at + 1) +
+      return refuse(def, "a value region " + Twine(user) +
                              " uses comes from neither the entry block nor "
                              "region " +
                              Twine(at));
     if (auto cst = dyn_cast<ConstantOp>(def))
       return Source{{}, cst};
+    if (isa<BlockerOp>(def))
+      return refuse(def, "region " + Twine(user) +
+                             " would take this value past a blocker of "
+                             "region " +
+                             Twine(at) +
+                             ", which also waits for its other "
+                             "inputs");
     if (isa<MuxOp, MergeOp>(def)) {
+      if (auto it = carried.find(def); it != carried.end())
+        return it->second;
       Value init;
       for (Value data : cast<MergeLikeOpInterface>(def).getDataOperands()) {
         if (isBackedge(data, def))
@@ -336,44 +422,50 @@ FailureOr<Source> Resolver::resolve(Value val, unsigned at) {
         if (init)
           return refuse(def, "this merge carries two distinct values into "
                              "region " +
-                                 Twine(at + 1));
+                                 Twine(user));
         init = data;
       }
       if (!init)
         return refuse(def, "this merge has no loop entry operand");
       if (!resolving.insert(def).second)
         return refuse(def, "this merge's loop entry leads back to it");
-      FailureOr<Source> src = resolve(init, at);
+      FailureOr<Source> src = resolve(init, at, /*filtered=*/true);
       if (succeeded(src) && failed(carriesItself(def, at, *src)))
         src = failure();
       resolving.erase(def);
+      if (succeeded(src))
+        carried[def] = *src;
       return src;
     }
     return refuse(def, "region " + Twine(at) +
-                           " computes this value and region " + Twine(at + 1) +
+                           " computes this value and region " + Twine(user) +
                            " uses it");
   }
 }
 
 /// Whether the back edges of `mux`, of region `at`, hand it the value its
-/// loop-entry operand brings (`init`, where that came in). Followed through
-/// wires, each must lead back to the mux, or to another mux or merge of the
-/// region (an inner loop's, a join block's) that carries the value in turn:
-/// every operand of that one must lead back the same way, or bring that same
-/// value in (the same entry value through a ring of its own, a copy of the
-/// same constant). Then whatever leaves through the mux is that value. A back
-/// edge that leads anywhere else brings a value the loop made, and what
-/// leaves is the last of those.
+/// loop-entry operand brings (`init`, where that came in). Followed back
+/// through what keeps a value (sameValueAs), each must lead to the mux, or
+/// to another mux or merge of the region (an inner loop's, a join block's)
+/// that carries the value in turn: every operand of that one must lead back
+/// the same way, or bring that same value in (the same entry value through a
+/// ring of its own, a copy of the same constant). Then whatever leaves
+/// through the mux is that value. A back edge that leads anywhere else
+/// brings a value the loop made, and what leaves is the last of those.
 LogicalResult Resolver::carriesItself(Operation *mux, unsigned at,
                                       const Source &init) {
+  std::optional<Root> initRoot;
   SmallPtrSet<Operation *, 8> carriers = {mux};
   SmallVector<Value> pending;
   for (Value data : cast<MergeLikeOpInterface>(mux).getDataOperands())
     if (isBackedge(data, mux))
       pending.push_back(data);
   while (!pending.empty()) {
-    Value val = throughWires(pending.pop_back_val(), at);
-    Operation *src = val.getDefiningOp();
+    FailureOr<Walk> walk =
+        throughWires(pending.pop_back_val(), at, sameValueAs);
+    if (failed(walk))
+      return failure();
+    Operation *src = walk->val.getDefiningOp();
     if (src && carriers.contains(src))
       continue;
     if (src && isa<MuxOp, MergeOp>(src) && inRegion(src, at)) {
@@ -382,12 +474,16 @@ LogicalResult Resolver::carriesItself(Operation *mux, unsigned at,
                          cast<MergeLikeOpInterface>(src).getDataOperands());
       continue;
     }
-    FailureOr<Source> other = resolve(val, at);
-    if (succeeded(other) && sameSource(*other, init))
-      continue;
+    FailureOr<Source> other = resolve(walk->val, at, /*filtered=*/true);
+    if (succeeded(other)) {
+      if (!initRoot)
+        initRoot = rootOf(init);
+      if (sameRoot(rootOf(*other), *initRoot))
+        continue;
+    }
     return refuse(mux, "region " + Twine(at) +
                            "'s loop updates this value and region " +
-                           Twine(at + 1) + " uses it");
+                           Twine(user) + " uses it");
   }
   return success();
 }
@@ -429,8 +525,11 @@ Outcome HandshakeParallelizeRegionsPass::parallelize(
 
   LogicBBs bbs = getLogicBBs(funcOp);
   for (auto &[bb, p] : places) {
-    if (!bbs.blocks.contains(bb))
-      return decline(nullptr, "block " + Twine(bb) + " has no operation");
+    if (!bbs.blocks.contains(bb)) {
+      funcOp->emitError() << "block " << bb << " named in '" << REGIONS_ATTR
+                          << "' has no operation";
+      return Outcome::FAILED;
+    }
   }
 
   // Walk every edge that lands in a block of the group and classify it. The
@@ -640,7 +739,7 @@ Outcome HandshakeParallelizeRegionsPass::parallelize(
   SmallVector<std::pair<OpOperand *, Source>> resolved;
   for (OpOperand *opd : dataCrossings) {
     unsigned from = placeOf(blockOf(opd->get()), places).region;
-    FailureOr<Source> src = resolver.resolve(opd->get(), from);
+    FailureOr<Source> src = resolver.resolveCrossing(opd->get(), from);
     if (failed(src))
       return decline(resolver.refusal.at, resolver.refusal.why);
     resolved.push_back({opd, *src});
@@ -678,13 +777,19 @@ Outcome HandshakeParallelizeRegionsPass::parallelize(
   // The wires that only existed to carry a value out of a region are now
   // dead: the exit branch, and behind it the muxes, forks and constants that
   // threaded the value through the loop. Erase what nothing uses any more,
-  // back to the first operation that still has a consumer.
+  // back to the first operation that still has a consumer: what the values
+  // were rewired past (the wires passedOn steps through, and the unbundle a
+  // channel put together again came from), muxes, merges and constants.
   // In materialized input a sink is the only consumer of such a wire; it
-  // counts as no consumer and goes with the wire.
+  // counts as no consumer and goes with the wire. One operation may be
+  // reached twice (two crossings from one fork's results, two operands of an
+  // erased one from one producer); the second time it is gone.
+  SmallPtrSet<Operation *, 16> erased;
   while (!maybeDead.empty()) {
     Operation *op = maybeDead.pop_back_val();
-    if (!op || !isa<ConditionalBranchOp, BranchOp, ForkOp, BufferOp, MuxOp,
-                    MergeOp, ConstantOp>(op))
+    if (!op || erased.contains(op))
+      continue;
+    if (!passedOn(op) && !isa<UnbundleOp, MuxOp, MergeOp, ConstantOp>(op))
       continue;
     SmallVector<Operation *> sinks;
     bool dead = true;
@@ -700,6 +805,7 @@ Outcome HandshakeParallelizeRegionsPass::parallelize(
       sink->erase();
     for (Value operand : op->getOperands())
       maybeDead.push_back(operand.getDefiningOp());
+    erased.insert(op);
     op->erase();
   }
 

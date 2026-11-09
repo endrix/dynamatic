@@ -214,8 +214,9 @@ def HandshakeParallelizeRegions : DynamaticPass<"handshake-parallelize-regions">
     when the circuit does not have the sequential shape it rewires (a region
     with more than one exit, say): a warning names the reason, the group's
     regions run one after the other as the lowering built them, and the group
-    leaves the attribute. An attribute it cannot read is an error. It does
-    not check that the regions are independent beyond that, which is the job
+    leaves the attribute. An attribute it cannot read, or a group that names
+    a block twice or a block with no operation, is an error. It does not
+    check that the regions are independent beyond that, which is the job
     of the analysis that writes the attribute. The result is not
     materialized: run `handshake-materialize` afterwards. Run it after
     `handshake-deactivate-mem-dependencies`, which reasons over the
