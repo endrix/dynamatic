@@ -138,15 +138,21 @@ For each group:
   lead back the same way or bring the same value in (the entry's value
   through a ring of its own, a copy of the same constant). A mux whose back
   edge brings a value the loop computed holds that value when the region
-  exits, not its loop-entry operand. A value the entry block provided is
-  used from there directly, unless a branch of a region took its tokens
-  itself (rather than a loop's copies of one, after a mux), and so is one
-  of a block before the group when no branch or mux of a region on the way
-  chose which of its tokens went on; a constant the lowering materialized
-  inside the earlier region is re-made in the entry block, driven by the
-  entry's control into the first region, once per firing of the group (the
-  group may sit in an outer loop). Anything else is a live-out, a ring of
-  wires among them, and the group is declined.
+  exits, not its loop-entry operand. A conditional branch on the way chose
+  which tokens went on unless a loop on the way accounts for it: one of the
+  branches a carrier mux's back edges come round by, or a branch that
+  splits the same decision of the same block on the other side (the loop's
+  exit, which hands on the token of the pass that leaves); for a constant,
+  which fires on its block's control, the branches the region's loops take
+  their control round by. A value the entry block provided is used from
+  there directly when every branch on the way is accounted for, and so is a
+  constant the lowering materialized inside the earlier region, re-made in
+  the entry block on the entry's control into the first region, once per
+  firing of the group (the group may sit in an outer loop); a value of a
+  block before the group only when no branch or mux of a region lies on the
+  way at all. A branch of a later region is never accounted for by a loop
+  of an earlier one. Anything else is a live-out, a ring of wires among
+  them, and the group is declined.
 - The wires that only carried those values out of a region -- the exit
   branch, and behind it the constants, forks and muxes that threaded them
   through the loop -- are erased, as far as nothing else uses them: what the

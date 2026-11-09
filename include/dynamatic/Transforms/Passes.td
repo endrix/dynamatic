@@ -205,21 +205,26 @@ def HandshakeParallelizeRegions : DynamaticPass<"handshake-parallelize-regions">
     once and joins the regions' exit tokens in the successor block. A value a
     later region received through an earlier region's exit branch is taken
     from the entry block instead; a constant the lowering materialized for it
-    inside the earlier region is re-made in the entry block. Memory
-    interfaces, `end` and block ids are untouched.
+    inside the earlier region is re-made in the entry block, firing on the
+    entry's control into the first region, once per firing of the group.
+    Memory interfaces, `end` and block ids are untouched.
 
     The pass declines a group when a memory dependence crosses two of its
     regions, when two regions share an LSQ, when a region computes a value
-    another region uses (a loop-carried value its loop updates among them), or
-    when the circuit does not have the sequential shape it rewires (a region
-    with more than one exit, say): a warning names the reason, the group's
-    regions run one after the other as the lowering built them, and the group
-    leaves the attribute. An attribute it cannot read, or a group that names
-    a block twice or a block with no operation, is an error. It does not
-    check that the regions are independent beyond that, which is the job
-    of the analysis that writes the attribute. The result is not
-    materialized: run `handshake-materialize` afterwards. Run it after
-    `handshake-deactivate-mem-dependencies`, which reasons over the
+    another region uses (a loop-carried value its loop updates among them),
+    when a value would be taken past a branch, blocker or lazy fork that
+    chose or held its tokens, or when the circuit does not have the
+    sequential shape it rewires (a region with more than one exit, say, or a
+    block an earlier group's rewiring emptied): a warning names the reason,
+    the group's regions run one after the other as the lowering built them,
+    and the group leaves the attribute. An attribute that does not fit the
+    function (one it cannot read, a group that names a block twice or a
+    block with no operation, a memory dependence that names an unknown
+    access) is an error, found for all of the function's groups before any
+    is rewired. It does not check that the regions are independent beyond
+    that, which is the job of the analysis that writes the attribute. The
+    result is not materialized: run `handshake-materialize` afterwards. Run
+    it after `handshake-deactivate-mem-dependencies`, which reasons over the
     sequential CFG. If the function carries a `handshake.frequencies`
     attribute, or the `frequencies` option names a profiler CSV, the archs
     are rewritten to the new shape (the fork and join edges added, the serial

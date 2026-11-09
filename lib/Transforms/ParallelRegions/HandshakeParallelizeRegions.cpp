@@ -243,6 +243,24 @@ struct Root {
   bool known = true;
 };
 
+/// A conditional branch a walk stepped through, and the side (result) it
+/// came by.
+using Branch = std::pair<Operation *, unsigned>;
+
+/// Where a value a region hands the next came in, and what lay on the way.
+struct Resolution {
+  Source src;
+  enum Kind { ENTRY, BEFORE, CONSTANT } kind = ENTRY;
+  /// The conditional branches on the way that no loop on the way accounts
+  /// for (see `forgiven`): each chose which of the source's tokens went on.
+  SmallVector<Branch> unforgiven;
+  /// The branches of the loops whose carrier muxes lie on the way: those
+  /// their back edges come round by.
+  SmallVector<Branch> loopBranches;
+  /// Whether a branch, a mux's loop entry or a region's exit lies on the way.
+  bool chose = false;
+};
+
 /// Follows a value that leaves a region back to where it came in: the entry
 /// block, a block before the group, or a constant inside a region. Only
 /// wires (passedOn) and loop-carried muxes that carry the value unchanged may
@@ -252,20 +270,20 @@ struct Root {
 /// all successes.
 class Resolver {
 public:
-  Resolver(const llvm::DenseMap<unsigned, Place> &places, unsigned entry)
-      : places(places), entry(entry) {}
+  Resolver(const llvm::DenseMap<unsigned, Place> &places, const LogicBBs &bbs,
+           unsigned entry)
+      : places(places), bbs(bbs), entry(entry) {}
 
   /// Where the value region `from` hands region `from + 1` through `val`
-  /// came in.
-  FailureOr<Source> resolveCrossing(Value val, unsigned from) {
-    user = from + 1;
-    return resolve(val, from, Filters());
-  }
+  /// came in, if it can be taken from there: only as the crossing had it,
+  /// with no branch on the way that chose its tokens.
+  FailureOr<Source> resolveCrossing(Value val, unsigned from);
 
   Refusal refusal;
 
 private:
   const llvm::DenseMap<unsigned, Place> &places;
+  const LogicBBs &bbs;
   unsigned entry;
   /// The region the crossing being resolved goes into, which the refusals
   /// name.
@@ -273,39 +291,39 @@ private:
   /// The muxes whose loop-entry operand is being followed: one met again is
   /// a cycle no loop entry breaks.
   SmallPtrSet<Operation *, 8> resolving;
-  /// What `resolve` found, by (value, 4 * region + filters).
-  llvm::DenseMap<std::pair<Value, unsigned>, Source> resolved;
-  /// The muxes found to carry their loop-entry value, and where it came in.
-  llvm::DenseMap<Operation *, Source> carried;
+  /// What `resolve` found, by (value, region).
+  llvm::DenseMap<std::pair<Value, unsigned>, Resolution> resolved;
+  /// A mux found to carry its loop-entry value: where that came in, and the
+  /// branches its back edges come round by.
+  struct Carried {
+    Resolution init;
+    SmallVector<Branch> loop;
+  };
+  llvm::DenseMap<Operation *, Carried> carried;
+  /// The branches the loops of a region take their control round by, by
+  /// region.
+  llvm::DenseMap<unsigned, SmallVector<Branch>> controlLoops;
 
   bool inRegion(Operation *op, unsigned at) const {
     Place p = placeOf(getLogicBB(op), places);
     return p.kind == Place::REGION && p.region == at;
   }
 
-  /// A walk back through the wires of one region: where it stopped, and
-  /// whether it stepped through a conditional branch, which chooses the
-  /// tokens it hands on.
+  /// A walk back through the wires of one region: where it stopped, and the
+  /// conditional branches it stepped through.
   struct Walk {
     Value val;
-    bool filtered = false;
+    SmallVector<Branch> branches;
   };
   FailureOr<Walk> throughWires(Value val, unsigned at,
                                Value (*step)(Operation *));
 
-  /// What may have chosen which tokens of a source go on, on the way back
-  /// to it: a conditional branch since the last mux whose loop entry the
-  /// walk followed (`direct`: the branch takes the source's own tokens, not
-  /// a loop's copies of one), and a branch or a mux's loop entry anywhere on
-  /// the way (`any`).
-  struct Filters {
-    bool direct = false;
-    bool any = false;
-  };
-
-  FailureOr<Source> resolve(Value val, unsigned at, Filters filters);
-  FailureOr<Source> resolveUncached(Value val, unsigned at, Filters filters);
-  LogicalResult carriesItself(Operation *mux, unsigned at, const Source &init);
+  FailureOr<Resolution> resolve(Value val, unsigned at);
+  FailureOr<Resolution> resolveUncached(Value val, unsigned at);
+  FailureOr<Carried> carry(Operation *mux, unsigned at);
+  FailureOr<SmallVector<Branch>> carriesItself(Operation *mux, unsigned at,
+                                               const Source &init);
+  ArrayRef<Branch> controlLoopsOf(unsigned at);
 
   LogicalResult refuse(Operation *at, const Twine &why) {
     refusal = {at, why.str()};
@@ -354,9 +372,45 @@ static bool sameRoot(Root a, Root b) {
   return a.value == b.value && a.filters == b.filters;
 }
 
+/// The condition a conditional branch decides on, back through the wires that
+/// copy it to every branch of a block.
+static Value conditionOf(Operation *condBr) {
+  Value cond = cast<ConditionalBranchOp>(condBr).getConditionOperand();
+  SmallPtrSet<Operation *, 4> seen;
+  while (Operation *def = cond.getDefiningOp()) {
+    if (!isa<ForkOp, LazyForkOp, BufferOp, BranchOp>(def) ||
+        !seen.insert(def).second)
+      break;
+    cond = def->getOperand(0);
+  }
+  return cond;
+}
+
+/// Whether the loops whose branches are `loops` account for `branch`: it is
+/// one of theirs (a side their back edges come round by, which hands on a
+/// loop's copies of one value), or it splits the same decision of the same
+/// block as one of theirs, on the other side: the loop's exit, which hands on
+/// the token of the pass that leaves. Any other branch chooses which tokens
+/// go on.
+static bool forgiven(Branch branch, ArrayRef<Branch> loops) {
+  for (Branch loop : loops) {
+    if (loop == branch)
+      return true;
+    if (loop.second != branch.second &&
+        getLogicBB(loop.first) == getLogicBB(branch.first) &&
+        conditionOf(loop.first) == conditionOf(branch.first))
+      return true;
+  }
+  return false;
+}
+
+static void forgive(SmallVectorImpl<Branch> &branches, ArrayRef<Branch> loops) {
+  llvm::erase_if(branches, [&](Branch b) { return forgiven(b, loops); });
+}
+
 FailureOr<Resolver::Walk> Resolver::throughWires(Value val, unsigned at,
                                                  Value (*step)(Operation *)) {
-  Walk walk{val};
+  Walk walk{val, {}};
   SmallPtrSet<Operation *, 8> seen;
   while (Operation *def = walk.val.getDefiningOp()) {
     if (!inRegion(def, at))
@@ -369,63 +423,88 @@ FailureOr<Resolver::Walk> Resolver::throughWires(Value val, unsigned at,
                          "region " +
                              Twine(at) + ", and region " + Twine(user) +
                              " uses it");
-    walk.filtered |= isa<ConditionalBranchOp>(def);
+    if (isa<ConditionalBranchOp>(def))
+      walk.branches.push_back(
+          {def, cast<OpResult>(walk.val).getResultNumber()});
     walk.val = prev;
   }
   return walk;
 }
 
-FailureOr<Source> Resolver::resolve(Value val, unsigned at, Filters filters) {
-  auto key = std::make_pair(val, 4 * at + (filters.any ? 2 : 0) +
-                                     (filters.direct ? 1 : 0));
-  if (auto it = resolved.find(key); it != resolved.end())
-    return it->second;
-  FailureOr<Source> src = resolveUncached(val, at, filters);
-  if (succeeded(src))
-    resolved[key] = *src;
-  return src;
+FailureOr<Source> Resolver::resolveCrossing(Value val, unsigned from) {
+  user = from + 1;
+  FailureOr<Resolution> res = resolve(val, from);
+  if (failed(res))
+    return failure();
+  switch (res->kind) {
+  case Resolution::ENTRY:
+    if (!res->unforgiven.empty())
+      return refuse(res->unforgiven.front().first,
+                    "region " + Twine(user) +
+                        " would take a value of the entry block past a branch "
+                        "of a region that chooses its tokens");
+    break;
+  case Resolution::CONSTANT:
+    if (!res->unforgiven.empty())
+      return refuse(res->unforgiven.front().first,
+                    "region " + Twine(user) +
+                        " would take a constant of a region past a branch "
+                        "that chooses its tokens");
+    break;
+  case Resolution::BEFORE:
+    if (res->chose)
+      return refuse(res->src.value.getDefiningOp(),
+                    "region " + Twine(user) +
+                        " would take a value of a block before the group past "
+                        "the branches and muxes of a region that choose its "
+                        "tokens");
+    break;
+  }
+  return res->src;
 }
 
-FailureOr<Source> Resolver::resolveUncached(Value val, unsigned at,
-                                            Filters filters) {
+FailureOr<Resolution> Resolver::resolve(Value val, unsigned at) {
+  auto key = std::make_pair(val, at);
+  if (auto it = resolved.find(key); it != resolved.end())
+    return it->second;
+  FailureOr<Resolution> res = resolveUncached(val, at);
+  if (succeeded(res))
+    resolved[key] = *res;
+  return res;
+}
+
+FailureOr<Resolution> Resolver::resolveUncached(Value val, unsigned at) {
+  Resolution res;
   Value cur = val;
   while (true) {
     FailureOr<Walk> walk = throughWires(cur, at, passedOn);
     if (failed(walk))
       return failure();
     cur = walk->val;
-    filters.direct |= walk->filtered;
-    filters.any |= walk->filtered;
+    res.chose |= !walk->branches.empty();
+    llvm::append_range(res.unforgiven, walk->branches);
     // A function argument belongs to block 0, the entry or a block before it.
     Operation *def = cur.getDefiningOp();
     Place p = placeOf(blockOf(cur), places);
-    // A value of the entry block comes once per firing of the group, as the
-    // crossing had it, unless a branch of the region took its own tokens
-    // (rather than a loop's copies of one).
+    // A value of the entry block comes once per firing of the group.
     if (p.kind == Place::ENTRY) {
-      if (filters.direct)
-        return refuse(def, "region " + Twine(user) +
-                               " would take a value of the entry block past "
-                               "a branch of a region that chooses its tokens");
-      return Source{cur, {}};
+      res.src = {cur, {}};
+      res.kind = Resolution::ENTRY;
+      return res;
     }
     // A value from a block BEFORE the group is a value of the firing, like
     // one from the entry (the regions may read it directly; see the edges
-    // parallelize admits), but only as the crossing had it: a branch or a mux
-    // on the way chose which of its tokens went on.
+    // parallelize admits).
     if (beforeTheGroup(cur, entry, places)) {
-      if (filters.any)
-        return refuse(def, "region " + Twine(user) +
-                               " would take a value of a block before the "
-                               "group past the branches and muxes of a "
-                               "region that choose its tokens");
-      return Source{cur, {}};
+      res.src = {cur, {}};
+      res.kind = Resolution::BEFORE;
+      return res;
     }
     // Region `at` received it through the previous region's exit: where it
     // came into that one.
     if (p.kind == Place::REGION && p.region + 1 == at) {
       at = p.region;
-      filters.any = true;
+      res.chose = true;
       continue;
     }
     if (!def || p.kind != Place::REGION || p.region != at)
@@ -433,8 +512,15 @@ FailureOr<Source> Resolver::resolveUncached(Value val, unsigned at,
                              " uses comes from neither the entry block nor "
                              "region " +
                              Twine(at));
-    if (auto cst = dyn_cast<ConstantOp>(def))
-      return Source{{}, cst};
+    // A constant fires on its block's control, once per pass through the
+    // block: a loop's exit branch hands on the pass that leaves, as the
+    // loop's control branches tell.
+    if (auto cst = dyn_cast<ConstantOp>(def)) {
+      forgive(res.unforgiven, controlLoopsOf(at));
+      res.src = {{}, cst};
+      res.kind = Resolution::CONSTANT;
+      return res;
+    }
     if (isa<BlockerOp>(def))
       return refuse(def, "region " + Twine(user) +
                              " would take this value past a blocker of "
@@ -447,31 +533,22 @@ FailureOr<Source> Resolver::resolveUncached(Value val, unsigned at,
                              " would take this value past a lazy fork of "
                              "region " +
                              Twine(at) + ", which waits for all its outputs");
+    // A mux that carries its value: the branches of its loop (and of the
+    // loops behind its loop entry) account for those on the way to it, and
+    // the value came in where its loop-entry operand did.
     if (isa<MuxOp, MergeOp>(def)) {
-      if (auto it = carried.find(def); it != carried.end())
-        return it->second;
-      Value init;
-      for (Value data : cast<MergeLikeOpInterface>(def).getDataOperands()) {
-        if (isBackedge(data, def))
-          continue;
-        if (init)
-          return refuse(def, "this merge carries two distinct values into "
-                             "region " +
-                                 Twine(user));
-        init = data;
-      }
-      if (!init)
-        return refuse(def, "this merge has no loop entry operand");
-      if (!resolving.insert(def).second)
-        return refuse(def, "this merge's loop entry leads back to it");
-      FailureOr<Source> src =
-          resolve(init, at, {/*direct=*/false, /*any=*/true});
-      if (succeeded(src) && failed(carriesItself(def, at, *src)))
-        src = failure();
-      resolving.erase(def);
-      if (succeeded(src))
-        carried[def] = *src;
-      return src;
+      FailureOr<Carried> c = carry(def, at);
+      if (failed(c))
+        return failure();
+      SmallVector<Branch> loops(c->loop);
+      llvm::append_range(loops, c->init.loopBranches);
+      forgive(res.unforgiven, loops);
+      Resolution out = c->init;
+      llvm::append_range(res.unforgiven, c->init.unforgiven);
+      out.unforgiven = std::move(res.unforgiven);
+      out.loopBranches = std::move(loops);
+      out.chose = true;
+      return out;
     }
     return refuse(def, "region " + Twine(at) +
                            " computes this value and region " + Twine(user) +
@@ -479,18 +556,49 @@ FailureOr<Source> Resolver::resolveUncached(Value val, unsigned at,
   }
 }
 
+FailureOr<Resolver::Carried> Resolver::carry(Operation *mux, unsigned at) {
+  if (auto it = carried.find(mux); it != carried.end())
+    return it->second;
+  Value init;
+  for (Value data : cast<MergeLikeOpInterface>(mux).getDataOperands()) {
+    if (isBackedge(data, mux))
+      continue;
+    if (init)
+      return refuse(mux, "this merge carries two distinct values into "
+                         "region " +
+                             Twine(user));
+    init = data;
+  }
+  if (!init)
+    return refuse(mux, "this merge has no loop entry operand");
+  if (!resolving.insert(mux).second)
+    return refuse(mux, "this merge's loop entry leads back to it");
+  FailureOr<Resolution> from = resolve(init, at);
+  FailureOr<SmallVector<Branch>> loop =
+      succeeded(from) ? carriesItself(mux, at, from->src)
+                      : FailureOr<SmallVector<Branch>>(failure());
+  resolving.erase(mux);
+  if (failed(loop))
+    return failure();
+  Carried c{*from, *loop};
+  carried[mux] = c;
+  return c;
+}
+
 /// Whether the back edges of `mux`, of region `at`, hand it the value its
-/// loop-entry operand brings (`init`, where that came in). Followed back
-/// through what keeps a value (sameValueAs), each must lead to the mux, or
-/// to another mux or merge of the region (an inner loop's, a join block's)
-/// that carries the value in turn: every operand of that one must lead back
-/// the same way, or bring that same value in (the same entry value through a
-/// ring of its own, a copy of the same constant). Then whatever leaves
-/// through the mux is that value. A back edge that leads anywhere else
-/// brings a value the loop made, and what leaves is the last of those.
-LogicalResult Resolver::carriesItself(Operation *mux, unsigned at,
-                                      const Source &init) {
+/// loop-entry operand brings (`init`, where that came in), and if so the
+/// branches they come round by. Followed back through what keeps a value
+/// (sameValueAs), each must lead to the mux, or to another mux or merge of
+/// the region (an inner loop's, a join block's) that carries the value in
+/// turn: every operand of that one must lead back the same way, or bring that
+/// same value in (the same entry value through a ring of its own, a copy of
+/// the same constant). Then whatever leaves through the mux is that value. A
+/// back edge that leads anywhere else brings a value the loop made, and what
+/// leaves is the last of those.
+FailureOr<SmallVector<Branch>>
+Resolver::carriesItself(Operation *mux, unsigned at, const Source &init) {
   std::optional<Root> initRoot;
+  SmallVector<Branch> loop;
   SmallPtrSet<Operation *, 8> carriers = {mux};
   SmallVector<Value> pending;
   for (Value data : cast<MergeLikeOpInterface>(mux).getDataOperands())
@@ -501,6 +609,7 @@ LogicalResult Resolver::carriesItself(Operation *mux, unsigned at,
         throughWires(pending.pop_back_val(), at, sameValueAs);
     if (failed(walk))
       return failure();
+    llvm::append_range(loop, walk->branches);
     Operation *src = walk->val.getDefiningOp();
     if (src && carriers.contains(src))
       continue;
@@ -511,20 +620,84 @@ LogicalResult Resolver::carriesItself(Operation *mux, unsigned at,
       continue;
     }
     // Anything else brings a value in: where it cannot be told, that reason
-    // stands; where it can, it must be the loop-entry operand's.
-    FailureOr<Source> other =
-        resolve(walk->val, at, {/*direct=*/walk->filtered, /*any=*/true});
+    // stands; where it can, it must be the loop-entry operand's. (Only which
+    // value: the branches on the way take the loop's own tokens.)
+    FailureOr<Resolution> other = resolve(walk->val, at);
     if (failed(other))
       return failure();
     if (!initRoot)
       initRoot = rootOf(init);
-    if (sameRoot(rootOf(*other), *initRoot))
+    if (sameRoot(rootOf(other->src), *initRoot))
       continue;
     return refuse(mux, "region " + Twine(at) +
                            "'s loop updates this value and region " +
                            Twine(user) + " uses it");
   }
-  return success();
+  return loop;
+}
+
+/// The branches the loops of region `at` take their control round by:
+/// followed back from every back edge of a control merge of the region,
+/// through what copies a control token (a one-input control merge among
+/// them) and through the region's other control merges and joins (an inner
+/// loop's header, every input of which leads back the same way), the
+/// conditional branches on the way, with the side they are taken by.
+ArrayRef<Branch> Resolver::controlLoopsOf(unsigned at) {
+  if (auto it = controlLoops.find(at); it != controlLoops.end())
+    return it->second;
+  SmallVector<Branch> loops;
+  for (auto &[bb, ops] : bbs.blocks) {
+    Place p = placeOf(bb, places);
+    if (p.kind != Place::REGION || p.region != at)
+      continue;
+    for (Operation *op : ops) {
+      auto header = dyn_cast<ControlMergeOp>(op);
+      if (!header)
+        continue;
+      SmallPtrSet<Operation *, 16> seen = {header};
+      SmallVector<Value> pending;
+      for (Value data : header.getDataOperands())
+        if (isBackedge(data, header))
+          pending.push_back(data);
+      while (!pending.empty()) {
+        Value val = pending.pop_back_val();
+        while (Operation *def = val.getDefiningOp()) {
+          if (!inRegion(def, at))
+            break;
+          if (auto condBr = dyn_cast<ConditionalBranchOp>(def))
+            loops.push_back({def, cast<OpResult>(val).getResultNumber()});
+          if (!seen.insert(def).second)
+            break;
+          if (auto condBr = dyn_cast<ConditionalBranchOp>(def)) {
+            val = condBr.getDataOperand();
+            continue;
+          }
+          if (auto merge = dyn_cast<ControlMergeOp>(def)) {
+            if (merge.getDataOperands().size() == 1) {
+              val = merge.getDataOperands().front();
+              continue;
+            }
+            llvm::append_range(pending, merge.getDataOperands());
+            break;
+          }
+          // A join hands the control on once every input came (the header's
+          // control and an entry's arrival, say): the control came round by
+          // each.
+          if (isa<JoinOp>(def)) {
+            llvm::append_range(pending, def->getOperands());
+            break;
+          }
+          if (isa<BranchOp, ForkOp, LazyForkOp, BufferOp>(def) ||
+              (isa<MergeOp>(def) && def->getNumOperands() == 1)) {
+            val = def->getOperand(0);
+            continue;
+          }
+          break;
+        }
+      }
+    }
+  }
+  return controlLoops[at] = std::move(loops);
 }
 
 /// The blocks a group names, in the order the attribute names them: the
@@ -779,9 +952,9 @@ Outcome HandshakeParallelizeRegionsPass::parallelize(
       for (MemDependenceAttr dep : deps.getDependencies()) {
         StringRef dstName = dep.getDstAccess();
         Operation *dstOp = names.getOp(dstName);
-        if (!dstOp)
-          return decline(op, "a memory dependence names an unknown access '" +
-                                 dstName + "'");
+        // checkGroups found every access a dependence of a region names, and
+        // rewiring a group erases no access.
+        assert(dstOp && "a dependence names an unknown access");
         std::optional<unsigned> dstRegion = regionOf(dstOp);
         if (dstRegion && *dstRegion != *region)
           return decline(op, "a memory dependence with '" + dstName +
@@ -810,7 +983,7 @@ Outcome HandshakeParallelizeRegionsPass::parallelize(
 
   // Where every value a region hands the next came in, before anything is
   // changed: a refusal leaves the circuit as it was.
-  Resolver resolver(places, group.entry);
+  Resolver resolver(places, bbs, group.entry);
   SmallVector<std::pair<OpOperand *, Source>> resolved;
   for (OpOperand *opd : dataCrossings) {
     unsigned from = placeOf(blockOf(opd->get()), places).region;
