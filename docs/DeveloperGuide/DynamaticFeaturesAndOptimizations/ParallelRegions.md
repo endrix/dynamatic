@@ -27,11 +27,16 @@ the next loop's constants, a lookahead's first reads), so every unit of
 the chain holds a loop. Two units are dependent when:
 
 - a value one computes reaches the other, through the branch into its
-  first block or by direct use (dominance allows it). A constant does not
-  count, nor does a block argument the unit only carries around unchanged,
-  back to a free origin: the lowering re-makes constants and the later
-  pass re-sources such values from the entry. A value handed to a block
-  argument nothing reads carries nothing;
+  first block or by direct use (dominance allows it), or through a block
+  argument of a unit in between that carries it on. A constant does not
+  count, nor does a block argument the unit only carries around unchanged
+  from one origin that is itself free (two copies of one constant, which
+  `push-constants` makes per block, are one origin): the lowering re-makes
+  constants and the later pass re-sources such values from the entry. A
+  block argument two different values reach (a loop-carried value the loop
+  updates, a flag it sets to another constant on every iteration) holds
+  whatever the unit's control flow chose last, and counts. A value handed
+  to a block argument nothing reads carries nothing;
 - a recorded memory dependence (`handshake.deps`) connects an access of
   one to an access of the other;
 - they touch a common memory (function arguments and allocations are
@@ -54,11 +59,21 @@ Regions are made within a range of consecutive units: everything before
 the range is done when it starts, so only dependences inside the range
 order anything. Within a range, dependent units merge into one region with
 everything between them, and what is left is a run of regions no two of
-which share a dependence. A unit that depends only on the last region
-joins it. One that depends on an earlier region ends the range: the range
-becomes a group when it holds two regions or more; when it holds one, a
-new range starts right after the last unit the newcomer depends on, so
-that the tail can still pair with it.
+which share a dependence. A unit whose value is read after the range, by a
+later unit, by the chain's successor or by any block after it, merges with
+everything up to the end of the range: the lowering threads that value
+through every block between the unit and its reader, and only the last
+region of a group may hand a value to what comes after the group (the
+transformation would otherwise take the value from the entry block, where
+it is not computed yet). A unit that depends only on the last region joins
+it. One that depends on an earlier region, which is then a dependence
+through memory, ends the range: the range becomes a group when it holds
+two regions or more, and the newcomer, the group's successor, whose first
+block takes the group's join, runs alone after it, the next range starting
+after the newcomer (a group whose entry lay in another group's last region
+would find that group's join in its own first region); when the range holds
+one region, a new range starts right after the last unit the newcomer
+depends on, so that the tail can still pair with it.
 
 Each group becomes one entry of the attribute, in the block ids the
 lowering will assign (position in the function), and a remark names it.
@@ -84,8 +99,17 @@ Whoever writes the attribute is responsible for independence: no value flows
 between the regions, no memory dependence crosses them, no LSQ serves two of
 them. The pass checks what it can see in the Handshake IR (a live-out, a
 `handshake.deps` edge between regions, an LSQ with inputs from two regions,
-a second exit) and refuses the group with an error; it cannot see aliasing
-that the analysis missed.
+a second exit, a circuit that does not have the sequential shape it
+rewires) and declines the group: a warning on the function names the
+reason (and a note the operation where it shows), the group's regions run
+one after the other as the lowering built them, and the group leaves the
+attribute, so that nothing after the pass takes it for parallel. Nothing is
+changed before every check has passed. An attribute that does not fit the
+function -- one the pass cannot read, a group that names a block twice or
+a block with no operation, a memory dependence that names an unknown
+access -- is an error, found for all of the function's groups before any
+is rewired. The pass cannot see
+aliasing that the analysis missed.
 
 ## What the pass does
 
@@ -98,15 +122,53 @@ For each group:
   meet in a `join` in the successor block, which replaces the serial input of
   the successor's control merge.
 - A value a later region received through an earlier region's exit branch is
-  followed back through that region (branches, forks, buffers and
-  loop-carried muxes are transparent) to where it came in. A value the entry
-  block provided is used from the entry directly; a constant the lowering
-  materialized inside the earlier region is re-made in the entry block,
-  driven by the function's start. Anything else is a live-out and the group
-  is refused.
+  followed back through that region, and through the regions before it
+  that it came through, to where it came in. Wires, which hand every
+  token on unchanged and when it comes, are transparent: a branch, a fork,
+  a lazy fork of one output, a buffer, a one-input merge, a blocker of one
+  input, a channel taken apart and put together again
+  (`bundle(unbundle(x))`). A blocker of several inputs forwards its first
+  but also waits for the others, and a lazy fork of several outputs waits
+  for all its successors; a later region taken past either would not wait
+  with it: the value may not be rewired through one, but a back edge
+  through one still hands its mux the same value. A mux or merge with one loop-entry operand is transparent
+  when its back edges hand it the value that operand brings: each leads,
+  through wires or such blockers, back to the mux, or to another mux or
+  merge of the region (an inner loop's, a join block's) whose operands all
+  lead back the same way or bring the same value in (the entry's value
+  through a ring of its own, a copy of the same constant). A mux whose back
+  edge brings a value the loop computed holds that value when the region
+  exits, not its loop-entry operand. A conditional branch on the way chose
+  which tokens went on unless a loop on the way accounts for it: one of the
+  branches a carrier mux's back edges come round by, or a branch that
+  splits the same decision of the same block on the other side (the loop's
+  exit, which hands on the token of the pass that leaves); for a constant,
+  which fires on its block's control, the branches the region's loops take
+  their control round by. A value the entry block provided is used from
+  there directly when every branch on the way is accounted for, and so is a
+  constant the lowering materialized inside the earlier region, re-made in
+  the entry block on the entry's control into the first region, once per
+  firing of the group (the group may sit in an outer loop); a value of a
+  block before the group only when no branch or mux of a region lies on the
+  way at all. A branch of a later region is never accounted for by a loop
+  of an earlier one, and a value a loop brings round on a back edge through
+  a branch that is not the loop's own continuing branch is refused. Anything
+  else is a live-out, a ring of wires among them, and the group is declined.
+- A function fast token delivery lowered (it carries `cfg.edges`, which
+  that lowering writes and nothing else does) has suppression branches
+  wherever a value is used, on any condition, and the block structure the
+  accounting above reads says nothing about them. There a branch on the
+  way is accounted for only as the exit of the very mux the value leaves:
+  the branch whose other side is that mux's back edge. Nothing further out
+  or deeper, no control loop, no equal condition; a constant is accounted
+  for by nothing; a back edge may come round only by the branch nearest its
+  mux. Anything else declines, with a warning that says the function was
+  lowered by fast token delivery and names the branch.
 - The wires that only carried those values out of a region -- the exit
   branch, and behind it the constants, forks and muxes that threaded them
-  through the loop -- are erased.
+  through the loop -- are erased, as far as nothing else uses them: what the
+  values were rewired past, with the same notion of a wire, and muxes,
+  merges and constants.
 - If the function carries `handshake.frequencies`, or the `frequencies`
   option names the profiler's CSV, the archs are rewritten to the new shape:
   the serial edges between regions dropped, an edge from the entry into
@@ -182,4 +244,9 @@ what that block costs.
   read ports.
 - Regions with more than one exit, groups inside an enclosing loop, and
   regions that are not loop nests.
-- The flow: neither pass is in `compile.sh` yet.
+- Groups the analysis names but the transformation declines. The analysis
+  keeps the values a region hands on to the last region, but it cannot see
+  edges a later lowering makes: a value of the last region that a block
+  after the successor reads, handed over directly rather than through the
+  successor, and a region whose control merge takes the entry's control
+  through another unit (a join) are declined, and run one after the other.
