@@ -1,4 +1,5 @@
 add_dynamatic_library(DynamaticExperimentalTestTransforms
+  TestFtdExitMerges.cpp
   TestHandshakeSimulator.cpp
 
   LINK_LIBS PUBLIC
@@ -10,4 +11,5 @@ add_dynamatic_library(DynamaticExperimentalTestTransforms
   DynamaticSupport
   DynamaticHandshake
   DynamaticExperimentalSupport
+  DynamaticExperimentalConversion
 )
