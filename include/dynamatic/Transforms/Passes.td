@@ -213,7 +213,9 @@ def HandshakeParallelizeRegions : DynamaticPass<"handshake-parallelize-regions">
     regions, when two regions share an LSQ, when a region computes a value
     another region uses (a loop-carried value its loop updates among them),
     when a value would be taken past a branch, blocker or lazy fork that
-    chose or held its tokens, or when the circuit does not have the
+    chose or held its tokens (in a function fast token delivery lowered,
+    which carries `cfg.edges`, any branch but the exit of the mux the value
+    leaves), or when the circuit does not have the
     sequential shape it rewires (a region with more than one exit, say, or a
     block an earlier group's rewiring emptied): a warning names the reason,
     the group's regions run one after the other as the lowering built them,

@@ -29,6 +29,7 @@
 #include "dynamatic/Support/CFG.h"
 #include "dynamatic/Support/LLVM.h"
 #include "dynamatic/Transforms/BufferPlacement/Utils/BufferingSupport.h"
+#include "experimental/Support/CFGAnnotation.h"
 #include "experimental/Support/StdProfiler.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -271,8 +272,8 @@ struct Resolution {
 class Resolver {
 public:
   Resolver(const llvm::DenseMap<unsigned, Place> &places, const LogicBBs &bbs,
-           unsigned entry)
-      : places(places), bbs(bbs), entry(entry) {}
+           unsigned entry, bool ftd)
+      : places(places), bbs(bbs), entry(entry), ftd(ftd) {}
 
   /// Where the value region `from` hands region `from + 1` through `val`
   /// came in, if it can be taken from there: only as the crossing had it,
@@ -285,6 +286,13 @@ private:
   const llvm::DenseMap<unsigned, Place> &places;
   const LogicBBs &bbs;
   unsigned entry;
+  /// Whether fast token delivery lowered the function. Its suppression
+  /// branches sit wherever a value is used, on any condition, and the block
+  /// structure the accounting below reads (the same decision of the same
+  /// block, a region's control loops) says nothing about them: a branch is
+  /// accounted for only as the exit of the very mux it carries the value out
+  /// of.
+  bool ftd;
   /// The region the crossing being resolved goes into, which the refusals
   /// name.
   unsigned user = 0;
@@ -324,6 +332,14 @@ private:
   FailureOr<SmallVector<Branch>> carriesItself(Operation *mux, unsigned at,
                                                const Source &init);
   ArrayRef<Branch> controlLoopsOf(unsigned at);
+  bool continues(Branch branch, unsigned at);
+  SmallVector<Branch> exitsOf(Operation *mux);
+
+  /// A branch, by name where it has one, for the warnings.
+  static std::string nameOf(Operation *op) {
+    StringRef name = getUniqueName(op);
+    return name.empty() ? std::string("a branch") : ("'" + name + "'").str();
+  }
 
   LogicalResult refuse(Operation *at, const Twine &why) {
     refusal = {at, why.str()};
@@ -436,6 +452,15 @@ FailureOr<Source> Resolver::resolveCrossing(Value val, unsigned from) {
   FailureOr<Resolution> res = resolve(val, from);
   if (failed(res))
     return failure();
+  if (ftd && !res->unforgiven.empty()) {
+    Operation *branch = res->unforgiven.front().first;
+    return refuse(branch, "the function is lowered by fast token delivery, and "
+                          "region " +
+                              Twine(user) + " would take a value past " +
+                              nameOf(branch) +
+                              ", which is not the exit of the mux that "
+                              "carries it");
+  }
   switch (res->kind) {
   case Resolution::ENTRY:
     if (!res->unforgiven.empty())
@@ -516,7 +541,8 @@ FailureOr<Resolution> Resolver::resolveUncached(Value val, unsigned at) {
     // block: a loop's exit branch hands on the pass that leaves, as the
     // loop's control branches tell.
     if (auto cst = dyn_cast<ConstantOp>(def)) {
-      forgive(res.unforgiven, controlLoopsOf(at));
+      if (!ftd)
+        forgive(res.unforgiven, controlLoopsOf(at));
       res.src = {{}, cst};
       res.kind = Resolution::CONSTANT;
       return res;
@@ -542,7 +568,19 @@ FailureOr<Resolution> Resolver::resolveUncached(Value val, unsigned at) {
         return failure();
       SmallVector<Branch> loops(c->loop);
       llvm::append_range(loops, c->init.loopBranches);
-      forgive(res.unforgiven, loops);
+      if (ftd) {
+        // Only this mux's own exit: the branch whose other side is its back
+        // edge, the very operation, nothing deeper or further out.
+        SmallVector<Branch> exits = exitsOf(def);
+        llvm::erase_if(res.unforgiven, [&](Branch b) {
+          return llvm::any_of(exits, [&](Branch e) {
+            return e.first == b.first && e.second != b.second;
+          });
+        });
+        loops.clear();
+      } else {
+        forgive(res.unforgiven, loops);
+      }
       Resolution out = c->init;
       llvm::append_range(res.unforgiven, c->init.unforgiven);
       out.unforgiven = std::move(res.unforgiven);
@@ -600,31 +638,70 @@ Resolver::carriesItself(Operation *mux, unsigned at, const Source &init) {
   std::optional<Root> initRoot;
   SmallVector<Branch> loop;
   SmallPtrSet<Operation *, 8> carriers = {mux};
-  SmallVector<Value> pending;
+  // Each value to follow, and whether it is a carrier's back edge.
+  SmallVector<std::pair<Value, bool>> pending;
   for (Value data : cast<MergeLikeOpInterface>(mux).getDataOperands())
     if (isBackedge(data, mux))
-      pending.push_back(data);
+      pending.push_back({data, true});
   while (!pending.empty()) {
-    FailureOr<Walk> walk =
-        throughWires(pending.pop_back_val(), at, sameValueAs);
+    auto [next, backEdge] = pending.pop_back_val();
+    FailureOr<Walk> walk = throughWires(next, at, sameValueAs);
     if (failed(walk))
       return failure();
     llvm::append_range(loop, walk->branches);
+    // Under fast token delivery a back edge may come round by its own
+    // branch, the one nearest its mux, and by no other.
+    if (ftd) {
+      for (auto [k, branch] : llvm::enumerate(walk->branches))
+        if (k > 0 || !backEdge)
+          return refuse(branch.first,
+                        "the function is lowered by fast token delivery, and "
+                        "region " +
+                            Twine(at) + "'s loop brings a value round past " +
+                            nameOf(branch.first) +
+                            ", which is not its own; region " + Twine(user) +
+                            " uses the value");
+    }
     Operation *src = walk->val.getDefiningOp();
     if (src && carriers.contains(src))
       continue;
     if (src && isa<MuxOp, MergeOp>(src) && inRegion(src, at)) {
       carriers.insert(src);
-      llvm::append_range(pending,
-                         cast<MergeLikeOpInterface>(src).getDataOperands());
+      for (Value data : cast<MergeLikeOpInterface>(src).getDataOperands())
+        pending.push_back({data, isBackedge(data, src)});
       continue;
     }
     // Anything else brings a value in: where it cannot be told, that reason
-    // stands; where it can, it must be the loop-entry operand's. (Only which
-    // value: the branches on the way take the loop's own tokens.)
+    // stands; where it can, it must be the loop-entry operand's, and come
+    // round only by the loop's own branches, which take the loop's own
+    // tokens: a branch that chooses which of its tokens come round is no part
+    // of the loop.
     FailureOr<Resolution> other = resolve(walk->val, at);
     if (failed(other))
       return failure();
+    if (ftd && !other->unforgiven.empty())
+      return refuse(other->unforgiven.front().first,
+                    "the function is lowered by fast token delivery, and "
+                    "region " +
+                        Twine(at) + "'s loop brings a value round past " +
+                        nameOf(other->unforgiven.front().first) +
+                        ", which is not its own; region " + Twine(user) +
+                        " uses the value");
+    SmallVector<Branch> onTheWay(walk->branches);
+    llvm::append_range(onTheWay, other->unforgiven);
+    for (Branch branch : onTheWay)
+      if (!ftd && !continues(branch, at))
+        return refuse(branch.first,
+                      "region " + Twine(at) +
+                          "'s loop brings this value round through a branch "
+                          "that chooses its tokens, and region " +
+                          Twine(user) + " uses it");
+    if (other->kind == Resolution::BEFORE &&
+        (other->chose || !walk->branches.empty()))
+      return refuse(mux, "region " + Twine(at) +
+                             "'s loop brings a value of a block before the "
+                             "group round, and region " +
+                             Twine(user) + " uses it");
     if (!initRoot)
       initRoot = rootOf(init);
     if (sameRoot(rootOf(other->src), *initRoot))
@@ -634,6 +711,41 @@ Resolver::carriesItself(Operation *mux, unsigned at, const Source &init) {
                            Twine(user) + " uses it");
   }
   return loop;
+}
+
+/// Whether `branch` is a loop's own continuing branch in region `at`: it
+/// splits the same decision of the same block as a branch the region's loops
+/// take their control round by, on the same side.
+bool Resolver::continues(Branch branch, unsigned at) {
+  for (Branch loop : controlLoopsOf(at))
+    if (loop.second == branch.second &&
+        getLogicBB(loop.first) == getLogicBB(branch.first) &&
+        conditionOf(loop.first) == conditionOf(branch.first))
+      return true;
+  return false;
+}
+
+/// The branches whose side is a back edge of `mux`, through wires that are
+/// not branches themselves: its loop's exit is their other side.
+SmallVector<Branch> Resolver::exitsOf(Operation *mux) {
+  SmallVector<Branch> exits;
+  for (Value data : cast<MergeLikeOpInterface>(mux).getDataOperands()) {
+    if (!isBackedge(data, mux))
+      continue;
+    SmallPtrSet<Operation *, 8> seen;
+    Value val = data;
+    while (Operation *def = val.getDefiningOp()) {
+      if (isa<ConditionalBranchOp>(def)) {
+        exits.push_back({def, cast<OpResult>(val).getResultNumber()});
+        break;
+      }
+      Value prev = passedOn(def);
+      if (!prev || !seen.insert(def).second)
+        break;
+      val = prev;
+    }
+  }
+  return exits;
 }
 
 /// The branches the loops of region `at` take their control round by:
@@ -955,6 +1067,9 @@ Outcome HandshakeParallelizeRegionsPass::parallelize(
         // checkGroups found every access a dependence of a region names, and
         // rewiring a group erases no access.
         assert(dstOp && "a dependence names an unknown access");
+        if (!dstOp)
+          return decline(op, "a memory dependence names an unknown access '" +
+                                 dstName + "'");
         std::optional<unsigned> dstRegion = regionOf(dstOp);
         if (dstRegion && *dstRegion != *region)
           return decline(op, "a memory dependence with '" + dstName +
@@ -983,7 +1098,8 @@ Outcome HandshakeParallelizeRegionsPass::parallelize(
 
   // Where every value a region hands the next came in, before anything is
   // changed: a refusal leaves the circuit as it was.
-  Resolver resolver(places, bbs, group.entry);
+  Resolver resolver(places, bbs, group.entry,
+                    funcOp->hasAttr(experimental::cfg::CFG_EDGES));
   SmallVector<std::pair<OpOperand *, Source>> resolved;
   for (OpOperand *opd : dataCrossings) {
     unsigned from = placeOf(blockOf(opd->get()), places).region;

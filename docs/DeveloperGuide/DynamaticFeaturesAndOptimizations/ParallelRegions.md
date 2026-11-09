@@ -151,8 +151,19 @@ For each group:
   firing of the group (the group may sit in an outer loop); a value of a
   block before the group only when no branch or mux of a region lies on the
   way at all. A branch of a later region is never accounted for by a loop
-  of an earlier one. Anything else is a live-out, a ring of wires among
-  them, and the group is declined.
+  of an earlier one, and a value a loop brings round on a back edge through
+  a branch that is not the loop's own continuing branch is refused. Anything
+  else is a live-out, a ring of wires among them, and the group is declined.
+- A function fast token delivery lowered (it carries `cfg.edges`, which
+  that lowering writes and nothing else does) has suppression branches
+  wherever a value is used, on any condition, and the block structure the
+  accounting above reads says nothing about them. There a branch on the
+  way is accounted for only as the exit of the very mux the value leaves:
+  the branch whose other side is that mux's back edge. Nothing further out
+  or deeper, no control loop, no equal condition; a constant is accounted
+  for by nothing; a back edge may come round only by the branch nearest its
+  mux. Anything else declines, with a warning that says the function was
+  lowered by fast token delivery and names the branch.
 - The wires that only carried those values out of a region -- the exit
   branch, and behind it the constants, forks and muxes that threaded them
   through the loop -- are erased, as far as nothing else uses them: what the
