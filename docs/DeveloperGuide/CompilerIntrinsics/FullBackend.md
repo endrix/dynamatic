@@ -312,6 +312,8 @@ For string parameters, only exact matches/differences are currently supported wi
 }
 ```
 
+A string parameter used as a generic of a VHDL component is written as a string literal in the instance's generic map (`generic map("ult", 8)`). The entity may declare the generic as a `string` (a predicate) or as a `std_logic_vector` (a bit string, such as the value of a constant).
+
 #### Backend parameters
 
 During component concretization, the backend injects extra *backend parameters* that are available for parameter substitution in addition to the parameters of the component being concretized. These parameters have reserved names which cannot be used by user-declared parameters in the RTL configuration file. All backend parameters are listed below.
@@ -537,6 +539,24 @@ For example, the `handshake.mux` component could modify its empty-by-default dat
   "name": "handshake.mux",
   "generator": "/my/chisel/mux/generator $SIZE $DATA_WIDTH $SELECT_WIDTH",
   "io-signals": { "data": "_bits" }
+}
+```
+
+#### `raw-vector-ports`
+
+A *raw* port carries a plain integer, not a dataflow channel: the ports of the `arith` units between an `unbundle` and a `bundle`. The exporter declares a raw wire of one bit as a scalar (`std_logic` in VHDL) and a wider one as a vector. A generated component follows the same convention, since its generator knows the width. A generic component cannot: a generic can set the width of a vector port but cannot make the port a scalar, so its raw data ports are vectors at every width, `std_logic_vector(0 downto 0)` at a width of one.
+
+The `raw-vector-ports` option, when present, must map to a boolean. When it is true, the exporter associates a raw wire of one bit with element 0 of the component's port (`result(0) => cmpi0_result` in VHDL). The clock and the reset are never concerned. The option is false by default.
+
+```json
+{
+  "name": "arith.cmpi",
+  "parameters": [
+    { "name": "PREDICATE", "type": "string" },
+    { "name": "DATA_WIDTH", "type": "unsigned" }
+  ],
+  "generic": "$DYNAMATIC/data/vhdl/arith/raw/arith_cmpi.vhd",
+  "raw-vector-ports": true
 }
 ```
 

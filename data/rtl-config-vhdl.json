@@ -947,7 +947,8 @@
         "type": "unsigned"
       }
     ],
-    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t arith_andi -p bitwidth=$DATA_WIDTH"
+    "generic": "$DYNAMATIC/data/vhdl/arith/raw/arith_andi.vhd",
+    "raw-vector-ports": true
   },
   {
     "name": "arith.ori",
@@ -957,7 +958,8 @@
         "type": "unsigned"
       }
     ],
-    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t arith_ori -p bitwidth=$DATA_WIDTH"
+    "generic": "$DYNAMATIC/data/vhdl/arith/raw/arith_ori.vhd",
+    "raw-vector-ports": true
   },
   {
     "name": "arith.xori",
@@ -967,7 +969,8 @@
         "type": "unsigned"
       }
     ],
-    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t arith_xori -p bitwidth=$DATA_WIDTH"
+    "generic": "$DYNAMATIC/data/vhdl/arith/raw/arith_xori.vhd",
+    "raw-vector-ports": true
   },
   {
     "name": "arith.addi",
@@ -977,7 +980,8 @@
         "type": "unsigned"
       }
     ],
-    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t arith_addi -p bitwidth=$DATA_WIDTH"
+    "generic": "$DYNAMATIC/data/vhdl/arith/raw/arith_addi.vhd",
+    "raw-vector-ports": true
   },
   {
     "name": "arith.subi",
@@ -987,7 +991,8 @@
         "type": "unsigned"
       }
     ],
-    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t arith_subi -p bitwidth=$DATA_WIDTH"
+    "generic": "$DYNAMATIC/data/vhdl/arith/raw/arith_subi.vhd",
+    "raw-vector-ports": true
   },
   {
     "name": "arith.muli",
@@ -997,7 +1002,8 @@
         "type": "unsigned"
       }
     ],
-    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t arith_muli -p bitwidth=$DATA_WIDTH"
+    "generic": "$DYNAMATIC/data/vhdl/arith/raw/arith_muli.vhd",
+    "raw-vector-ports": true
   },
   {
     "name": "arith.shli",
@@ -1007,7 +1013,8 @@
         "type": "unsigned"
       }
     ],
-    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t arith_shli -p bitwidth=$DATA_WIDTH"
+    "generic": "$DYNAMATIC/data/vhdl/arith/raw/arith_shli.vhd",
+    "raw-vector-ports": true
   },
   {
     "name": "arith.shrui",
@@ -1017,7 +1024,8 @@
         "type": "unsigned"
       }
     ],
-    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t arith_shrui -p bitwidth=$DATA_WIDTH"
+    "generic": "$DYNAMATIC/data/vhdl/arith/raw/arith_shrui.vhd",
+    "raw-vector-ports": true
   },
   {
     "name": "arith.shrsi",
@@ -1027,7 +1035,8 @@
         "type": "unsigned"
       }
     ],
-    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t arith_shrsi -p bitwidth=$DATA_WIDTH"
+    "generic": "$DYNAMATIC/data/vhdl/arith/raw/arith_shrsi.vhd",
+    "raw-vector-ports": true
   },
   {
     "name": "arith.select",
@@ -1037,7 +1046,8 @@
         "type": "unsigned"
       }
     ],
-    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t arith_select -p bitwidth=$DATA_WIDTH"
+    "generic": "$DYNAMATIC/data/vhdl/arith/raw/arith_select.vhd",
+    "raw-vector-ports": true
   },
   {
     "name": "arith.cmpi",
@@ -1051,7 +1061,8 @@
         "type": "unsigned"
       }
     ],
-    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t arith_cmpi -p predicate=\"'$PREDICATE'\" bitwidth=$DATA_WIDTH"
+    "generic": "$DYNAMATIC/data/vhdl/arith/raw/arith_cmpi.vhd",
+    "raw-vector-ports": true
   },
   {
     "name": "arith.constant",
@@ -1065,7 +1076,8 @@
         "type": "unsigned"
       }
     ],
-    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t arith_constant -p value=\"'$VALUE'\" bitwidth=$DATA_WIDTH"
+    "generic": "$DYNAMATIC/data/vhdl/arith/raw/arith_constant.vhd",
+    "raw-vector-ports": true
   },
   {
     "name": "arith.trunci",
@@ -1079,7 +1091,8 @@
         "type": "unsigned"
       }
     ],
-    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t arith_trunci -p input_bitwidth=$INPUT_WIDTH output_bitwidth=$OUTPUT_WIDTH"
+    "generic": "$DYNAMATIC/data/vhdl/arith/raw/arith_trunci.vhd",
+    "raw-vector-ports": true
   },
   {
     "name": "arith.extui",
@@ -1093,7 +1106,8 @@
         "type": "unsigned"
       }
     ],
-    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t arith_extui -p input_bitwidth=$INPUT_WIDTH output_bitwidth=$OUTPUT_WIDTH"
+    "generic": "$DYNAMATIC/data/vhdl/arith/raw/arith_extui.vhd",
+    "raw-vector-ports": true
   },
   {
     "name": "arith.extsi",
@@ -1107,6 +1121,7 @@
         "type": "unsigned"
       }
     ],
-    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t arith_extsi -p input_bitwidth=$INPUT_WIDTH output_bitwidth=$OUTPUT_WIDTH"
+    "generic": "$DYNAMATIC/data/vhdl/arith/raw/arith_extsi.vhd",
+    "raw-vector-ports": true
   }
 ]
