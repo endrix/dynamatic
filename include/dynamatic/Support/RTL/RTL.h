@@ -396,6 +396,10 @@ public:
   /// Returns the component's module name.
   StringRef getModuleName() const { return moduleName; }
 
+  /// Returns whether the component declares every raw data port as a vector,
+  /// a one-bit one included ("raw-vector-ports" in the RTL configuration).
+  bool hasRawVectorPorts() const { return rawVectorPorts; }
+
   /// Returns the HDL in which the component is written.
   HDL getHDL() const { return hdl; }
 
@@ -458,6 +462,13 @@ private:
   /// makes sense for this to be defined for generated components. The filepath
   /// supports parameter substitution.
   std::optional<std::string> jsonConfig;
+
+  /// Whether the component declares every raw (non-channel) data port as a
+  /// vector, a one-bit one included. The exporter declares a one-bit raw wire
+  /// as a scalar, so it associates such a wire with element 0 of the port.
+  /// What a generic entity needs: its port types cannot depend on a width.
+  /// The clock and the reset stay scalars.
+  bool rawVectorPorts = false;
 
   /// IO kind used by the component, hierarchical by default.
   IOKind ioKind = IOKind::HIERARCICAL;

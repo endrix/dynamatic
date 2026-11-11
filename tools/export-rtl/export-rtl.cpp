@@ -34,6 +34,7 @@
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/StringSet.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/CommandLine.h"
@@ -776,8 +777,30 @@ void RTLWriter::fillIOMappings(hw::InstanceOp instOp,
     FGetTypedSignalName getTypedSignalName = [&](auto port, auto type) -> Port {
       return match.component->getRTLPortName(port, type, ::hdl);
     };
+    // A component with "raw-vector-ports" declares a one-bit raw port as a
+    // vector of one element, while the wire connected to it is a scalar: the
+    // port is then an array port of one signal, which the port map writes as
+    // `port(0) => signal`. The clock and the reset stay scalars.
+    llvm::StringSet<> oneBitRawPorts;
+    if (match.component->hasRawVectorPorts()) {
+      auto addOneBit = [&](Type type, StringRef port) {
+        auto intType = dyn_cast<IntegerType>(type);
+        if (intType && intType.getWidth() == 1 && port != CLK_PORT &&
+            port != RST_PORT)
+          oneBitRawPorts.insert(port);
+      };
+      for (auto [oprd, port] :
+           llvm::zip_equal(instOp.getOperands(), modOp.getInputNamesStr()))
+        addOneBit(oprd.getType(), port.str());
+      for (auto [res, port] :
+           llvm::zip_equal(instOp.getResults(), modOp.getOutputNamesStr()))
+        addOneBit(res.getType(), port.str());
+    }
     FGetSignalName getSignalName = [&](auto port) -> Port {
-      return match.component->getRTLPortName(port, ::hdl);
+      Port rtlPort = match.component->getRTLPortName(port, ::hdl);
+      if (oneBitRawPorts.contains(port))
+        rtlPort.second = true;
+      return rtlPort;
     };
     constructIOMappings(instOp, modOp, getValueName, getTypedSignalName,
                         getSignalName, mappings);
@@ -889,13 +912,12 @@ LogicalResult VHDLWriter::write(hw::HWModuleOp modOp,
 }
 
 void VHDLWriter::writeModuleInstantiations(WriteModData &data) const {
-  using KeyValuePair = std::pair<StringRef, StringRef>;
-
   for (hw::InstanceOp instOp : data.modOp.getOps<hw::InstanceOp>()) {
     HDL hdl(HDL::VHDL);
     std::string moduleName;
     std::string archName;
-    SmallVector<KeyValuePair> genericParams;
+    // The generics' values, in the order the component declares them.
+    SmallVector<std::string> genericValues;
 
     llvm::TypeSwitch<Operation *, void>(getHWModule(instOp).getOperation())
         .Case<hw::HWModuleOp>([&](hw::HWModuleOp hwModOp) {
@@ -907,7 +929,19 @@ void VHDLWriter::writeModuleInstantiations(WriteModData &data) const {
           hdl = match.component->getHDL();
           moduleName = match.getConcreteModuleName();
           archName = match.getConcreteArchName();
-          genericParams = match.getGenericParameterValues().takeVector();
+          auto values = match.getGenericParameterValues();
+          for (const RTLParameter *param :
+               match.component->getGenericParameters()) {
+            StringRef val = values.lookup(param->getName());
+            // A string is a VHDL string literal: a predicate for a string
+            // generic, a bit string for a vector one. Unquoted, a bit string
+            // would read as a decimal number.
+            if (hdl == HDL::VHDL &&
+                param->getType().getID() == RTLStringType::ID)
+              genericValues.push_back("\"" + val.str() + "\"");
+            else
+              genericValues.push_back(val.str());
+          }
         })
         .Default([&](auto) { llvm_unreachable("unknown module type"); });
 
@@ -918,12 +952,10 @@ void VHDLWriter::writeModuleInstantiations(WriteModData &data) const {
       os << "(" << archName << ")";
 
     // Write generic parameters if there are any
-    if (!genericParams.empty()) {
+    if (!genericValues.empty()) {
       os << " generic map(";
-
-      for (auto [_, val] : ArrayRef<KeyValuePair>{genericParams}.drop_back())
-        os << val << ", ";
-      os << genericParams.back().second << ")";
+      llvm::interleave(genericValues, os, ", ");
+      os << ")";
     }
     os << "\n";
 

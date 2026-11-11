@@ -48,7 +48,8 @@ static constexpr StringLiteral KEY_PARAMETERS("parameters"),
     KEY_PARAMETER("parameter"), KEY_DEPENDENCIES("dependencies"),
     KEY_MODULE_NAME("module-name"), KEY_ARCH_NAME("arch-name"), KEY_HDL("hdl"),
     KEY_USE_JSON_CONFIG("use-json-config"), KEY_IO_KIND("io-kind"),
-    KEY_IO_MAP("io-map"), KEY_IO_SIGNALS("io-signals");
+    KEY_IO_MAP("io-map"), KEY_IO_SIGNALS("io-signals"),
+    KEY_RAW_VECTOR_PORTS("raw-vector-ports");
 
 /// JSON path errors.
 static constexpr StringLiteral
@@ -700,7 +701,8 @@ bool RTLComponent::fromJSON(const ljson::Value &value, ljson::Path path) {
       !mapper.mapOptional(KEY_USE_JSON_CONFIG, jsonConfig) ||
       !mapper.mapOptional(KEY_IO_KIND, ioKind) ||
       !mapper.mapOptional(KEY_IO_MAP, ioMap) ||
-      !mapper.mapOptional(KEY_IO_SIGNALS, ioSignals)) {
+      !mapper.mapOptional(KEY_IO_SIGNALS, ioSignals) ||
+      !mapper.mapOptional(KEY_RAW_VECTOR_PORTS, rawVectorPorts)) {
     return false;
   }
 

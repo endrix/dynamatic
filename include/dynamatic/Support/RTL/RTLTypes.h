@@ -143,6 +143,7 @@ struct RTLType {
                                      llvm::json::Path path) = 0;
     virtual bool verify(mlir::Attribute attr) const = 0;
     virtual std::string serializeImpl(mlir::Attribute attr) const = 0;
+    virtual StringRef getID() const = 0;
     virtual ~Concept() = default;
   };
 
@@ -169,6 +170,7 @@ struct RTLType {
     std::string serializeImpl(mlir::Attribute attr) const override {
       return DerivedT::serialize(attr);
     }
+    StringRef getID() const override { return DerivedT::ID; }
 
     /// Constraints on the concrete RTL type.
     ConstraintT constraints;
@@ -197,6 +199,10 @@ struct RTLType {
   std::string serialize(mlir::Attribute attr) const {
     return typeConcept->serializeImpl(attr);
   };
+
+  /// The type's identifier, the "type" of the parameter in the RTL
+  /// configuration ("boolean", "unsigned", "string" or "dataflow").
+  StringRef getID() const { return typeConcept->getID(); }
 
   /// Determines whether the type's constraints are satisfied with a specific
   /// parameter value stored in the MLIR attribute.
