@@ -24,6 +24,15 @@ end entity;
 
 architecture arch of arith_cmpi is
 begin
+  -- A predicate none of the branches below takes would leave the result
+  -- undriven. The names are those of arith.cmpi, in lower case.
+  assert PREDICATE = "eq" or PREDICATE = "ne" or PREDICATE = "slt"
+    or PREDICATE = "sle" or PREDICATE = "sgt" or PREDICATE = "sge"
+    or PREDICATE = "ult" or PREDICATE = "ule" or PREDICATE = "ugt"
+    or PREDICATE = "uge"
+    report "arith_cmpi: unknown predicate " & PREDICATE
+    severity failure;
+
   p_eq : if PREDICATE = "eq" generate
     result(0) <= '1' when ((lhs) = (rhs)) else '0';
   end generate;

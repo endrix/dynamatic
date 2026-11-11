@@ -14,5 +14,8 @@
 // element; 31 is the widest shift amount `to_integer` takes whole, 32 and 40
 // the widths whose amount is read in two parts.
 
-// CHECK: arith raw, W={{[0-9]+}}: {{[0-9]+}} checks as expected
-// CHECK-NOT: failure
+// A wrong result stops the simulation there (severity failure), before the
+// count; the count is of four digits at least at every width.
+
+// CHECK-NOT: wrong
+// CHECK: arith raw, W={{[0-9]+}}: {{[0-9][0-9][0-9][0-9]+}} checks as expected

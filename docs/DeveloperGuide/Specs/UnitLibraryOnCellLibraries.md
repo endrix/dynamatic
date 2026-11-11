@@ -382,7 +382,9 @@ the core emits a VHDL `assert`, which yosys carries into the netlist as a
 This matters because it separates "blocks our work" from "blocks someone
 else's". Taking the unit type out of the header line of every generated file
 across the seven exports of a picorv32 Core run, the design instantiates 35
-handshake units and 13 raw-wire ones:
+handshake units and 13 raw-wire ones (the raw-wire units have since become
+generic entities, `data/vhdl/arith/raw`, which carry no such header: their
+file names give the type):
 
 `addi`, `andi`, `blocker`, `buffer`, `bundle`, `cmpi`, `cond_br`, `constant`,
 `control_merge`, `divui`, `extsi`, `extui`, `fork`, `init`, `lazy_fork`,

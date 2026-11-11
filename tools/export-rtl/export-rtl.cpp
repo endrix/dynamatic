@@ -935,9 +935,9 @@ void VHDLWriter::writeModuleInstantiations(WriteModData &data) const {
             StringRef val = values.lookup(param->getName());
             // A string is a VHDL string literal: a predicate for a string
             // generic, a bit string for a vector one. Unquoted, a bit string
-            // would read as a decimal number.
-            if (hdl == HDL::VHDL &&
-                param->getType().getID() == RTLStringType::ID)
+            // would read as a decimal number. The generic map is VHDL
+            // whatever the component's own language.
+            if (param->getType().getID() == RTLStringType::ID)
               genericValues.push_back("\"" + val.str() + "\"");
             else
               genericValues.push_back(val.str());

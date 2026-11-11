@@ -22,5 +22,10 @@ end entity;
 
 architecture arch of arith_constant is
 begin
+  assert VALUE'length = DATA_WIDTH
+    report "arith_constant: a value of " & integer'image(VALUE'length)
+      & " bits for a width of " & integer'image(DATA_WIDTH)
+    severity failure;
+
   outs <= VALUE;
 end architecture;
