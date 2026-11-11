@@ -39,7 +39,7 @@
 // CHECK-DAG: sink3 : entity work.handshake_sink_{{[0-9]+}}(arch)
 // CHECK-DAG: sink4 : entity work.handshake_sink_{{[0-9]+}}(arch)
 // CHECK-DAG: sink5 : entity work.handshake_sink_{{[0-9]+}}(arch)
-// CHECK-DAG: source0 : entity work.source(arch)
+// CHECK-DAG: source0 : entity work.handshake_source(arch)
 // CHECK-DAG: source1 : entity work.handshake_source_{{[0-9]+}}(arch)
 
 // The generated files of these kinds: those of the speculative values, one
@@ -53,6 +53,7 @@
 // FILES-NOT:  handshake_{{(fork|lazy_fork|ori)}}_{{[0-9]+}}.vhd
 // FILES:      handshake_sink_{{[0-9]+}}.vhd
 // FILES-NEXT: handshake_sink_{{[0-9]+}}.vhd
+// FILES-NEXT: handshake_source.vhd
 // FILES-NEXT: handshake_source_{{[0-9]+}}.vhd
 // FILES-NOT:  handshake_{{(sink|source|subi|xori)}}_{{[0-9]+}}.vhd
 

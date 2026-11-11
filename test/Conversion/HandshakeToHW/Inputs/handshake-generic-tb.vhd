@@ -75,6 +75,7 @@ begin
     variable amount : natural;
     variable both : std_logic;
     variable want : bit1;
+    variable fire, anti_t, anti_f : std_logic;
 
     procedure step is
     begin
@@ -108,9 +109,7 @@ begin
       step;
       a <= xa; b <= xb; ax <= std_logic_vector(lfsr(X - 1 downto 0));
       av <= lfsr(40); bv <= lfsr(41); rdy <= lfsr(42);
-      -- The select is checked on its data and with all three operands there:
-      -- its antitokens are the generator's own, checked against it elsewhere.
-      c(0) <= lfsr(43); cv <= '1';
+      c(0) <= lfsr(43); cv <= lfsr(44);
       wait for 1 ns;
       both := av and bv;
       -- The amount is the low W - 1 bits of rhs.
@@ -125,7 +124,8 @@ begin
       -- A join of the two operands.
       check(shl_v = both and shru_v = both and shrs_v = both, "shift valid");
       check(shl_ar = (bv and rdy) and shl_br = (av and rdy), "shli ready");
-      check(shru_ar = (bv and rdy) and shrs_br = (av and rdy), "shift ready");
+      check(shru_ar = (bv and rdy) and shru_br = (av and rdy), "shrui ready");
+      check(shrs_ar = (bv and rdy) and shrs_br = (av and rdy), "shrsi ready");
       check(trunc_r = ax(W - 1 downto 0), "trunci");
       check(trunc_v = av and trunc_ar = rdy, "trunci handshake");
       check(k_r = KV, "constant");
@@ -151,15 +151,33 @@ begin
       else
         check(sel_r = xb, "select, false");
       end if;
-      if both = '1' then
+      -- No antitoken is out at this point (see below). The select fires on
+      -- the condition and the operand it chooses; the other operand, if it
+      -- is not there yet, is owed an antitoken.
+      fire := cv and ((c(0) and av) or (not c(0) and bv));
+      check(sel_v = fire, "select valid");
+      check(sel_cr = (not cv or (fire and rdy)), "select condition ready");
+      check(sel_tr = (not av or (fire and rdy)), "select true ready");
+      check(sel_fr = (not bv or (fire and rdy)), "select false ready");
+      anti_t := fire and rdy and not av;
+      anti_f := fire and rdy and not bv;
+      clk <= '1'; wait for 1 ns; clk <= '0'; wait for 1 ns;
+      -- The late operand arrives: the antitoken takes it, whatever the
+      -- output does, and nothing is sent while an antitoken is out.
+      av <= '1'; bv <= '1'; cv <= '1'; rdy <= '0';
+      wait for 1 ns;
+      if anti_t = '1' or anti_f = '1' then
+        check(sel_v = '0', "select valid, an antitoken out");
+        check(sel_tr = anti_t, "select true ready, its antitoken");
+        check(sel_fr = anti_f, "select false ready, its antitoken");
+      else
         check(sel_v = '1', "select valid, every operand there");
+        check(sel_tr = '0' and sel_fr = '0' and sel_cr = '0', "select ready, output not ready");
       end if;
       clk <= '1'; wait for 1 ns; clk <= '0'; wait for 1 ns;
-      -- Leave no antitoken behind: offer both operands until it is gone.
-      av <= '1'; bv <= '1'; rdy <= '1';
-      for d in 1 to 3 loop
-        clk <= '1'; wait for 1 ns; clk <= '0'; wait for 1 ns;
-      end loop;
+      -- No antitoken is left: the next round starts clean.
+      wait for 1 ns;
+      check(sel_v = '1', "select valid, the antitoken gone");
     end loop;
     report "handshake generic, W=" & integer'image(W) & ": " & integer'image(checks)
       & " checks as expected";

@@ -583,7 +583,7 @@
       {
         "name": "NUM_SLOTS",
         "type": "unsigned",
-        "lb": 1
+        "lb": 2
       },
       {
         "name": "DATA_TYPE",
@@ -611,7 +611,7 @@
       {
         "name": "NUM_SLOTS",
         "type": "unsigned",
-        "lb": 1
+        "lb": 2
       },
       {
         "name": "DATA_TYPE",
@@ -982,7 +982,7 @@
   },
   {
     "name": "handshake.source",
-    "generic": "$DYNAMATIC/data/vhdl/handshake/source.vhd",
+    "generic": "$DYNAMATIC/data/vhdl/handshake/generic/handshake_source.vhd",
     "no-extra-signals": true
   },
   {
@@ -1741,10 +1741,7 @@
   },
   {
     "generic": "$DYNAMATIC/data/vhdl/support/elastic_fifo_inner.vhd",
-    "module-name": "elastic_fifo_inner",
-    "dependencies": [
-      "elastic_fifo_inner_dataless"
-    ]
+    "module-name": "elastic_fifo_inner"
   },
   {
     "generic": "$DYNAMATIC/data/vhdl/support/dataless/elastic_fifo_inner.vhd",

@@ -12,5 +12,5 @@
 // (data/vhdl/handshake/generic), simulated: one entity per unit kind has to
 // be right at every width, a width of one and one above 32 bits included.
 
+// A wrong result stops the run before this line.
 // CHECK: checks as expected
-// CHECK-NOT: wrong
