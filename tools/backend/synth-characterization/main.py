@@ -59,7 +59,9 @@ def get_dependency_dict(dataflow_units):
         if not "name" in unit_info:
             rtl_file = unit_info.get("generic")
             assert rtl_file, "Unit info must contain a 'generic' field for RTL file."
-            unit_name = rtl_file.split("/")[-1].split(".")[0]
+            # Named as export-rtl names it: by its module name when it gives
+            # one (two files of one stem: tehb.vhd and dataless/tehb.vhd).
+            unit_name = unit_info.get("module-name") or rtl_file.split("/")[-1].split(".")[0]
             if "dependencies" in unit_info:
                 dependencies = unit_info["dependencies"]
             else:
@@ -89,6 +91,15 @@ def get_dependency_dict(dataflow_units):
                 dependency_dict.setdefault(
                     stem, {"RTL": rtl_file, "dependencies": dependencies})
     return dependency_dict
+
+
+def generated_entries(dataflow_units, unit_name):
+    """
+    The config's entries under a unit's name that a generator writes at the
+    unit's port types, in the config's order.
+    """
+    return [u for u in dataflow_units
+            if u.get("name") == unit_name and generated_units.bakes_types(u)]
 
 
 def characterize_generated(unit_name, entries, dirs, dynamatic_dir,
@@ -237,12 +248,17 @@ def run_characterization(json_input, json_output, dynamatic_dir, synth_tool, clo
         # entries under its name at once, since export-rtl picks among them
         # by the operation's attributes (the pipelined or the sequential
         # divider).
+        # A generic entity listed ahead of the unit's generator is the
+        # generator's logic without extra signals (rtl-config-vhdl.json): the
+        # unit is measured once, from the generator.
+        if generic and generated_entries(dataflow_units, unit_name):
+            continue
         if generated_units.bakes_types(unit_info):
             if unit_name in generated_done:
                 continue
             generated_done.add(unit_name)
             print(f"Processing unit: {unit_name}")
-            entries = [u for u in dataflow_units if u.get("name") == unit_name]
+            entries = generated_entries(dataflow_units, unit_name)
             keyed = characterize_generated(unit_name, entries, dirs, dynamatic_dir,
                                            all_dependencies_dict, synth_tool,
                                            clock_period,

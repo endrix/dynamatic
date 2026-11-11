@@ -203,9 +203,13 @@ bool DataflowConstraints::verify(Attribute attr) const {
            numDownstreams.verify(channelType.getNumDownstreamExtraSignals()) &&
            numUpstreams.verify(channelType.getNumUpstreamExtraSignals());
   }
-  if (isa<handshake::ControlType>(ty)) {
-    return dataWidth.verify(0) && numExtras.verify(0) &&
-           numDownstreams.verify(0) && numUpstreams.verify(0);
+  if (auto controlType = dyn_cast<handshake::ControlType>(ty)) {
+    // No data, but a control carries extra signals as a channel does (a
+    // speculative region's `spec` bit).
+    return dataWidth.verify(0) &&
+           numExtras.verify(controlType.getNumExtraSignals()) &&
+           numDownstreams.verify(controlType.getNumDownstreamExtraSignals()) &&
+           numUpstreams.verify(controlType.getNumUpstreamExtraSignals());
   }
   return false;
 }

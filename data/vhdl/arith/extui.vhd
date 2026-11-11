@@ -22,7 +22,7 @@ end entity;
 
 architecture arch of extui is
 begin
-  outs(OUTPUT_TYPE - 1 downto INPUT_TYPE) <= (OUTPUT_TYPE - INPUT_TYPE - 1 downto 0 => '0');
+  outs(OUTPUT_TYPE - 1 downto INPUT_TYPE) <= (others => '0');
   outs(INPUT_TYPE - 1 downto 0)            <= ins;
   outs_valid                                <= ins_valid;
   ins_ready                                 <= outs_ready;

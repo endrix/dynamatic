@@ -1,0 +1,6 @@
+// A function named as the entity of a unit it instantiates (the sink's),
+// used by generic-units-nofork-export.mlir.
+handshake.func @Sink(%a: !handshake.channel<i8>, %start: !handshake.control<>) -> (!handshake.control<>) attributes {argNames = ["a", "start"], resNames = ["end"]} {
+  sink %a {handshake.name = "sink0"} : <i8>
+  end {handshake.name = "end0"} %start : <>
+}

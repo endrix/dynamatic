@@ -4,7 +4,7 @@
 // RUN: export-rtl %t/raw.hw %t/vhdl %dynamatic_src_root/data/rtl-config-vhdl.json --dynamatic-path %dynamatic_src_root --hdl vhdl
 // RUN: FileCheck %s --input-file=%t/vhdl/raw.vhd
 // RUN: ls %t/vhdl | FileCheck %s --check-prefix=FILES
-// RUN: cd %t/vhdl && ghdl -a --std=08 arith_*.vhd handshake_*.vhd raw.vhd && ghdl -e --std=08 raw
+// RUN: cd %t/vhdl && ghdl -i --std=08 *.vhd && ghdl -m --std=08 raw
 
 // arith on raw wires through the exporter: one generic entity per operation,
 // whatever its width, its predicate or its value. Two constants and two
