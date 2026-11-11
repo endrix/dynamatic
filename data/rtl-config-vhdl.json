@@ -30,7 +30,37 @@
   },
   {
     "name": "handshake.addi",
+    "parameters": [
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/arith/addi.vhd",
+    "dependencies": [
+      "join"
+    ]
+  },
+  {
+    "name": "handshake.addi",
     "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t addi -p bitwidth=$BITWIDTH extra_signals=$EXTRA_SIGNALS"
+  },
+  {
+    "name": "handshake.andi",
+    "parameters": [
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/arith/andi.vhd",
+    "dependencies": [
+      "join"
+    ]
   },
   {
     "name": "handshake.andi",
@@ -261,6 +291,24 @@
   },
   {
     "name": "handshake.extsi",
+    "parameters": [
+      {
+        "name": "INPUT_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      },
+      {
+        "name": "OUTPUT_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/arith/extsi.vhd"
+  },
+  {
+    "name": "handshake.extsi",
     "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t extsi -p input_bitwidth=$INPUT_BITWIDTH output_bitwidth=$OUTPUT_BITWIDTH extra_signals=$EXTRA_SIGNALS"
   },
   {
@@ -341,6 +389,21 @@
   },
   {
     "name": "handshake.subi",
+    "parameters": [
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/arith/subi.vhd",
+    "dependencies": [
+      "join"
+    ]
+  },
+  {
+    "name": "handshake.subi",
     "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t subi -p bitwidth=$BITWIDTH extra_signals=$EXTRA_SIGNALS"
   },
   {
@@ -374,12 +437,100 @@
     "parameters": [
       {
         "name": "SIZE",
+        "type": "unsigned",
+        "lb": 1
+      },
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-eq": 0,
+        "extra-eq": 0,
+        "generic": false
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/dataless/fork.vhd",
+    "module-name": "fork_dataless",
+    "dependencies": [
+      "logic",
+      "eager_fork_register_block"
+    ]
+  },
+  {
+    "name": "handshake.fork",
+    "parameters": [
+      {
+        "name": "SIZE",
+        "type": "unsigned",
+        "lb": 1
+      },
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/fork.vhd",
+    "module-name": "handshake_fork",
+    "dependencies": [
+      "types",
+      "fork_dataless"
+    ]
+  },
+  {
+    "name": "handshake.fork",
+    "parameters": [
+      {
+        "name": "SIZE",
         "type": "unsigned"
       }
     ],
     "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t fork -p size=$SIZE bitwidth=$BITWIDTH extra_signals=$EXTRA_SIGNALS",
     "dependencies": [
       "types"
+    ]
+  },
+  {
+    "name": "handshake.lazy_fork",
+    "parameters": [
+      {
+        "name": "SIZE",
+        "type": "unsigned",
+        "lb": 1
+      },
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-eq": 0,
+        "extra-eq": 0,
+        "generic": false
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/dataless/lazy_fork.vhd",
+    "module-name": "lazy_fork_dataless",
+    "dependencies": [
+      "logic"
+    ]
+  },
+  {
+    "name": "handshake.lazy_fork",
+    "parameters": [
+      {
+        "name": "SIZE",
+        "type": "unsigned",
+        "lb": 1
+      },
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/lazy_fork.vhd",
+    "dependencies": [
+      "types",
+      "lazy_fork_dataless"
     ]
   },
   {
@@ -394,6 +545,32 @@
     "dependencies": [
       "types"
     ]
+  },
+  {
+    "name": "handshake.sink",
+    "parameters": [
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-eq": 0,
+        "extra-eq": 0,
+        "generic": false
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/dataless/sink.vhd",
+    "module-name": "sink_dataless"
+  },
+  {
+    "name": "handshake.sink",
+    "parameters": [
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/sink.vhd"
   },
   {
     "name": "handshake.sink",
@@ -549,6 +726,38 @@
   },
   {
     "name": "handshake.cond_br",
+    "parameters": [
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-eq": 0,
+        "extra-eq": 0,
+        "generic": false
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/dataless/cond_br.vhd",
+    "module-name": "cond_br_dataless",
+    "dependencies": [
+      "join"
+    ]
+  },
+  {
+    "name": "handshake.cond_br",
+    "parameters": [
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/cond_br.vhd",
+    "dependencies": [
+      "cond_br_dataless"
+    ]
+  },
+  {
+    "name": "handshake.cond_br",
     "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t cond_br -p bitwidth=$BITWIDTH extra_signals=$EXTRA_SIGNALS"
   },
   {
@@ -558,6 +767,11 @@
   {
     "name": "handshake.br",
     "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t br -p bitwidth=$BITWIDTH extra_signals=$EXTRA_SIGNALS"
+  },
+  {
+    "name": "handshake.source",
+    "parameters": [],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/source.vhd"
   },
   {
     "name": "handshake.source",
@@ -577,6 +791,54 @@
     "name": "handshake.load",
     "parameters": [
       {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      },
+      {
+        "name": "ADDR_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      },
+      {
+        "name": "KILL_DROP",
+        "type": "unsigned",
+        "eq": 1,
+        "generic": false
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/load_kill_drop.vhd",
+    "dependencies": [
+      "tehb"
+    ]
+  },
+  {
+    "name": "handshake.load",
+    "parameters": [
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      },
+      {
+        "name": "ADDR_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/load.vhd",
+    "dependencies": [
+      "tehb"
+    ]
+  },
+  {
+    "name": "handshake.load",
+    "parameters": [
+      {
         "name": "KILL_DROP",
         "type": "unsigned",
         "eq": 1
@@ -587,6 +849,27 @@
   {
     "name": "handshake.load",
     "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t load -p addr_bitwidth=$ADDR_BITWIDTH data_bitwidth=$DATA_BITWIDTH extra_signals=$EXTRA_SIGNALS"
+  },
+  {
+    "name": "handshake.store",
+    "parameters": [
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      },
+      {
+        "name": "ADDR_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/store.vhd",
+    "dependencies": [
+      "join"
+    ]
   },
   {
     "name": "handshake.store",
@@ -636,7 +919,37 @@
   },
   {
     "name": "handshake.ori",
+    "parameters": [
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/arith/ori.vhd",
+    "dependencies": [
+      "join"
+    ]
+  },
+  {
+    "name": "handshake.ori",
     "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t ori -p bitwidth=$BITWIDTH extra_signals=$EXTRA_SIGNALS"
+  },
+  {
+    "name": "handshake.xori",
+    "parameters": [
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/arith/xori.vhd",
+    "dependencies": [
+      "join"
+    ]
   },
   {
     "name": "handshake.xori",
@@ -691,6 +1004,24 @@
   {
     "name": "mem_to_bram",
     "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t mem_to_bram -p addr_bitwidth=$ADDR_BITWIDTH data_bitwidth=$DATA_BITWIDTH"
+  },
+  {
+    "name": "handshake.extui",
+    "parameters": [
+      {
+        "name": "INPUT_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      },
+      {
+        "name": "OUTPUT_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/arith/extui.vhd"
   },
   {
     "name": "handshake.extui",
@@ -1123,5 +1454,25 @@
     ],
     "generic": "$DYNAMATIC/data/vhdl/arith/raw/arith_extsi.vhd",
     "raw-vector-ports": true
+  },
+  {
+    "generic": "$DYNAMATIC/data/vhdl/support/join.vhd"
+  },
+  {
+    "generic": "$DYNAMATIC/data/vhdl/support/logic.vhd"
+  },
+  {
+    "generic": "$DYNAMATIC/data/vhdl/support/eager_fork_register_block.vhd"
+  },
+  {
+    "generic": "$DYNAMATIC/data/vhdl/handshake/tehb.vhd",
+    "module-name": "tehb",
+    "dependencies": [
+      "tehb_dataless"
+    ]
+  },
+  {
+    "generic": "$DYNAMATIC/data/vhdl/handshake/dataless/tehb.vhd",
+    "module-name": "tehb_dataless"
   }
 ]
