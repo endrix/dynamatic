@@ -208,8 +208,7 @@ bool DataflowConstraints::verify(Attribute attr) const {
     // speculative region's `spec` bit).
     return dataWidth.verify(0) &&
            numExtras.verify(controlType.getNumExtraSignals()) &&
-           numDownstreams.verify(
-               controlType.getNumDownstreamExtraSignals()) &&
+           numDownstreams.verify(controlType.getNumDownstreamExtraSignals()) &&
            numUpstreams.verify(controlType.getNumUpstreamExtraSignals());
   }
   return false;
