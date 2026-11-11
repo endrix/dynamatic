@@ -2,7 +2,7 @@
 // RUN: rm -rf %t && mkdir -p %t
 // RUN: dynamatic-opt %S/kill-domain-three.mlir --lower-handshake-to-hw > %t/three.hw
 // RUN: export-rtl %t/three.hw %t/vhdl %dynamatic_src_root/data/rtl-config-vhdl.json --dynamatic-path %dynamatic_src_root --hdl vhdl
-// RUN: cd %t/vhdl && ghdl -a --std=08 handshake_*.vhd kill_or_*.vhd three.vhd && ghdl -e --std=08 three
+// RUN: cd %t/vhdl && ghdl -i --std=08 *.vhd && ghdl -m --std=08 three
 // RUN: export-rtl %t/three.hw %t/vlog %dynamatic_src_root/data/rtl-config-verilog.json --dynamatic-path %dynamatic_src_root --hdl verilog
 // RUN: cd %t/vlog && iverilog -g2012 -s three -o sim *.v
 

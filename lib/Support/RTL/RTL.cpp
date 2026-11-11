@@ -49,7 +49,8 @@ static constexpr StringLiteral KEY_PARAMETERS("parameters"),
     KEY_MODULE_NAME("module-name"), KEY_ARCH_NAME("arch-name"), KEY_HDL("hdl"),
     KEY_USE_JSON_CONFIG("use-json-config"), KEY_IO_KIND("io-kind"),
     KEY_IO_MAP("io-map"), KEY_IO_SIGNALS("io-signals"),
-    KEY_RAW_VECTOR_PORTS("raw-vector-ports");
+    KEY_RAW_VECTOR_PORTS("raw-vector-ports"),
+    KEY_NO_EXTRA_SIGNALS("no-extra-signals");
 
 /// JSON path errors.
 static constexpr StringLiteral
@@ -190,6 +191,27 @@ RTLRequestFromHWModule::tryToMatch(const RTLComponent &component) const {
   ParameterMappings mappings;
   if (failed(areParametersCompatible(component, mappings)))
     return nullptr;
+
+  // A component written for plain channels does not take a module one of
+  // whose ports carries an extra signal, whatever its parameters say: some
+  // units (a source, a constant) have no parameter that shows one.
+  if (component.refusesExtraSignals()) {
+    auto hasExtraSignals = [](Type type) {
+      if (auto channelType = dyn_cast<handshake::ChannelType>(type))
+        return channelType.getNumExtraSignals() != 0;
+      if (auto controlType = dyn_cast<handshake::ControlType>(type))
+        return controlType.getNumExtraSignals() != 0;
+      return false;
+    };
+    hw::ModuleType modType = cast<hw::HWModuleExternOp>(op).getModuleType();
+    for (const hw::ModulePort &port : modType.getPorts()) {
+      if (hasExtraSignals(port.type)) {
+        LLVM_DEBUG(llvm::dbgs() << "\t-> Port \"" << port.name.getValue()
+                                << "\" carries an extra signal\n");
+        return nullptr;
+      }
+    }
+  }
 
   mappings[RTLParameter::MODULE_NAME] =
       component.isGeneric()
@@ -702,7 +724,8 @@ bool RTLComponent::fromJSON(const ljson::Value &value, ljson::Path path) {
       !mapper.mapOptional(KEY_IO_KIND, ioKind) ||
       !mapper.mapOptional(KEY_IO_MAP, ioMap) ||
       !mapper.mapOptional(KEY_IO_SIGNALS, ioSignals) ||
-      !mapper.mapOptional(KEY_RAW_VECTOR_PORTS, rawVectorPorts)) {
+      !mapper.mapOptional(KEY_RAW_VECTOR_PORTS, rawVectorPorts) ||
+      !mapper.mapOptional(KEY_NO_EXTRA_SIGNALS, noExtraSignals)) {
     return false;
   }
 

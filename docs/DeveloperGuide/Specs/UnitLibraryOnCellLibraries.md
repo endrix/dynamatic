@@ -28,9 +28,11 @@ The audit is of the generators, not of `data/vhdl/`. Only six files under
 `vivado_ip_cores`); the rest of `data/vhdl/` belongs to
 `data/rtl-config-vhdl-vivado.json`, a separate configuration, and the default
 VHDL flow reads none of it. (Since this audit, the default configuration
-takes the hand-written generic entity of fourteen units, those measured to
-be their generator's logic, and of the arith units on raw wires; a unit that
-carries an extra signal is still generated.) That leaves 87 generator types named by the
+takes the hand-written generic entity of the units measured to be their
+generator's logic (thirteen kinds, the source and three kinds of buffer), a
+generic entity written from the generator's logic for seven more
+(`data/vhdl/handshake/generic`), and one for each arith unit on raw wires; a
+unit that carries an extra signal is still generated.) That leaves 87 generator types named by the
 default configuration, of which one (`rigidifier`) has no generator, plus the
 LSQ, which has a generator of its own.
 

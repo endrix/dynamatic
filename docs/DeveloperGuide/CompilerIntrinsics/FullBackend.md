@@ -560,6 +560,24 @@ The `raw-vector-ports` option, when present, must map to a boolean. When it is t
 }
 ```
 
+#### `no-extra-signals`
+
+A component's parameters usually show the channel types of the unit it implements, and a `dataflow` parameter's `extra-eq` constraint keeps a component written for plain channels away from a unit that carries an extra signal (the `spec` bit of a speculative region). Some units have no such parameter: a `handshake.source` has none at all, and a `handshake.constant` has its value and its width only.
+
+The `no-extra-signals` option, when present, must map to a boolean. When it is true, the component matches only a module none of whose channel or control ports carries an extra signal, whatever its parameters. The option is false by default.
+
+```json
+{
+  "name": "handshake.constant",
+  "parameters": [
+    { "name": "VALUE", "type": "string" },
+    { "name": "DATA_WIDTH", "type": "unsigned" }
+  ],
+  "generic": "$DYNAMATIC/data/vhdl/handshake/generic/handshake_constant.vhd",
+  "no-extra-signals": true
+}
+```
+
 #### `io-map`
 
 The backend determines the port name of each RTL module's signal using the operand/result names encoded in HW-level IR, which themselves come from the `handshake::NamedIOInterface` interface for Handshake operations, and from custom logic for operations from other dialects. In some cases, however, the concretized RTL implementation of a component may not match these conventions and it may be unpractical to modify the RTL to make it agree with MLIR port names.

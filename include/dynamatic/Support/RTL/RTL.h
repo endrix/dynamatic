@@ -400,6 +400,11 @@ public:
   /// a one-bit one included ("raw-vector-ports" in the RTL configuration).
   bool hasRawVectorPorts() const { return rawVectorPorts; }
 
+  /// Returns whether the component only implements a unit none of whose
+  /// ports carries an extra signal ("no-extra-signals" in the RTL
+  /// configuration).
+  bool refusesExtraSignals() const { return noExtraSignals; }
+
   /// Returns the HDL in which the component is written.
   HDL getHDL() const { return hdl; }
 
@@ -469,6 +474,11 @@ private:
   /// What a generic entity needs: its port types cannot depend on a width.
   /// The clock and the reset stay scalars.
   bool rawVectorPorts = false;
+
+  /// Whether the component matches only a module none of whose channel or
+  /// control ports carries an extra signal. For a unit whose parameters do
+  /// not show its channel types, so that no parameter constraint can say it.
+  bool noExtraSignals = false;
 
   /// IO kind used by the component, hierarchical by default.
   IOKind ioKind = IOKind::HIERARCICAL;
