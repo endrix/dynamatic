@@ -137,8 +137,10 @@ always measured on.
 
 For some units the generator config lists a generic entity of `data/vhdl`
 ahead of the generator: the units whose hand-written entity was measured to
-be the generator's logic (a fork, a sink, an addition), which an exported
-design then instantiates once per kind and not once per width. Such a unit
+be the generator's logic (a fork, a sink, an addition, a buffer), or a
+generic entity written from the generator's logic
+(`data/vhdl/handshake/generic`: a constant, a comparison, a shift), which an
+exported design then instantiates once per kind and not once per width. Such a unit
 is characterized once, from its generator, which also covers the units that
 carry an extra signal and are still generated.
 

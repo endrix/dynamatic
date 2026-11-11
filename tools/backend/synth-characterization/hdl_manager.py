@@ -2,7 +2,7 @@
 import os
 
 
-def copy_dependency_rtl_files(dependencies, dependency_dict, hdl_out_dir, dynamatic_dir):
+def copy_dependency_rtl_files(dependencies, dependency_dict, hdl_out_dir, dynamatic_dir, generated=False):
     """
     Copy the RTL files of the dependencies of the given unit to the output directory.
 
@@ -16,6 +16,8 @@ def copy_dependency_rtl_files(dependencies, dependency_dict, hdl_out_dir, dynama
         dependency_dict (dict): Dictionary containing the list of dependencies for all units.
         hdl_out_dir (str): Directory where HDL files should be stored.
         dynamatic_dir (str): Path to the Dynamatic directory.
+        generated (bool): The unit is written by a generator, which writes its
+            own buffers and gates: only the packages are copied beside it.
     """
     # Add dependency RTL files to the output directory
     remaining_dependencies = list(dependencies)
@@ -36,10 +38,13 @@ def copy_dependency_rtl_files(dependencies, dependency_dict, hdl_out_dir, dynama
         if "dependencies" in dependency_info:
             remaining_dependencies.extend(dependency_info["dependencies"])
 
-    extra_dependencies = ["types", "logic", "oehb", "oehb_dataless", "br_dataless"]
-    # Add extra dependencies that are not in the dependency list. A generator
-    # config has only `types` of them: its units write their own buffers and
-    # gates.
+    # The files a hand-written unit's wrapper may need without naming them. A
+    # generated unit needs the packages only: the buffer entities, which a
+    # generator config also lists (as the generic form of handshake.buffer),
+    # would be dead files beside it, in an order GHDL may not analyze.
+    extra_dependencies = ["types", "logic"]
+    if not generated:
+        extra_dependencies += ["oehb", "oehb_dataless", "br_dataless"]
     for extra_dependency in extra_dependencies:
         if extra_dependency not in dependency_dict:
             continue
@@ -76,7 +81,8 @@ def get_hdl_files(unit_name, generic, generator, dependencies, hdl_out_dir, dyna
     if not os.path.exists(hdl_out_dir):
         os.makedirs(hdl_out_dir)
     # Copy the RTL files of the dependencies to the output directory
-    copy_dependency_rtl_files(dependencies, dependency_dict, hdl_out_dir, dynamatic_dir)
+    copy_dependency_rtl_files(dependencies, dependency_dict, hdl_out_dir, dynamatic_dir,
+                              generated=not generic)
     # Check if the unit has RTL file
     if generic:
         # If generic is provided, copy the RTL file to the output directory

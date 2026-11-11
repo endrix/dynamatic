@@ -11,7 +11,8 @@
 // where a unit without data has no data port. A unit whose channel or
 // control carries an extra signal has no generic entity -- a generic cannot
 // add a port -- and is still generated: here every unit on the speculative
-// values, and the source, which has no parameter to tell it by.
+// values. A source has no parameter that shows its control type, so its
+// entry says "no-extra-signals": the speculative one is generated.
 
 // CHECK-DAG: fork0 : entity work.handshake_fork(arch) generic map(3, 8)
 // CHECK-DAG: fork1 : entity work.fork_dataless(arch) generic map(2)
@@ -37,10 +38,12 @@
 // CHECK-DAG: sink2 : entity work.sink_dataless(arch)
 // CHECK-DAG: sink3 : entity work.handshake_sink_{{[0-9]+}}(arch)
 // CHECK-DAG: sink4 : entity work.handshake_sink_{{[0-9]+}}(arch)
-// CHECK-DAG: source0 : entity work.handshake_source_{{[0-9]+}}(arch)
+// CHECK-DAG: sink5 : entity work.handshake_sink_{{[0-9]+}}(arch)
+// CHECK-DAG: source0 : entity work.handshake_source(arch)
+// CHECK-DAG: source1 : entity work.handshake_source_{{[0-9]+}}(arch)
 
-// The generated files of these kinds: those of the speculative values and
-// the source, one each. `ls` sorts them after the generic entities' files.
+// The generated files of these kinds: those of the speculative values, one
+// each. `ls` sorts them after the generic entities' files.
 // FILES-NOT:  handshake_{{(lazy_fork|extui|extsi|addi|subi|andi|ori|xori)}}_{{[0-9]+}}.vhd
 // FILES:      handshake_cond_br_{{[0-9]+}}.vhd
 // FILES-NOT:  handshake_cond_br_{{[0-9]+}}.vhd
@@ -50,6 +53,7 @@
 // FILES-NOT:  handshake_{{(fork|lazy_fork|ori)}}_{{[0-9]+}}.vhd
 // FILES:      handshake_sink_{{[0-9]+}}.vhd
 // FILES-NEXT: handshake_sink_{{[0-9]+}}.vhd
+// FILES-NEXT: handshake_source.vhd
 // FILES-NEXT: handshake_source_{{[0-9]+}}.vhd
 // FILES-NOT:  handshake_{{(sink|source|subi|xori)}}_{{[0-9]+}}.vhd
 
@@ -67,6 +71,8 @@ handshake.func @genunits(%a: !handshake.channel<i8>, %c: !handshake.channel<i1>,
   %zx2 = extui %l0 {handshake.name = "extui1"} : <i8> to <i16>
   %dif = subi %sum, %zx2 {handshake.name = "subi0"} : <i16>
   %src = source {handshake.name = "source0"} : <>
+  %ssrc = source {handshake.name = "source1"} : <[spec: i1]>
+  sink %ssrc {handshake.name = "sink5"} : <[spec: i1]>
   %k = constant %src {handshake.name = "constant0", value = 255 : i16} : <>, <i16>
   %k0, %k1, %k2 = fork [3] %k {handshake.name = "fork3"} : <i16>
   %and = andi %dif, %k0 {handshake.name = "andi0"} : <i16>

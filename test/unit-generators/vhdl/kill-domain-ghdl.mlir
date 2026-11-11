@@ -2,7 +2,7 @@
 // RUN: rm -rf %t && mkdir -p %t
 // RUN: dynamatic-opt %s --lower-handshake-to-hw > %t/kd.hw
 // RUN: export-rtl %t/kd.hw %t/out %dynamatic_src_root/data/rtl-config-vhdl.json --dynamatic-path %dynamatic_src_root --hdl vhdl
-// RUN: cd %t/out && ghdl -a --std=08 handshake_*.vhd kill_or_*.vhd kd.vhd %S/Inputs/kill-domain-tb.vhd
+// RUN: cd %t/out && ghdl -i --std=08 *.vhd %S/Inputs/kill-domain-tb.vhd && ghdl -m --std=08 tb
 // RUN: cd %t/out && ghdl --elab-run --std=08 tb --stop-time=2us 2>&1 | FileCheck %s
 
 // A kill domain simulated, through the lowering and the exporter (the
