@@ -367,6 +367,31 @@
     "name": "handshake.muli",
     "parameters": [
       {
+        "name": "IMPL",
+        "type": "string",
+        "eq": "sequential",
+        "generic": false
+      },
+      {
+        "name": "STEP",
+        "type": "unsigned"
+      },
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/generic/handshake_muli_sequential.vhd",
+    "dependencies": [
+      "join"
+    ]
+  },
+  {
+    "name": "handshake.muli",
+    "parameters": [
+      {
         "name": "LATENCY",
         "type": "unsigned"
       },
@@ -1291,6 +1316,43 @@
   {
     "name": "handshake.shrsi",
     "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t shrsi -p bitwidth=$BITWIDTH extra_signals=$EXTRA_SIGNALS"
+  },
+  {
+    "name": "handshake.init",
+    "parameters": [
+      {
+        "name": "INITIAL_VALUE",
+        "type": "string",
+        "generic": false
+      },
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-eq": 0,
+        "extra-eq": 0,
+        "generic": false
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/generic/handshake_init_dataless.vhd"
+  },
+  {
+    "name": "handshake.init",
+    "parameters": [
+      {
+        "name": "INITIAL_VALUE",
+        "type": "string"
+      },
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/generic/handshake_init.vhd",
+    "dependencies": [
+      "handshake_init_dataless"
+    ]
   },
   {
     "name": "handshake.init",

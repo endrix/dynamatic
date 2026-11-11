@@ -1,6 +1,6 @@
 // REQUIRES: ghdl
 // RUN: rm -rf %t && mkdir -p %t
-// RUN: cd %t && ghdl -a --std=08 %dynamatic_src_root/data/vhdl/support/logic.vhd %dynamatic_src_root/data/vhdl/support/join.vhd %dynamatic_src_root/data/vhdl/handshake/generic/handshake_*.vhd %S/Inputs/handshake-generic-tb.vhd
+// RUN: cd %t && ghdl -i --std=08 %dynamatic_src_root/data/vhdl/support/logic.vhd %dynamatic_src_root/data/vhdl/support/join.vhd %dynamatic_src_root/data/vhdl/handshake/generic/handshake_*.vhd %S/Inputs/handshake-generic-tb.vhd && ghdl -m --std=08 tb
 // RUN: cd %t && ghdl --elab-run --std=08 tb -gW=1 2>&1 | FileCheck %s
 // RUN: cd %t && ghdl --elab-run --std=08 tb -gW=2 2>&1 | FileCheck %s
 // RUN: cd %t && ghdl --elab-run --std=08 tb -gW=8 2>&1 | FileCheck %s

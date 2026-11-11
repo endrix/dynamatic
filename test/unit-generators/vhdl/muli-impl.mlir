@@ -1,16 +1,20 @@
 // RUN: %export-vhdl
-// RUN: FileCheck %s -input-file %t/handshake_muli_0.vhd --check-prefix=SEQ
+// RUN: FileCheck %s -input-file %t/test.vhd --check-prefix=TOP
+// RUN: FileCheck %s -input-file %t/handshake_muli_sequential.vhd --check-prefix=SEQ
 // RUN: FileCheck %s -input-file %t/handshake_muli_1.vhd --check-prefix=PIPE
 
 // The two multipliers. IMPL=sequential adds STEP multiplier bits a cycle
-// on one register set, the product held until taken; IMPL=pipelined is the
-// one-cycle product behind the unit's latency in registers.
+// on one register set, the product held until taken: one generic entity for
+// every step and width. IMPL=pipelined is the one-cycle product behind the
+// unit's latency in registers, generated per parameter set.
 
-// SEQ: entity handshake_muli_0_join is
-// SEQ: entity handshake_muli_0 is
+// TOP: mul0 : entity work.handshake_muli_sequential(arch) generic map(4, 32)
+// TOP: mul1 : entity work.handshake_muli_1(arch)
+
+// SEQ: entity handshake_muli_sequential is
 // SEQ: signal busy, done : std_logic;
-// SEQ: partial <= a_reg * b_reg(4 - 1 downto 0);
-// SEQ: a_reg <= shift_left(a_reg, 4);
+// SEQ: partial <= a_reg * b_reg(STEP - 1 downto 0);
+// SEQ: a_reg <= shift_left(a_reg, STEP);
 // SEQ: result_valid <= done;
 
 // PIPE: entity handshake_muli_1_valid_buffer is
