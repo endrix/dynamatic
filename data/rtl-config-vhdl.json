@@ -770,11 +770,6 @@
   },
   {
     "name": "handshake.source",
-    "parameters": [],
-    "generic": "$DYNAMATIC/data/vhdl/handshake/source.vhd"
-  },
-  {
-    "name": "handshake.source",
     "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t source -p extra_signals=$EXTRA_SIGNALS"
   },
   {
@@ -1456,7 +1451,10 @@
     "raw-vector-ports": true
   },
   {
-    "generic": "$DYNAMATIC/data/vhdl/support/join.vhd"
+    "generic": "$DYNAMATIC/data/vhdl/support/join.vhd",
+    "dependencies": [
+      "logic"
+    ]
   },
   {
     "generic": "$DYNAMATIC/data/vhdl/support/logic.vhd"

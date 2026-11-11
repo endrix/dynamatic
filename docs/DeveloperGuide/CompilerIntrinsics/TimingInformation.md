@@ -128,11 +128,19 @@ python3 main.py --synth-tool asap7 \
 
 A standard-cell model is for the designs `export-rtl` writes, and
 `export-rtl` builds a design from the generators that `data/rtl-config-vhdl.json`
-names. A fork in an exported design is `vhdl-unit-generator.py -t fork`,
-written at its size and width, not `data/vhdl/handshake/fork.vhd`, the file
-`rtl-config-vhdl-vivado.json` lists. So the PDK backends read the generator
-config, and that is their default when `--json-input` is left out. Vivado
-keeps the hand-written files its model was always measured on.
+names. A truncation in an exported design is `vhdl-unit-generator.py -t
+trunci`, written at its widths, not `data/vhdl/arith/trunci.vhd`, the file
+`rtl-config-vhdl-vivado.json` lists, whose ready is another expression. So
+the PDK backends read the generator config, and that is their default when
+`--json-input` is left out. Vivado keeps the hand-written files its model was
+always measured on.
+
+For some units the generator config lists a generic entity of `data/vhdl`
+ahead of the generator: the units whose hand-written entity was measured to
+be the generator's logic (a fork, a sink, an addition), which an exported
+design then instantiates once per kind and not once per width. Such a unit
+is characterized once, from its generator, which also covers the units that
+carry an extra signal and are still generated.
 
 A generator entry has no generics. `export-rtl` fills its command's
 variables and the generator bakes them into the RTL. Some variables come

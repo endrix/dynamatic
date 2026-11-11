@@ -6,6 +6,9 @@
 # exported design is `vhdl-unit-generator.py -t fork`, written at its size and
 # width. A model measured on the hand-written files describes RTL no exported
 # design contains, so a characterization for a design flow reads this config.
+# Where this config lists a generic entity ahead of a unit's generator, the
+# entity is the generator's logic without extra signals, and the unit is
+# measured from the generator (main.py, generated_entries).
 #
 # A generator entry has no generics. export-rtl fills its command's variables
 # -- from the operation's attributes (the entry's `parameters`: SIZE,

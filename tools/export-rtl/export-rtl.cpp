@@ -139,6 +139,10 @@ struct ExportInfo {
   /// heap-allocated match according to the RTL configuration.
   mlir::DenseMap<hw::HWModuleExternOp, RTLMatch *> externals;
 
+  /// The names, in lower case, of the modules concretized in the output
+  /// directory: the external modules' and their dependencies'.
+  std::set<std::string> componentNames;
+
   /// Creates export information for the given module and RTL configuration.
   ExportInfo(mlir::ModuleOp modOp, RTLConfiguration &config,
              StringRef outputPath)
@@ -199,6 +203,7 @@ LogicalResult ExportInfo::concretizeExternalModules() {
     StringRef concreteModName = match->getConcreteModuleName();
     if (auto [_, isNew] = modules.insert(concreteModName.str()); !isNew)
       return success();
+    componentNames.insert(concreteModName.lower());
 
     // First generate dependencies recursively...
     for (const std::string &dep : match->getDependencies()) {
@@ -1721,6 +1726,16 @@ static LogicalResult writeModule(std::unique_ptr<RTLWriter> &writer,
   std::string filepath =
       writer->exportInfo.outputPath.str() + sys::path::get_separator().str() +
       modOp.getSymName().str() + "." + getHDLExtension(hdl).str();
+
+  // The components the design instantiates are in the output directory
+  // already, a generic one under its own fixed name (sink, join). A module of
+  // that name would overwrite the component's file and declare its entity a
+  // second time; VHDL does not tell names apart by case.
+  if (writer->exportInfo.componentNames.count(modOp.getSymName().lower()))
+    return modOp->emitOpError()
+           << "the module is named as an RTL component the design "
+              "instantiates (\""
+           << modOp.getSymName() << "\", in any case): rename the module";
 
   std::error_code ec;
   llvm::raw_fd_ostream fileStream(filepath, ec);
