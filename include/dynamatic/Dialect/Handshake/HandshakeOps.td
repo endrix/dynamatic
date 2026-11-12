@@ -525,7 +525,7 @@ class Handshake_ForkOp<string mnemonic, list<Trait> traits = []> :
     Pure,
     HasClock,
     SameOperandsAndResultType,
-    SimpleNamedIO
+    ArrayOutputsNamedIO
 ]> {
   let arguments = (ins HandshakeType:$operand);
   let results = (outs Variadic<HandshakeType>:$result);
@@ -593,7 +593,7 @@ def FirstOp : Handshake_Op<"first", [
   SameOperandsAndResultType,
   VariadicHasElement<"dataOperands">,
   DeclareOpInterfaceMethods<MergeLikeOpInterface, ["getDataResult"]>,
-  SimpleNamedIO
+  ArrayInputsNamedIO
 ]> {
   let summary = "first-wins merge with full consumption";
   let description = [{
@@ -1252,7 +1252,7 @@ def MergeOp : Handshake_Op<"merge", [
   SameOperandsAndResultType,
   VariadicHasElement<"dataOperands">,
   DeclareOpInterfaceMethods<MergeLikeOpInterface, ["getDataResult"]>,
-  SimpleNamedIO
+  ArrayInputsNamedIO
 ]> {
   let summary = "merge operation";
   let description = [{
@@ -1332,11 +1332,11 @@ def MuxOp : Handshake_Op<"mux", [
     //===------------------------------------------------------------------===//
 
     /// Operand 0 is named "index"
-    /// Operands 1 to N are named "ins_0" to "ins_<N-1>"
-    /// simpleOperandName handles validation
+    /// Operands 1 to N are named "ins_0" to "ins_<N-1>", indexed even when
+    /// there is one: the data inputs are an array in the unit's RTL
     std::string getOperandName(unsigned idx) {
-      return idx == 0 ? "index"
-                      : simpleOperandName(idx - 1, getNumOperands() - 1);
+      validateOperandIdx(idx);
+      return idx == 0 ? "index" : "ins_" + std::to_string(idx - 1);
     }
 
     /// Result 0 is named "outs"
@@ -1417,10 +1417,11 @@ def ControlMergeOp : Handshake_Op<"control_merge", [
     // NamedIOInterface Methods
     //===------------------------------------------------------------------===//
 
-    /// Operands 0 to N are named "ins_0" to "ins_<N>"
-    /// simpleOperandName handles validation
+    /// Operands 0 to N are named "ins_0" to "ins_<N>", indexed even when
+    /// there is one: the inputs are an array in the unit's RTL
     std::string getOperandName(unsigned idx) {
-      return simpleOperandName(idx);
+      validateOperandIdx(idx);
+      return "ins_" + std::to_string(idx);
     }
 
     /// Result 0 is named outs
@@ -1665,7 +1666,7 @@ def SourceOp : Handshake_Op<"source", [
 def JoinOp : Handshake_Op<"join", [
   SameOperandsAndResultType,
   DeclareOpInterfaceMethods<ControlInterface, ["isControl"]>,
-  SimpleNamedIO
+  ArrayInputsNamedIO
 ]> {
   let summary = "join operation";
   let description = [{
@@ -1700,7 +1701,7 @@ def JoinOp : Handshake_Op<"join", [
 // once the backend supports variadic channels with zero or one item correctly.
 def BlockerOp : Handshake_Op<"blocker", [
   SameOperandsAndResultType,
-  SimpleNamedIO
+  ArrayInputsNamedIO
 ]> {
   let summary = "blocker operation";
   let description = [{
