@@ -1,7 +1,11 @@
 // RUN: %export-vhdl
+// RUN: python3 %dynamatic_src_root/tools/unit-generators/vhdl/vhdl-unit-generator.py -n handshake_divui_0 -o %t/handshake_divui_0.vhd -t divui -p bitwidth=32 latency=35 "impl='sequential'" 'extra_signals={}'
 // RUN: FileCheck %s -input-file %t/handshake_divui_0.vhd --check-prefix=SEQ
 // RUN: FileCheck %s -input-file %t/handshake_divui_1.vhd --check-prefix=PIPE
 // RUN: ls %t | FileCheck %s --check-prefix=DEPS
+
+// The sequential unit is generated directly: the export gives a sequential
+// divider the generic entity (generic-units-6-export.mlir).
 
 // The two dividers. IMPL=sequential is one register set stepped BITWIDTH
 // times, the quotient held until taken; IMPL=pipelined is the Vitis IP
