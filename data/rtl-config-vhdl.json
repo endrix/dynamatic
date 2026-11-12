@@ -950,6 +950,116 @@
     "parameters": [
       {
         "name": "SIZE",
+        "type": "unsigned",
+        "lb": 1
+      },
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-eq": 0,
+        "extra-eq": 0,
+        "generic": false
+      },
+      {
+        "name": "TEHB",
+        "type": "unsigned",
+        "eq": 0,
+        "generic": false
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/generic/handshake_merge_notehb_dataless.vhd",
+    "module-name": "handshake_merge_notehb_dataless"
+  },
+  {
+    "name": "handshake.merge",
+    "parameters": [
+      {
+        "name": "SIZE",
+        "type": "unsigned",
+        "lb": 1
+      },
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      },
+      {
+        "name": "TEHB",
+        "type": "unsigned",
+        "eq": 0,
+        "generic": false
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/generic/handshake_merge_notehb.vhd",
+    "module-name": "handshake_merge_notehb",
+    "dependencies": [
+      "types"
+    ]
+  },
+  {
+    "name": "handshake.merge",
+    "parameters": [
+      {
+        "name": "SIZE",
+        "type": "unsigned",
+        "lb": 1
+      },
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-eq": 0,
+        "extra-eq": 0,
+        "generic": false
+      },
+      {
+        "name": "TEHB",
+        "type": "unsigned",
+        "eq": 1,
+        "generic": false
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/generic/handshake_merge_dataless.vhd",
+    "module-name": "handshake_merge_dataless",
+    "dependencies": [
+      "handshake_merge_notehb_dataless",
+      "tehb_dataless"
+    ]
+  },
+  {
+    "name": "handshake.merge",
+    "parameters": [
+      {
+        "name": "SIZE",
+        "type": "unsigned",
+        "lb": 1
+      },
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      },
+      {
+        "name": "TEHB",
+        "type": "unsigned",
+        "eq": 1,
+        "generic": false
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/generic/handshake_merge.vhd",
+    "module-name": "handshake_merge",
+    "dependencies": [
+      "types",
+      "handshake_merge_notehb",
+      "tehb"
+    ]
+  },
+  {
+    "name": "handshake.merge",
+    "parameters": [
+      {
+        "name": "SIZE",
         "type": "unsigned"
       },
       {
@@ -1447,6 +1557,27 @@
     "parameters": [
       {
         "name": "SIZE",
+        "type": "unsigned",
+        "lb": 1
+      },
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/generic/handshake_blocker.vhd",
+    "dependencies": [
+      "types",
+      "join"
+    ]
+  },
+  {
+    "name": "handshake.blocker",
+    "parameters": [
+      {
+        "name": "SIZE",
         "type": "unsigned"
       }
     ],
@@ -1454,6 +1585,21 @@
     "dependencies": [
       "types"
     ]
+  },
+  {
+    "name": "handshake.join",
+    "parameters": [
+      {
+        "name": "SIZE",
+        "type": "unsigned",
+        "lb": 1
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/generic/handshake_join.vhd",
+    "dependencies": [
+      "join"
+    ],
+    "no-extra-signals": true
   },
   {
     "name": "handshake.join",
@@ -1582,6 +1728,42 @@
       }
     ],
     "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t bundle -p form='\"$FORM\"' data_width=$DATA_WIDTH extra_down='$EXTRA_DOWN' extra_up='$EXTRA_UP'"
+  },
+  {
+    "name": "handshake.queue",
+    "parameters": [
+      {
+        "name": "NUM_SLOTS",
+        "type": "unsigned",
+        "lb": 1
+      },
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 1,
+        "generic": false
+      },
+      {
+        "name": "DATA_WIDTH",
+        "type": "unsigned"
+      },
+      {
+        "name": "SIZE_WIDTH",
+        "type": "unsigned",
+        "lb": 1
+      },
+      {
+        "name": "SPACE_WIDTH",
+        "type": "unsigned",
+        "lb": 1
+      },
+      {
+        "name": "INITIAL_TOKENS",
+        "type": "string"
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/generic/handshake_queue.vhd"
   },
   {
     "name": "handshake.queue",
