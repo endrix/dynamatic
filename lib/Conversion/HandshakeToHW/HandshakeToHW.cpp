@@ -3515,11 +3515,11 @@ static LogicalResult wireKillDomains(hw::HWModuleOp hwModOp) {
 
 namespace {
 
-/// Conversion pass driver. The conversion only works on modules containing
-/// a single handshake function (handshake::FuncOp) at the moment. The
-/// function and all the operations it contains are converted to operations
-/// from the HW dialect. Dataflow semantics are made explicit with Handshake
-/// channels.
+/// Conversion pass driver. Every non-external handshake function
+/// (handshake::FuncOp) of the module and all the operations it contains are
+/// converted to operations from the HW dialect; a module may hold several,
+/// instantiating each other, or none. Dataflow semantics are made explicit
+/// with Handshake channels.
 class HandshakeToHWPass
     : public dynamatic::impl::HandshakeToHWBase<HandshakeToHWPass> {
 public:
