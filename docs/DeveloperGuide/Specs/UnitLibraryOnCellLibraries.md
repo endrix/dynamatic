@@ -67,7 +67,7 @@ Thus the answer to "three more items or thirteen" is: twenty-one units are
 not plainly fine. Nine unit types cannot be built at all (the seven vendor
 ones, `ndwire` and `rigidifier`), and three more fail in one configuration
 (`SHIFT_REG_BREAK_DV` with data, `valid_merger` and `top_join` with extra
-signals). The rest cost area and flip-flops rather than correctness. Separately, six units emit VHDL
+signals; `top_join` is fixed since this audit). The rest cost area and flip-flops rather than correctness. Separately, six units emit VHDL
 that no tool can read, or cannot be generated at all, for reasons that have
 nothing to do with the target; they are listed in their own section because
 fixing them is cheap and independent.
@@ -114,7 +114,7 @@ implementation that the class is about.
 | `mux` | 351 | 33 | 201.3 ps | size 3 |
 | `control_merge` | 254 | 37 | 166.0 ps | size 3 |
 | `first` | 314 | 37 | 216.8 ps | size 3 |
-| `top_join` | 5 | 0 | 12.5 ps | size 3; broken with extra signals |
+| `top_join` | 5 | 0 | 12.5 ps | size 3; broken with extra signals at the time of this audit, fixed since |
 | `sink` | 0 | 0 | no path |  |
 | `source` | 0 | 0 | no path |  |
 | `ready_remover` | 0 | 0 | 0.0 ps |  |
@@ -348,7 +348,11 @@ the generator would have found.
   signal manager declares `ins_valid : in std_logic` and the inner join takes
   `ins_valid : in std_logic_vector(size-1 downto 0)`; GHDL reports
   `can't associate "ins_valid" with port "ins_valid"`. A signal manager for an
-  N-input unit is not a unary signal manager.
+  N-input unit is not a unary signal manager. (Fixed since this audit for
+  `top_join`, the unit of a `handshake.join`: its signal manager declares
+  the unit's N inputs, and the configuration, which did not hand it the
+  extra signals at all, now does. `join` is a helper inside other units and
+  is given none.)
 - **`cmpf`, `maximumf` and `minimumf` under `vivado` are broken before the IP
   matters.** The body references `oehb_ready`, a signal the arithmetic
   boilerplate stopped declaring, and passes generics `ID` and `NUM_STAGE` that
