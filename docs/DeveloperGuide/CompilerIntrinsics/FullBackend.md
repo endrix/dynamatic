@@ -438,6 +438,8 @@ The `arch-name` option, when present, must map to a string which overrides the d
 }
 ```
 
+One entity may have several architectures, each a component of its own: the four sequential dividers are one entity, `handshake_divider_sequential`, whose entries name the architectures `divui`, `divsi`, `remui` and `remsi`. The option is for VHDL components. Verilog has no architectures, and the Verilog emission writes the name in place of the module's, so an entry that sets it does not export to Verilog.
+
 #### `use-json-config`
 
 > [!NOTE]

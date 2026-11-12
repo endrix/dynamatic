@@ -43,7 +43,19 @@ begin
   process
     variable lfsr : unsigned(62 downto 0) := to_unsigned(12345, 63);
     variable compared, results, by_zero, negative : natural := 0;
+    -- the most negative dividend over minus one, a result held back by its
+    -- consumer, a reset while a division runs
+    variable extreme, stalled, cut : natural := 0;
+    variable running : boolean := false;
     variable kind : natural;
+
+    -- the most negative word: its sign bit alone
+    function most_negative return word is
+      variable r : word := (others => '0');
+    begin
+      r(W - 1) := '1';
+      return r;
+    end function;
 
     procedure step is
     begin
@@ -110,15 +122,31 @@ begin
       wait for 4 ns;
       if c >= 2 then
         compare;
-        if rst = '0' and g_ds_v = '1' and rr = '1' then
-          results := results + 1;
-        end if;
-        if rst = '0' and g_ds_a = '1' and av = '1' and bv = '1' then
-          if unsigned(b) = 0 then
-            by_zero := by_zero + 1;
+        if rst = '1' then
+          if running and g_ds_v = '0' then
+            cut := cut + 1;
           end if;
-          if a(W - 1) = '1' then
-            negative := negative + 1;
+          running := false;
+        else
+          if g_ds_v = '1' then
+            running := false;
+            if rr = '1' then
+              results := results + 1;
+            else
+              stalled := stalled + 1;
+            end if;
+          end if;
+          if g_ds_a = '1' and av = '1' and bv = '1' then
+            running := true;
+            if unsigned(b) = 0 then
+              by_zero := by_zero + 1;
+            end if;
+            if a(W - 1) = '1' then
+              negative := negative + 1;
+            end if;
+            if a = most_negative and unsigned(not b) = 0 then
+              extreme := extreme + 1;
+            end if;
           end if;
         end if;
       end if;
@@ -132,10 +160,15 @@ begin
       wait for 1 ns;
     end loop;
     -- the run was not idle: divisions finished, some by zero, some of a
-    -- negative dividend
+    -- negative dividend, some of the most negative one over minus one; a
+    -- result waited for its consumer; a reset cut a division short
     assert results > CYCLES / (4 * (W + 2)) and by_zero > 0 and negative > 0
+           and extreme > 0 and stalled > 0 and cut > 0
       report "the stimulus was idle: " & integer'image(results) & " results, "
-             & integer'image(by_zero) & " by zero, " & integer'image(negative) & " negative"
+             & integer'image(by_zero) & " by zero, " & integer'image(negative) & " negative, "
+             & integer'image(extreme) & " of the most negative over minus one, "
+             & integer'image(stalled) & " cycles a result waited, "
+             & integer'image(cut) & " divisions cut by a reset"
       severity failure;
     report "equal to the generator's over " & integer'image(compared) & " comparisons";
     wait;

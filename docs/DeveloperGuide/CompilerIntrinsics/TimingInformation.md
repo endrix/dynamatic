@@ -146,7 +146,10 @@ exported design then instantiates once per kind and not once per width. Such a u
 is characterized once, from its generator, which also covers the units that
 carry an extra signal and are still generated. (The init has no model
 entry yet and is not characterized at all; nor are the join, the blocker, the
-queue, the bundle and the unbundle, which the characterization skips.)
+queue, the bundle and the unbundle, which the characterization skips. Of the
+sequential dividers only `divui` has a model entry,
+`handshake.divui.sequential`; a sequential `divsi`, `remui` or `remsi` is
+timed by its pipelined entry.)
 
 A generator entry has no generics. `export-rtl` fills its command's
 variables and the generator bakes them into the RTL. Some variables come
