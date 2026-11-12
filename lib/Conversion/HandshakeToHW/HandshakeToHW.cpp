@@ -677,9 +677,14 @@ ModuleDiscriminator::ModuleDiscriminator(Operation *op) {
                        [](NamedAttribute a) { return a.getName() == "TEHB"; });
         addUnsigned("TEHB", tehb);
       })
-      .Case<handshake::JoinOp, handshake::BlockerOp>([&](auto) {
+      .Case<handshake::JoinOp>([&](auto) {
         // Number of input channels
         addUnsigned("SIZE", op->getNumOperands());
+      })
+      .Case<handshake::BlockerOp>([&](auto) {
+        // Number of input channels and bitwidth
+        addUnsigned("SIZE", op->getNumOperands());
+        addType("DATA_TYPE", op->getResult(0));
       })
       .Case<handshake::BranchOp, handshake::SinkOp, handshake::NDWireOp>(
           [&](auto) {
@@ -896,6 +901,10 @@ ModuleDiscriminator::ModuleDiscriminator(Operation *op) {
       .Case<handshake::QueueOp>([&](handshake::QueueOp queueOp) {
         addUnsigned("NUM_SLOTS", queueOp.getNumSlots());
         addType("DATA_TYPE", queueOp.getIns());
+        // The data width on its own, for the generic entity: the type above
+        // serializes with the extra signals the channel carries.
+        addUnsigned("DATA_WIDTH", handshake::getHandshakeTypeBitWidth(
+                                      queueOp.getIns().getType()));
         // Occupancy is optional -- a queue nobody queries is a FIFO -- so the
         // generator is told which signals to publish rather than assuming
         // both. Zero means absent; the two share a width because they count

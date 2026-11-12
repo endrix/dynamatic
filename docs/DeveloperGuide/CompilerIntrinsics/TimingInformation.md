@@ -140,11 +140,12 @@ ahead of the generator: the units whose hand-written entity was measured to
 be the generator's logic (a fork, a sink, an addition, a buffer), or a
 generic entity written from the generator's logic
 (`data/vhdl/handshake/generic`: a constant, a comparison, a shift, an init,
-the sequential multiplier), which an
+the sequential multiplier, a merge, a join, a blocker, a queue), which an
 exported design then instantiates once per kind and not once per width. Such a unit
 is characterized once, from its generator, which also covers the units that
 carry an extra signal and are still generated. (The init has no model
-entry yet and is not characterized at all.)
+entry yet and is not characterized at all; nor are the join, the blocker and
+the queue, which the characterization skips.)
 
 A generator entry has no generics. `export-rtl` fills its command's
 variables and the generator bakes them into the RTL. Some variables come
