@@ -5,7 +5,7 @@
 // RUN: cd %t && ghdl -r --std=08 tb -gSLOTS=2 -gTOKENS=00000001,00000010 2>&1 | FileCheck %s --check-prefix=FULL
 // RUN: cd %t && ghdl -r --std=08 tb -gW=70 -gSLOTS=1 -gTOKENS=0000000000000000000000000000000000000000000000000000000000000000000101 2>&1 | FileCheck %s --check-prefix=WIDE
 // RUN: cd %t && for t in 00000001,00000010,00000011 0001 000000001 0000000x 00000001, ,00000001; do \
-// RUN:   ! ghdl -r --std=08 tb -gSLOTS=2 -gTOKENS=$t 2>&1 || exit 1; done | FileCheck %s --check-prefix=BAD
+// RUN:   ! ghdl -r --std=08 tb -gSLOTS=2 -gTOKENS=$t --stop-time=1ns 2>&1 || exit 1; done | FileCheck %s --check-prefix=BAD
 
 // The tokens a generic queue holds at reset are a generic, the string the
 // lowering writes: each token's bits at the data width, first out first,
@@ -35,7 +35,8 @@
 // WIDE:      after reset: size 1 space 0
 // WIDE-NEXT: token 5
 
-// What the queue could not hold is refused when the design is elaborated:
+// What the queue could not hold is refused when the design is elaborated,
+// before any clock edge (the runs stop at 1 ns):
 // more tokens than slots, a token of another width or not in binary, an
 // empty token.
 // BAD:      handshake_queue: more initial tokens than slots

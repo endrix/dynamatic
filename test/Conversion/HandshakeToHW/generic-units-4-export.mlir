@@ -5,6 +5,7 @@
 // RUN: export-rtl %t/genunits4.hw %t/vhdl %dynamatic_src_root/data/rtl-config-vhdl.json --dynamatic-path %dynamatic_src_root --hdl vhdl
 // RUN: FileCheck %s --input-file=%t/vhdl/genunits4.vhd
 // RUN: ls %t/vhdl | FileCheck %s --check-prefix=FILES
+// RUN: grep -c one_slot_break_r %t/vhdl/handshake_merge_[0-9]*.vhd | sort -t: -k2 -n | FileCheck %s --check-prefix=SLOT
 // RUN: cd %t/vhdl && ghdl -i --std=08 *.vhd && ghdl -m --std=08 genunits4
 // RUN: cd %t/vhdl && ghdl -r --std=08 genunits4 --stop-time=1ns --ieee-asserts=disable 2>&1 | FileCheck %s --check-prefix=SIM --allow-empty
 
@@ -28,6 +29,7 @@
 // CHECK-DAG: merge3 : entity work.handshake_merge_dataless(arch) generic map(2)
 // CHECK-DAG: merge4 : entity work.handshake_merge_notehb_dataless(arch) generic map(3)
 // CHECK-DAG: merge5 : entity work.handshake_merge_{{[0-9]+}}(arch)
+// CHECK-DAG: merge6 : entity work.handshake_merge_{{[0-9]+}}(arch)
 // CHECK-DAG: join0 : entity work.handshake_join(arch) generic map(2)
 // CHECK-DAG: join1 : entity work.handshake_join(arch) generic map(3)
 // CHECK-DAG: blocker0 : entity work.handshake_blocker(arch) generic map(2, 12)
@@ -43,12 +45,18 @@
 // FILES:      handshake_join.vhd
 // FILES-NEXT: handshake_merge.vhd
 // FILES-NEXT: handshake_merge_{{[0-9]+}}.vhd
+// FILES-NEXT: handshake_merge_{{[0-9]+}}.vhd
 // FILES-NEXT: handshake_merge_dataless.vhd
 // FILES-NEXT: handshake_merge_notehb.vhd
 // FILES-NEXT: handshake_merge_notehb_dataless.vhd
 // FILES-NEXT: handshake_queue.vhd
 // FILES-NEXT: handshake_queue_{{[0-9]+}}.vhd
 // FILES-NOT:  handshake_{{(join|merge|queue)}}_{{[0-9]+}}.vhd
+
+// A generated merge is still told whether it keeps its slot: of the two
+// speculative ones, one file has a one_slot_break_r.
+// SLOT:      handshake_merge_{{[0-9]+}}.vhd:0
+// SLOT-NEXT: handshake_merge_{{[0-9]+}}.vhd:{{[1-9]}}
 
 // The queue's assertions (tokens of the data width, no more than slots)
 // hold at the start of a run.
@@ -65,9 +73,10 @@ handshake.func @genunits4(%a: !handshake.channel<i12>, %b: !handshake.channel<i1
   %z0, %z1 = fork [2] %z {handshake.name = "fork4"} : <>
   %m3 = merge %x0, %y0 {handshake.name = "merge3"} : <>
   %m4 = merge %m3, %x1, %z0 {handshake.name = "merge4", hw.parameters = {TEHB = 0 : i64}} : <>
-  %s0, %s1 = fork [2] %s {handshake.name = "fork5"} : <i12, [spec: i1]>
+  %s0, %s1, %s2 = fork [3] %s {handshake.name = "fork5"} : <i12, [spec: i1]>
   %t0, %t1 = fork [2] %t {handshake.name = "fork6"} : <i12, [spec: i1]>
-  %m5 = merge %s0, %t0 {handshake.name = "merge5"} : <i12, [spec: i1]>
+  %m5a = merge %s0, %t0 {handshake.name = "merge5"} : <i12, [spec: i1]>
+  %m5 = merge %m5a, %s2 {handshake.name = "merge6", hw.parameters = {TEHB = 0 : i64}} : <i12, [spec: i1]>
   %j0 = join %x2, %y1 {handshake.name = "join0"} : <>
   %j1 = join %j0, %y2, %z1 {handshake.name = "join1"} : <>
   %k0 = blocker %a1, %b1 {handshake.name = "blocker0"} : <i12>

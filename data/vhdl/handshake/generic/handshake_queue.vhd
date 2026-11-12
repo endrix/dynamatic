@@ -84,6 +84,19 @@ architecture arch of handshake_queue is
 
   constant NUM_INITIAL : natural := token_count(INITIAL_TOKENS);
 
+  -- The tokens held at reset, read once when the design is elaborated: what
+  -- the queue could not hold is refused then.
+  type token_table is array (natural range <>) of std_logic_vector(DATA_WIDTH - 1 downto 0);
+  function tokens(text : string; count : natural) return token_table is
+    variable table : token_table(0 to count - 1);
+  begin
+    for i in 0 to count - 1 loop
+      table(i) := token_bits(text, i);
+    end loop;
+    return table;
+  end function;
+  constant INITIAL : token_table(0 to NUM_INITIAL - 1) := tokens(INITIAL_TOKENS, NUM_INITIAL);
+
   signal ReadEn  : std_logic := '0';
   signal WriteEn : std_logic := '0';
   signal Tail    : natural range 0 to NUM_SLOTS - 1;
@@ -169,7 +182,7 @@ begin
       if rising_edge(clk) then
         if rst = '1' then
           for i in 0 to NUM_INITIAL - 1 loop
-            Memory(i) <= token_bits(INITIAL_TOKENS, i);
+            Memory(i) <= INITIAL(i);
           end loop;
         elsif WriteEn = '1' then
           Memory(Tail) <= ins;
