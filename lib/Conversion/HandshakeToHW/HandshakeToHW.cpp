@@ -970,6 +970,20 @@ ModuleDiscriminator::ModuleDiscriminator(Operation *op) {
         }
         addString("EXTRA_DOWN", downStr + "}");
         addString("EXTRA_UP", upStr + "}");
+        // For the generic entities: the channel's type, on which the RTL
+        // config constrains the extra signals, and the widths of the two a
+        // generic entity has a port for, a queue's `size` downstream and its
+        // `space` upstream (zero where the channel does not carry it).
+        addType("DATA_TYPE", channelLike);
+        unsigned sizeWidth = 0, spaceWidth = 0;
+        for (const handshake::ExtraSignal &extra : extras) {
+          if (extra.downstream && extra.name == handshake::QueueOp::kSizeName)
+            sizeWidth = extra.getBitWidth();
+          if (!extra.downstream && extra.name == handshake::QueueOp::kSpaceName)
+            spaceWidth = extra.getBitWidth();
+        }
+        addUnsigned("SIZE_WIDTH", sizeWidth);
+        addUnsigned("SPACE_WIDTH", spaceWidth);
 
         if (auto channelType = dyn_cast<handshake::ChannelType>(channelLike)) {
           addString("FORM", "channel");
