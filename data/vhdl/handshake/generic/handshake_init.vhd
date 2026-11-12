@@ -29,22 +29,27 @@ entity handshake_init is
 end entity;
 
 architecture arch of handshake_init is
-  -- The decimal string as DATA_TYPE bits, of any width: the digits are
-  -- accumulated modulo 2**DATA_TYPE.
+  -- The decimal string as DATA_TYPE bits, of any width. The value has to fit
+  -- the width: no prefix of its digits is above it, so four bits over the
+  -- width hold every step of the accumulation, and a step that sets one of
+  -- them is a value that does not fit.
   function reset_bits(text : string) return std_logic_vector is
     variable acc   : unsigned(DATA_TYPE + 3 downto 0) := (others => '0');
     variable digit : natural;
   begin
+    assert text'length > 0
+      report "handshake_init: INITIAL_VALUE is empty"
+      severity failure;
     for i in text'range loop
       assert text(i) >= '0' and text(i) <= '9'
         report "handshake_init: INITIAL_VALUE """ & text & """ is not an unsigned decimal number"
         severity failure;
       digit := character'pos(text(i)) - character'pos('0');
       acc   := resize(acc * 10, acc'length) + digit;
+      assert acc(DATA_TYPE + 3 downto DATA_TYPE) = 0
+        report "handshake_init: INITIAL_VALUE " & text & " does not fit the width"
+        severity failure;
     end loop;
-    assert acc(DATA_TYPE + 3 downto DATA_TYPE) = 0
-      report "handshake_init: INITIAL_VALUE " & text & " does not fit the width"
-      severity failure;
     return std_logic_vector(acc(DATA_TYPE - 1 downto 0));
   end function;
 

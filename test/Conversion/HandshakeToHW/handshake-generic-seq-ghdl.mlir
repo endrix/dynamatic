@@ -8,6 +8,7 @@
 // RUN: cd %t && ghdl --elab-run --std=08 tb -gW=33 -gS=4 -gV=4294967296 -gBITS=100000000000000000000000000000000 2>&1 | FileCheck %s
 // RUN: cd %t && ghdl --elab-run --std=08 tb -gW=70 -gS=16 -gV=590295810358705651712 -gBITS=1000000000000000000000000000000000000000000000000000000000000000000000 2>&1 | FileCheck %s
 // RUN: cd %t && not ghdl --elab-run --std=08 tb -gW=8 -gS=3 -gV=256 -gBITS=00000000 2>&1 | FileCheck %s --check-prefix=WIDE
+// RUN: cd %t && not ghdl --elab-run --std=08 tb -gW=8 -gS=3 -gV=4101 -gBITS=00000101 2>&1 | FileCheck %s --check-prefix=WRAP
 // RUN: cd %t && not ghdl --elab-run --std=08 tb -gW=8 -gS=9 -gV=5 -gBITS=00000101 2>&1 | FileCheck %s --check-prefix=STEP
 
 // The generic init and sequential multiplier (data/vhdl/handshake/generic),
@@ -17,4 +18,5 @@
 
 // CHECK: checks as expected
 // WIDE: handshake_init: INITIAL_VALUE 256 does not fit the width
+// WRAP: handshake_init: INITIAL_VALUE 4101 does not fit the width
 // STEP: handshake_muli_sequential: a step of 9 for a width of 8

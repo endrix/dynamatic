@@ -143,7 +143,8 @@ generic entity written from the generator's logic
 the sequential multiplier), which an
 exported design then instantiates once per kind and not once per width. Such a unit
 is characterized once, from its generator, which also covers the units that
-carry an extra signal and are still generated.
+carry an extra signal and are still generated. (The init has no model
+entry yet and is not characterized at all.)
 
 A generator entry has no generics. `export-rtl` fills its command's
 variables and the generator bakes them into the RTL. Some variables come

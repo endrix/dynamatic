@@ -374,7 +374,8 @@
       },
       {
         "name": "STEP",
-        "type": "unsigned"
+        "type": "unsigned",
+        "lb": 1
       },
       {
         "name": "DATA_TYPE",
