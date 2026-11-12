@@ -46,6 +46,7 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/StringSet.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <algorithm>
@@ -3701,8 +3702,26 @@ public:
       for (auto &[circuitOp, _] : lowerState.modState)
         insertIIMonitors(circuitOp, iiMonitorSpecs, builder);
 
-    // Create memory wrappers around all hardware modules
-    for (auto &[circuitOp, _] : lowerState.modState)
+    // Create memory wrappers around the hardware modules that no other
+    // module instantiates. A wrapper gives a module standard memory
+    // interfaces for whoever uses it from outside the design; a module
+    // instantiated by another one is used from inside, unwrapped, so its
+    // wrapper would be a module that nothing instantiates, and one file more
+    // in the exported design for every module of a hierarchy.
+    // The wrappers are created in the order of their modules, not in the
+    // lowering state's, which is keyed by pointer and changes between runs.
+    llvm::StringSet<> instantiated;
+    for (hw::HWModuleOp hwModOp : modOp.getOps<hw::HWModuleOp>())
+      hwModOp.walk([&](hw::InstanceOp instOp) {
+        if (instOp.getModuleName() != hwModOp.getSymName())
+          instantiated.insert(instOp.getModuleName());
+      });
+    SmallVector<hw::HWModuleOp> toWrap;
+    for (hw::HWModuleOp hwModOp : modOp.getOps<hw::HWModuleOp>())
+      if (lowerState.modState.contains(hwModOp) &&
+          !instantiated.contains(hwModOp.getSymName()))
+        toWrap.push_back(hwModOp);
+    for (hw::HWModuleOp circuitOp : toWrap)
       createWrapper(circuitOp, lowerState, builder);
 
     // At this level all operations already have an intrinsic name so we can
