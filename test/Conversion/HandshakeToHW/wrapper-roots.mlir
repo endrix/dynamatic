@@ -1,5 +1,6 @@
 // RUN: dynamatic-opt %s --lower-handshake-to-hw | FileCheck %s
 // RUN: dynamatic-opt %s --lower-handshake-to-hw | grep -c "hw.module @.*_wrapper(" | FileCheck %s --check-prefix=COUNT
+// RUN: dynamatic-opt %s --lower-handshake-to-hw | FileCheck %s --check-prefix=CONV
 
 // Which modules get a wrapper. A wrapper is the module with standard memory
 // interfaces, for whoever uses a module from outside the design. A module
@@ -8,10 +9,16 @@
 // design for every module of a hierarchy. So only the modules that no other
 // one instantiates are wrapped -- here the two tops, `top` (over `mid` over
 // `leaf`, and over `reader`, to which it hands a memory down) and `other`,
-// which stands alone.
+// which stands alone. `top` comes first: a module is known to be
+// instantiated whatever the order of the functions.
 
 // Two wrappers, and no more.
-// COUNT: 2
+// COUNT: {{^}}2{{$}}
+
+// The memory converter was in the wrapper of `reader`, which holds the
+// controller: with that wrapper it is gone. (The wrapper of `top` passes the
+// memory it hands down as it is, as it always did.)
+// CONV-NOT: mem_to_bram
 
 // CHECK-DAG: hw.module @leaf(
 // CHECK-DAG: hw.module @mid(
@@ -24,6 +31,12 @@
 // CHECK-DAG: hw.instance "other_wrapped" @other(
 
 module {
+  handshake.func @top(%a: !handshake.channel<i32>, %mem: memref<64xi32>, %start: !handshake.control<>) -> (!handshake.channel<i32>, !handshake.channel<i32>)
+      attributes {argNames = ["in0", "store", "in1"], resNames = ["out0", "out1"]} {
+    %r = instance @mid(%a) : (!handshake.channel<i32>) -> !handshake.channel<i32>
+    %v = instance @reader(%mem, %start) : (memref<64xi32>, !handshake.control<>) -> !handshake.channel<i32>
+    end %r, %v : <i32>, <i32>
+  }
   handshake.func @leaf(%a: !handshake.channel<i32>) -> !handshake.channel<i32>
       attributes {argNames = ["in0"], resNames = ["out0"]} {
     %c = source : <>
@@ -45,12 +58,6 @@ module {
     %addr = constant %start {value = 5 : i32, handshake.bb = 0 : ui32} : <>, <i32>
     %ldAddr, %ldVal = load[%addr] %ldData {handshake.bb = 0 : ui32} : <i32>, <i32>, <i32>, <i32>
     end %ldVal : <i32>
-  }
-  handshake.func @top(%a: !handshake.channel<i32>, %mem: memref<64xi32>, %start: !handshake.control<>) -> (!handshake.channel<i32>, !handshake.channel<i32>)
-      attributes {argNames = ["in0", "store", "in1"], resNames = ["out0", "out1"]} {
-    %r = instance @mid(%a) : (!handshake.channel<i32>) -> !handshake.channel<i32>
-    %v = instance @reader(%mem, %start) : (memref<64xi32>, !handshake.control<>) -> !handshake.channel<i32>
-    end %r, %v : <i32>, <i32>
   }
   handshake.func @other(%a: !handshake.channel<i32>) -> !handshake.channel<i32>
       attributes {argNames = ["in0"], resNames = ["out0"]} {

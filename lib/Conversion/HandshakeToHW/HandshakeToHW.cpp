@@ -3694,14 +3694,21 @@ public:
     // instantiated by another one is used from inside, unwrapped, so its
     // wrapper would be a module that nothing instantiates, and one file more
     // in the exported design for every module of a hierarchy.
+    // The wrappers are created in the order of their modules, not in the
+    // lowering state's, which is keyed by pointer and changes between runs.
     llvm::StringSet<> instantiated;
     for (hw::HWModuleOp hwModOp : modOp.getOps<hw::HWModuleOp>())
       hwModOp.walk([&](hw::InstanceOp instOp) {
-        instantiated.insert(instOp.getModuleName());
+        if (instOp.getModuleName() != hwModOp.getSymName())
+          instantiated.insert(instOp.getModuleName());
       });
-    for (auto &[circuitOp, _] : lowerState.modState)
-      if (!instantiated.contains(circuitOp.getSymName()))
-        createWrapper(circuitOp, lowerState, builder);
+    SmallVector<hw::HWModuleOp> toWrap;
+    for (hw::HWModuleOp hwModOp : modOp.getOps<hw::HWModuleOp>())
+      if (lowerState.modState.contains(hwModOp) &&
+          !instantiated.contains(hwModOp.getSymName()))
+        toWrap.push_back(hwModOp);
+    for (hw::HWModuleOp circuitOp : toWrap)
+      createWrapper(circuitOp, lowerState, builder);
 
     // At this level all operations already have an intrinsic name so we can
     // disable our naming system

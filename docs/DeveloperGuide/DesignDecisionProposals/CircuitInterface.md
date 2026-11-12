@@ -52,7 +52,7 @@ While the [ad-hoc memory interfaces](#ad-hoc-memory-interfaces) described above 
 
 The wrapper has exactly the same `start`, `end`, arguments, results, and memory control signals as the Dynamatic circuit it wraps. However, the Dynamatic circuit's ad-hoc memory interfaces (double-sided arrows on the right of the inner box on the figure) get converted on-the-fly to standard memory interfaces (AXI displayed right in the figure). As a sanity check on any ad-hoc interface, it should always be possible and often easy to make load/store requests coming through them compliant with standard communication protocols.
 
-A design may be a hierarchy of circuits, one instantiating another. A circuit that another one instantiates is used from inside the design, unwrapped, and its memory interfaces come up through its parent's; only the circuits that no other one instantiates get a wrapper.
+A design may be a hierarchy of circuits, one instantiating another. A circuit that another one instantiates is used from inside the design, unwrapped; only the circuits that no other one instantiates get a wrapper. A wrapper converts the memory interfaces of the controllers its own circuit holds: a memory that the circuit hands down to one it instantiates comes up through it with its ad-hoc interface, and stays so on the wrapper.
 
 ## Internal Implementation
 
