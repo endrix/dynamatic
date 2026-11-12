@@ -296,6 +296,20 @@ def SimpleNamedIOTrait : NativeOpTrait<"SimpleNamedIO"> {
 // using SimpleNamedIO get both the interface contract and the impl.
 def SimpleNamedIO : TraitList<[NamedIOInterface, SimpleNamedIOTrait]>;
 
+// Trait that returns operand names as "ins_N" whatever the operand count, and
+// result names as SimpleNamedIO does: a unit whose inputs are an array.
+def ArrayInputsNamedIOTrait : NativeOpTrait<"ArrayInputsNamedIO"> {
+  let cppNamespace = "::dynamatic::handshake";
+}
+def ArrayInputsNamedIO : TraitList<[NamedIOInterface, ArrayInputsNamedIOTrait]>;
+
+// Trait that returns result names as "outs_N" whatever the result count, and
+// operand names as SimpleNamedIO does: a unit whose outputs are an array.
+def ArrayOutputsNamedIOTrait : NativeOpTrait<"ArrayOutputsNamedIO"> {
+  let cppNamespace = "::dynamatic::handshake";
+}
+def ArrayOutputsNamedIO : TraitList<[NamedIOInterface, ArrayOutputsNamedIOTrait]>;
+
 // Trait that returns operands as "lhs"/"rhs" and the single result as "result".
 def BinaryArithNamedIOTrait : NativeOpTrait<"BinaryArithNamedIO"> {
   let cppNamespace = "::dynamatic::handshake";
