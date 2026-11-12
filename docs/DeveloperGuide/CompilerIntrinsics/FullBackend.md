@@ -520,6 +520,8 @@ We would need to name its data inputs `dataInputs_0` and `dataInputs_1` during i
 
 In both cases, the base name `dataInputs` is part of the specification of `handshake.mux`, the matching MLIR operation. Within the IR, these ports are always named following the `flat` convention: `dataInputs_0` and `dataInputs_1`. During RTL emission, they will be converted to the first hierarchical form by default, or left as is if the `io-kind` is explicitly set to `flat`.
 
+The convention holds for an array of one. A merge, a mux, a control merge, a join or a blocker of a single input names it `ins_0` in the HW IR, and a fork of a single output names it `outs_0`, although the Handshake operation calls a lone operand `ins` and a lone result `outs`: the index is what tells the emission that the port is an array's element, and without it a vector would be bound to an array of one.
+
 #### `io-signals`
 
 The backend has naming convention when it comes to signals part of the same dataflow channel. By default, if the channel name is `channel_name`, then all signal names will start with the channel name and be suffixed by a specific (possibly empty) string.

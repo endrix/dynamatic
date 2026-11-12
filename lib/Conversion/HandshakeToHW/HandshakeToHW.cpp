@@ -2124,6 +2124,28 @@ LogicalResult ConvertMemInterfaceForInternalArray::matchAndRewrite(
   return success();
 }
 
+/// The name of a unit's port as its RTL declares it. A unit that takes any
+/// number of inputs (a merge, a mux's data inputs, a control merge, a join, a
+/// blocker) or gives any number of outputs (a fork) declares them as an
+/// array, and the netlist printers tell an array's element from a plain port
+/// by the `_<index>` suffix of its name. The operation names a lone one
+/// without a suffix (`ins`, `outs`), which reads as a plain port: in VHDL a
+/// vector bound to an array of one, which does not elaborate. So the lone
+/// input or output of such a unit is named as what it is, the array's
+/// element 0. A port that is not one of an array keeps its name: a fork's
+/// input, a control merge's output.
+static std::string arrayPortName(Operation *op, const std::string &name,
+                                 bool isInput) {
+  if (isInput && name == "ins" &&
+      isa<handshake::MergeOp, handshake::MuxOp, handshake::ControlMergeOp,
+          handshake::JoinOp, handshake::BlockerOp>(op))
+    return "ins_0";
+  if (!isInput && name == "outs" &&
+      isa<handshake::ForkOp, handshake::LazyForkOp>(op))
+    return "outs_0";
+  return name;
+}
+
 namespace {
 /// Converts an operation (of type indicated by the template argument) into
 /// an equivalent hardware instance. The method creates an external module
@@ -2154,7 +2176,10 @@ LogicalResult ConvertToHWInstance<T>::matchAndRewrite(
   // Add all operation operands to the inputs
   auto namedIOInterface = cast<handshake::NamedIOInterface>(op.getOperation());
   for (auto [idx, oprd] : llvm::enumerate(adaptor.getOperands()))
-    converter.addInput(namedIOInterface.getOperandName(idx), oprd);
+    converter.addInput(arrayPortName(op.getOperation(),
+                                     namedIOInterface.getOperandName(idx),
+                                     /*isInput=*/true),
+                       oprd);
   auto parentModOp = ((Operation *)op)->getParentOfType<hw::HWModuleOp>();
   // A load a commit stops drops what it still owes on the commit's `kill`,
   // an input of its own; the module's reset holds its place until
@@ -2166,7 +2191,10 @@ LogicalResult ConvertToHWInstance<T>::matchAndRewrite(
 
   // Add all operation results to the outputs
   for (auto [idx, type] : llvm::enumerate(op->getResultTypes()))
-    converter.addOutput(namedIOInterface.getResultName(idx), lowerType(type));
+    converter.addOutput(arrayPortName(op.getOperation(),
+                                      namedIOInterface.getResultName(idx),
+                                      /*isInput=*/false),
+                        lowerType(type));
   hw::InstanceOp instOp = converter.convertToInstance(op, rewriter);
   return instOp ? success() : failure();
 }

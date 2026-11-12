@@ -1,5 +1,5 @@
 // REQUIRES: ghdl
-// RUN: rm -rf %t && mkdir -p %t && cd %t && n=0 && for p in 2:2:1:2 2:8:1:3 3:5:2:2 4:33:2:4 5:64:3:2 8:2:5:2 9:100:4:3 17:7:5:5 5:4:2:2 3:1:2:2; do \
+// RUN: rm -rf %t && mkdir -p %t && cd %t && n=0 && for p in 2:2:1:2 2:8:1:3 3:5:2:2 4:33:2:4 5:64:3:2 8:2:5:2 9:100:4:3 17:7:5:5 5:4:2:2 3:1:2:2 1:3:1:2; do \
 // RUN:   n=$((n+1)); z=${p%%%%:*}; r=${p#*:}; w=${r%%%%:*}; r=${r#*:}; i=${r%%%%:*}; c=${r#*:}; t=$((n %% 3 + 1)); b=$w; [ $w -lt 2 ] && b=2; mkdir c$n && cd c$n || exit 1; \
 // RUN:   g="python3 %dynamatic_src_root/tools/unit-generators/vhdl/vhdl-unit-generator.py"; d=%dynamatic_src_root/data/vhdl; \
 // RUN:   $g -n gen_mux -o gen_mux.vhd -t mux -p size=$z data_bitwidth=$w index_bitwidth=$i 'extra_signals={}' tehb=$t || exit 1; \
@@ -20,9 +20,9 @@
 
 // The generic muxes, control merges, bundles and unbundles are their
 // generator's logic: each in lockstep with the unit the generator writes at
-// the same parameters, at ten sizes and widths: an index wider than the
+// the same parameters, at eleven sizes and widths: an index wider than the
 // inputs need and one narrower (five inputs on two bits, where the indices
-// alias), a width of one. The slot is asked for as TEHB = 1, 2 or 3 in turn:
+// alias), a width of one, a single input. The slot is asked for as TEHB = 1, 2 or 3 in turn:
 // any value but 0 keeps it. The generator is still what the timing
 // characterization measures and what a unit with extra signals is built
 // from, so the two must not drift apart. (The slot and the fork without
@@ -50,4 +50,6 @@
 // CHECK-NEXT: size 5 width 4 index 2 count 2 slot 1
 // CHECK-NEXT: equal to the generator's over
 // CHECK-NEXT: size 3 width 1 index 2 count 2 slot 2
+// CHECK-NEXT: equal to the generator's over
+// CHECK-NEXT: size 1 width 3 index 1 count 2 slot 3
 // CHECK-NEXT: equal to the generator's over
