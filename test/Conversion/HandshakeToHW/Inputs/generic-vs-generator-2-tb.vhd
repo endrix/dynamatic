@@ -18,6 +18,7 @@ entity tb is
     SLOTS  : positive := 2;      -- the queue's slots
     CW     : positive := 2;      -- the width of the queue's counts
     TOKENS : string   := "none"; -- the tokens the queue holds at reset
+    SLOT   : positive := 1;      -- the TEHB of the merges that keep their slot
     CYCLES : positive := 3000
   );
 end entity;
@@ -50,7 +51,7 @@ begin
   g_merge : entity work.gen_merge
     port map(clk => clk, rst => rst, ins => ins, ins_valid => ins_valid, ins_ready => gm_r,
              outs => gm_o, outs_valid => gm_v, outs_ready => outs_ready);
-  h_merge : entity work.handshake_merge(arch) generic map(SIZE, W, 1)
+  h_merge : entity work.handshake_merge(arch) generic map(SIZE, W, SLOT)
     port map(clk => clk, rst => rst, ins => ins, ins_valid => ins_valid, ins_ready => hm_r,
              outs => hm_o, outs_valid => hm_v, outs_ready => outs_ready);
   g_bare : entity work.gen_merge_bare
@@ -62,7 +63,7 @@ begin
   g_ctl : entity work.gen_merge_ctl
     port map(clk => clk, rst => rst, ins_valid => ins_valid, ins_ready => gc_r,
              outs_valid => gc_v, outs_ready => outs_ready);
-  h_ctl : entity work.handshake_merge_dataless(arch) generic map(SIZE, 1)
+  h_ctl : entity work.handshake_merge_dataless(arch) generic map(SIZE, SLOT)
     port map(clk => clk, rst => rst, ins_valid => ins_valid, ins_ready => hc_r,
              outs_valid => hc_v, outs_ready => outs_ready);
   g_ctl_bare : entity work.gen_merge_ctl_bare

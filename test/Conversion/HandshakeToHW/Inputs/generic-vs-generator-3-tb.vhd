@@ -7,8 +7,8 @@
 -- random valid, ready and data at every cycle, a reset now and then, every
 -- output compared before and after each clock edge. The generic entity is
 -- the generator's logic, and this is what keeps the two from drifting apart.
--- W and CW are two bits at least: a bare wire of one bit is a scalar in what
--- the generator writes (generic-units-5-export.mlir exports that case).
+-- BW and CW are two bits at least: a bare wire of one bit is a scalar in
+-- what the generator writes (generic-units-5-export.mlir exports that case).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -17,7 +17,9 @@ use work.types.all;
 entity tb is
   generic (
     SIZE   : positive := 3;  -- inputs of the muxes and control merges
-    W      : positive := 8;  -- data width
+    W      : positive := 8;  -- data width of the muxes and control merges
+    BW     : positive := 8;  -- data width of the bundles and unbundles
+    SLOT   : positive := 1;  -- the TEHB of the muxes that keep their slot
     IW     : positive := 2;  -- width of the mux's select and the control merge's index
     CW     : positive := 2;  -- width of a channel's `size` or `space`
     CYCLES : positive := 3000
@@ -26,6 +28,7 @@ end entity;
 
 architecture sim of tb is
   subtype word is std_logic_vector(W - 1 downto 0);
+  subtype bword is std_logic_vector(BW - 1 downto 0);
   subtype bits is std_logic_vector(SIZE - 1 downto 0);
   subtype idx is std_logic_vector(IW - 1 downto 0);
   subtype count is std_logic_vector(CW - 1 downto 0);
@@ -37,7 +40,7 @@ architecture sim of tb is
   signal sel                   : idx       := (others => '0');
   signal sel_valid, outs_ready : std_logic := '0';
   signal index_ready           : std_logic := '0';
-  signal d                     : word      := (others => '0');
+  signal d                     : bword     := (others => '0');
   signal k                     : count     := (others => '0');
   signal v, r                  : std_logic := '0';
   -- mux, with and without its slot, with and without data
@@ -52,7 +55,7 @@ architecture sim of tb is
   signal gx_v, hx_v, gy_v, hy_v         : std_logic;
   signal gx_iv, hx_iv, gy_iv, hy_iv     : std_logic;
   -- bundle and unbundle
-  signal g1_o, h1_o, g2_o, h2_o, g3_d, h3_d, g4_d, h4_d : word;
+  signal g1_o, h1_o, g2_o, h2_o, g3_d, h3_d, g4_d, h4_d : bword;
   signal g2_k, h2_k, g4_k, h4_k                         : count;
   signal g1_v, h1_v, g1_r, h1_r, g2_v, h2_v, g2_r, h2_r : std_logic;
   signal g3_v, h3_v, g3_r, h3_r, g4_v, h4_v, g4_r, h4_r : std_logic;
@@ -62,7 +65,7 @@ begin
     port map(clk => clk, rst => rst, ins => ins, ins_valid => ins_valid, ins_ready => gm_r,
              index => sel, index_valid => sel_valid, index_ready => gm_s,
              outs => gm_o, outs_valid => gm_v, outs_ready => outs_ready);
-  h_mux : entity work.handshake_mux(arch) generic map(SIZE, W, IW, 1)
+  h_mux : entity work.handshake_mux(arch) generic map(SIZE, W, IW, SLOT)
     port map(clk => clk, rst => rst, ins => ins, ins_valid => ins_valid, ins_ready => hm_r,
              index => sel, index_valid => sel_valid, index_ready => hm_s,
              outs => hm_o, outs_valid => hm_v, outs_ready => outs_ready);
@@ -78,7 +81,7 @@ begin
     port map(clk => clk, rst => rst, ins_valid => ins_valid, ins_ready => gc_r,
              index => sel, index_valid => sel_valid, index_ready => gc_s,
              outs_valid => gc_v, outs_ready => outs_ready);
-  h_ctl : entity work.handshake_mux_dataless(arch) generic map(SIZE, IW, 1)
+  h_ctl : entity work.handshake_mux_dataless(arch) generic map(SIZE, IW, SLOT)
     port map(clk => clk, rst => rst, ins_valid => ins_valid, ins_ready => hc_r,
              index => sel, index_valid => sel_valid, index_ready => hc_s,
              outs_valid => hc_v, outs_ready => outs_ready);
@@ -111,25 +114,25 @@ begin
   g_bundle : entity work.gen_bundle
     port map(clk => clk, rst => rst, ctrl_valid => v, ctrl_ready => g1_r, data => d,
              outs => g1_o, outs_valid => g1_v, outs_ready => r);
-  h_bundle : entity work.handshake_bundle(arch) generic map(W)
+  h_bundle : entity work.handshake_bundle(arch) generic map(BW)
     port map(clk => clk, rst => rst, ctrl_valid => v, ctrl_ready => h1_r, data => d,
              outs => h1_o, outs_valid => h1_v, outs_ready => r);
   g_bundle_space : entity work.gen_bundle_space
     port map(clk => clk, rst => rst, ctrl_valid => v, ctrl_ready => g2_r, data => d, space => g2_k,
              outs => g2_o, outs_valid => g2_v, outs_ready => r, outs_space => k);
-  h_bundle_space : entity work.handshake_bundle_space(arch) generic map(W, CW)
+  h_bundle_space : entity work.handshake_bundle_space(arch) generic map(BW, CW)
     port map(clk => clk, rst => rst, ctrl_valid => v, ctrl_ready => h2_r, data => d, space => h2_k,
              outs => h2_o, outs_valid => h2_v, outs_ready => r, outs_space => k);
   g_unbundle : entity work.gen_unbundle
     port map(clk => clk, rst => rst, ins => d, ins_valid => v, ins_ready => g3_r,
              ctrl_valid => g3_v, ctrl_ready => r, data => g3_d);
-  h_unbundle : entity work.handshake_unbundle(arch) generic map(W)
+  h_unbundle : entity work.handshake_unbundle(arch) generic map(BW)
     port map(clk => clk, rst => rst, ins => d, ins_valid => v, ins_ready => h3_r,
              ctrl_valid => h3_v, ctrl_ready => r, data => h3_d);
   g_unbundle_size : entity work.gen_unbundle_size
     port map(clk => clk, rst => rst, ins => d, ins_valid => v, ins_ready => g4_r, ins_size => k,
              ctrl_valid => g4_v, ctrl_ready => r, data => g4_d, size => g4_k);
-  h_unbundle_size : entity work.handshake_unbundle_size(arch) generic map(W, CW)
+  h_unbundle_size : entity work.handshake_unbundle_size(arch) generic map(BW, CW)
     port map(clk => clk, rst => rst, ins => d, ins_valid => v, ins_ready => h4_r, ins_size => k,
              ctrl_valid => h4_v, ctrl_ready => r, data => h4_d, size => h4_k);
   g_bundle_control : entity work.gen_bundle_control
@@ -227,7 +230,12 @@ begin
       sel_valid   <= lfsr(4) or lfsr(5);
       outs_ready  <= lfsr(6) or lfsr(7);
       index_ready <= lfsr(8) or lfsr(9);
-      d <= fresh;
+      for i in 0 to BW - 1 loop
+        if i mod 60 = 0 then
+          step;
+        end if;
+        d(i) <= lfsr(i mod 60);
+      end loop;
       step;
       k <= std_logic_vector(resize(lfsr(40 downto 10), CW));
       v <= lfsr(0);

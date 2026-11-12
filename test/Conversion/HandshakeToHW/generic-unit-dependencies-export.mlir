@@ -1,5 +1,5 @@
 // REQUIRES: ghdl
-// RUN: rm -rf %t && mkdir -p %t && cd %t && for u in blocker bare barectl join queue mux muxctl cmerge cmergectl; do \
+// RUN: rm -rf %t && mkdir -p %t && cd %t && for u in blocker bare mergectl join queue mux muxctl cmerge cmergectl; do \
 // RUN:   sed -n "/^\/\/ BEGIN $u\$/,/^\/\/ END\$/p" %s > $u.mlir && dynamatic-opt $u.mlir --lower-handshake-to-hw > $u.hw || exit 1; \
 // RUN:   export-rtl $u.hw $u %dynamatic_src_root/data/rtl-config-vhdl.json --dynamatic-path %dynamatic_src_root --hdl vhdl || exit 1; \
 // RUN:   echo "design $u"; ls $u; (cd $u && ghdl -i --std=08 *.vhd && ghdl -m --std=08 alone) || exit 1; done | FileCheck %s
@@ -18,7 +18,7 @@
 // CHECK-NEXT: tehb.vhd
 // CHECK-NEXT: tehb_dataless.vhd
 // CHECK-NEXT: types.vhd
-// CHECK:      design barectl
+// CHECK:      design mergectl
 // CHECK:      handshake_merge_dataless.vhd
 // CHECK-NEXT: tehb_dataless.vhd
 // CHECK:      design join
@@ -65,7 +65,7 @@ handshake.func @alone(%a: !handshake.channel<i12>, %b: !handshake.channel<i12>) 
   end {handshake.name = "end0"} %m : <i12>
 }
 // END
-// BEGIN barectl
+// BEGIN mergectl
 handshake.func @alone(%x: !handshake.control<>, %y: !handshake.control<>) -> !handshake.control<> attributes {argNames = ["x", "y"], resNames = ["o"]} {
   %m = merge %x, %y {handshake.name = "merge0"} : <>
   end {handshake.name = "end0"} %m : <>
