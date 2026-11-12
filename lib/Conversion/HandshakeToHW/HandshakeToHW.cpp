@@ -3515,11 +3515,11 @@ static LogicalResult wireKillDomains(hw::HWModuleOp hwModOp) {
 
 namespace {
 
-/// Conversion pass driver. The conversion only works on modules containing
-/// a single handshake function (handshake::FuncOp) at the moment. The
-/// function and all the operations it contains are converted to operations
-/// from the HW dialect. Dataflow semantics are made explicit with Handshake
-/// channels.
+/// Conversion pass driver. Every non-external handshake function
+/// (handshake::FuncOp) of the module and all the operations it contains are
+/// converted to operations from the HW dialect; a module may hold several,
+/// instantiating each other, or none. Dataflow semantics are made explicit
+/// with Handshake channels.
 class HandshakeToHWPass
     : public dynamatic::impl::HandshakeToHWBase<HandshakeToHWPass> {
 public:
@@ -3657,7 +3657,7 @@ public:
         ConvertToHWInstance<handshake::SpeculatingBranchOp>,
         ConvertToHWInstance<handshake::NonSpecOp>
         // clang-format on
-        >(typeConverter, funcOp->getContext());
+        >(typeConverter, ctx);
     // arith on raw wires, named on the way when the conversion's folding
     // created them after the pass named everything
     patterns.insert<
@@ -3678,7 +3678,7 @@ public:
         ConvertRawToHWInstance<arith::ExtSIOp>,
         ConvertRawToHWInstance<arith::ConstantOp>
         // clang-format on
-        >(typeConverter, funcOp->getContext(), namer);
+        >(typeConverter, ctx, namer);
 
     // Everything must be converted to operations in the hw dialect
     ConversionTarget target(*ctx);
