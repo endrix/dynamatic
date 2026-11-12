@@ -16,8 +16,7 @@
 // queue's depth, widths and tokens held at reset are generics. A unit on
 // speculative channels, and a queue that does not publish both of its
 // counts (its ports differ), are generated. (A join of speculative controls
-// is not in the test: the configuration never gave its generator the extra
-// signals, so it does not elaborate; it still takes the generator.)
+// takes the generator too: join-extra-signals-export.mlir.)
 
 // The blocker's width reaches the configuration as a parameter, and the
 // queue's on its own: its type serializes with the channel's `space`.

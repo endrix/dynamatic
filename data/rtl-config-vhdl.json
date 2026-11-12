@@ -1675,7 +1675,10 @@
         "type": "unsigned"
       }
     ],
-    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t top_join -p size=$SIZE"
+    "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t top_join -p size=$SIZE extra_signals=$EXTRA_SIGNALS",
+    "dependencies": [
+      "types"
+    ]
   },
   {
     "name": "handshake.sharing_wrapper",

@@ -76,7 +76,8 @@ def _generate_top_join_signal_manager(name, size, extra_signals):
         [{
             "name": "ins",
             "bitwidth": 0,
-            "extra_signals": extra_signals
+            "extra_signals": extra_signals,
+            "size": size
         },],
         [{
             "name": "outs",
