@@ -3657,7 +3657,7 @@ public:
         ConvertToHWInstance<handshake::SpeculatingBranchOp>,
         ConvertToHWInstance<handshake::NonSpecOp>
         // clang-format on
-        >(typeConverter, funcOp->getContext());
+        >(typeConverter, ctx);
     // arith on raw wires, named on the way when the conversion's folding
     // created them after the pass named everything
     patterns.insert<
@@ -3678,7 +3678,7 @@ public:
         ConvertRawToHWInstance<arith::ExtSIOp>,
         ConvertRawToHWInstance<arith::ConstantOp>
         // clang-format on
-        >(typeConverter, funcOp->getContext(), namer);
+        >(typeConverter, ctx, namer);
 
     // Everything must be converted to operations in the hw dialect
     ConversionTarget target(*ctx);
