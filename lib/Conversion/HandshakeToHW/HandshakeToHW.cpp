@@ -1014,6 +1014,9 @@ ModuleDiscriminator::ModuleDiscriminator(Operation *op) {
             initialValue = initTokenAttr.getValue() ? "1" : "0";
         }
         addString("INITIAL_VALUE", initialValue);
+        // The channel's type, by which a generic implementation tells an
+        // init with data from one without, and one with extra signals.
+        addType("DATA_TYPE", initOp.getType());
       })
       // arith on raw wires -- the logic a function holds between an unbundle
       // and a bundle. The unit carries the wires and nothing else, so its
