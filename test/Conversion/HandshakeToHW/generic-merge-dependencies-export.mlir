@@ -5,14 +5,11 @@
 // RUN: ls %t/vhdl | FileCheck %s
 // RUN: cd %t/vhdl && ghdl -i --std=08 *.vhd && ghdl -m --std=08 mergedeps
 
-// A generic merge brings what it is built from: its arbiter and the slot
-// behind it, with or without data, in a design that has no other user of
-// them.
+// A generic merge brings what it is built from, the slot behind its
+// arbiter, with or without data, in a design that has no other user of it.
 
 // CHECK:      handshake_merge.vhd
 // CHECK-NEXT: handshake_merge_dataless.vhd
-// CHECK-NEXT: handshake_merge_notehb.vhd
-// CHECK-NEXT: handshake_merge_notehb_dataless.vhd
 // CHECK:      tehb.vhd
 // CHECK-NEXT: tehb_dataless.vhd
 // CHECK-NEXT: types.vhd

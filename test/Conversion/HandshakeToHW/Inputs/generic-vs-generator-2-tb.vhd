@@ -50,25 +50,25 @@ begin
   g_merge : entity work.gen_merge
     port map(clk => clk, rst => rst, ins => ins, ins_valid => ins_valid, ins_ready => gm_r,
              outs => gm_o, outs_valid => gm_v, outs_ready => outs_ready);
-  h_merge : entity work.handshake_merge(arch) generic map(SIZE, W)
+  h_merge : entity work.handshake_merge(arch) generic map(SIZE, W, 1)
     port map(clk => clk, rst => rst, ins => ins, ins_valid => ins_valid, ins_ready => hm_r,
              outs => hm_o, outs_valid => hm_v, outs_ready => outs_ready);
   g_bare : entity work.gen_merge_bare
     port map(clk => clk, rst => rst, ins => ins, ins_valid => ins_valid, ins_ready => gb_r,
              outs => gb_o, outs_valid => gb_v, outs_ready => outs_ready);
-  h_bare : entity work.handshake_merge_notehb(arch) generic map(SIZE, W)
+  h_bare : entity work.handshake_merge(arch) generic map(SIZE, W, 0)
     port map(clk => clk, rst => rst, ins => ins, ins_valid => ins_valid, ins_ready => hb_r,
              outs => hb_o, outs_valid => hb_v, outs_ready => outs_ready);
   g_ctl : entity work.gen_merge_ctl
     port map(clk => clk, rst => rst, ins_valid => ins_valid, ins_ready => gc_r,
              outs_valid => gc_v, outs_ready => outs_ready);
-  h_ctl : entity work.handshake_merge_dataless(arch) generic map(SIZE)
+  h_ctl : entity work.handshake_merge_dataless(arch) generic map(SIZE, 1)
     port map(clk => clk, rst => rst, ins_valid => ins_valid, ins_ready => hc_r,
              outs_valid => hc_v, outs_ready => outs_ready);
   g_ctl_bare : entity work.gen_merge_ctl_bare
     port map(clk => clk, rst => rst, ins_valid => ins_valid, ins_ready => gd_r,
              outs_valid => gd_v, outs_ready => outs_ready);
-  h_ctl_bare : entity work.handshake_merge_notehb_dataless(arch) generic map(SIZE)
+  h_ctl_bare : entity work.handshake_merge_dataless(arch) generic map(SIZE, 0)
     port map(clk => clk, rst => rst, ins_valid => ins_valid, ins_ready => hd_r,
              outs_valid => hd_v, outs_ready => outs_ready);
 

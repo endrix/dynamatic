@@ -10,7 +10,7 @@
 // RUN:   $g -n gen_blocker -o gen_blocker.vhd -t blocker -p size=$z bitwidth=$w 'extra_signals={}' || exit 1; \
 // RUN:   cp $d/handshake/dataless/tehb.vhd tehb_dataless.vhd || exit 1; \
 // RUN:   $g -n gen_queue -o gen_queue.vhd -t queue -p num_slots=$s bitwidth=$w size_width=$c space_width=$c "initial_tokens='$t'" || exit 1; \
-// RUN:   ghdl -i --std=08 $d/support/types.vhd $d/support/logic.vhd $d/support/join.vhd $d/handshake/tehb.vhd tehb_dataless.vhd $d/handshake/generic/handshake_merge.vhd $d/handshake/generic/handshake_merge_dataless.vhd $d/handshake/generic/handshake_merge_notehb.vhd $d/handshake/generic/handshake_merge_notehb_dataless.vhd $d/handshake/generic/handshake_join.vhd $d/handshake/generic/handshake_blocker.vhd $d/handshake/generic/handshake_queue.vhd gen_*.vhd %S/Inputs/generic-vs-generator-2-tb.vhd && ghdl -m --std=08 tb || exit 1; \
+// RUN:   ghdl -i --std=08 $d/support/types.vhd $d/support/logic.vhd $d/support/join.vhd $d/handshake/tehb.vhd tehb_dataless.vhd $d/handshake/generic/handshake_merge.vhd $d/handshake/generic/handshake_merge_dataless.vhd $d/handshake/generic/handshake_join.vhd $d/handshake/generic/handshake_blocker.vhd $d/handshake/generic/handshake_queue.vhd gen_*.vhd %S/Inputs/generic-vs-generator-2-tb.vhd && ghdl -m --std=08 tb || exit 1; \
 // RUN:   echo "size $z width $w slots $s counts $c tokens $t"; ghdl -r --std=08 tb -gSIZE=$z -gW=$w -gSLOTS=$s -gCW=$c -gTOKENS=$t --ieee-asserts=disable 2>&1; cd ..; done | FileCheck %s
 
 // The generic merges, join, blocker and queue are their generator's logic:

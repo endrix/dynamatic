@@ -544,7 +544,7 @@ For example, the `handshake.mux` component could modify its empty-by-default dat
 
 #### `raw-vector-ports`
 
-A *raw* port carries a plain integer, not a dataflow channel: the ports of the `arith` units between an `unbundle` and a `bundle`. The exporter declares a raw wire of one bit as a scalar (`std_logic` in VHDL) and a wider one as a vector. A generated component follows the same convention, since its generator knows the width. A generic component cannot: a generic can set the width of a vector port but cannot make the port a scalar, so its raw data ports are vectors at every width, `std_logic_vector(0 downto 0)` at a width of one.
+A *raw* port carries a plain integer, not a dataflow channel: the ports of the `arith` units between an `unbundle` and a `bundle`, and the bare side of the `unbundle` and the `bundle` themselves (the data, a `size`, a `space`). The exporter declares a raw wire of one bit as a scalar (`std_logic` in VHDL) and a wider one as a vector. A generated component follows the same convention, since its generator knows the width. A generic component cannot: a generic can set the width of a vector port but cannot make the port a scalar, so its raw data ports are vectors at every width, `std_logic_vector(0 downto 0)` at a width of one.
 
 The `raw-vector-ports` option, when present, must map to a boolean. When it is true, the exporter associates a raw wire of one bit with element 0 of the component's port (`result(0) => cmpi0_result` in VHDL). The clock and the reset are never concerned. The option is false by default.
 

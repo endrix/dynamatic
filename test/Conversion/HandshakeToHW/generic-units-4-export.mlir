@@ -10,8 +10,9 @@
 // RUN: cd %t/vhdl && ghdl -r --std=08 genunits4 --stop-time=1ns --ieee-asserts=disable 2>&1 | FileCheck %s --check-prefix=SIM --allow-empty
 
 // The merge, the join, the blocker and the queue: one generic entity per
-// kind (data/vhdl/handshake/generic). A merge is one of four, with or
-// without data and with or without the slot behind its arbiter (TEHB); a
+// kind (data/vhdl/handshake/generic). A merge is one of two, with or
+// without data, and whether it keeps the slot behind its arbiter (TEHB) is a
+// generic; a
 // queue's depth, widths and tokens held at reset are generics. A unit on
 // speculative channels, and a queue that does not publish both of its
 // counts (its ports differ), are generated. (A join of speculative controls
@@ -23,11 +24,11 @@
 // HW-DAG: hw.name = "handshake.blocker", hw.parameters = {DATA_TYPE = !handshake.channel<i12>, SIZE = 2 : ui32}
 // HW-DAG: hw.name = "handshake.queue", hw.parameters = {DATA_TYPE = !handshake.channel<i12, [space: i3 (U)]>, DATA_WIDTH = 12 : ui32,
 
-// CHECK-DAG: merge0 : entity work.handshake_merge(arch) generic map(2, 12)
-// CHECK-DAG: merge1 : entity work.handshake_merge(arch) generic map(3, 12)
-// CHECK-DAG: merge2 : entity work.handshake_merge_notehb(arch) generic map(2, 12)
-// CHECK-DAG: merge3 : entity work.handshake_merge_dataless(arch) generic map(2)
-// CHECK-DAG: merge4 : entity work.handshake_merge_notehb_dataless(arch) generic map(3)
+// CHECK-DAG: merge0 : entity work.handshake_merge(arch) generic map(2, 12, 1)
+// CHECK-DAG: merge1 : entity work.handshake_merge(arch) generic map(3, 12, 1)
+// CHECK-DAG: merge2 : entity work.handshake_merge(arch) generic map(2, 12, 0)
+// CHECK-DAG: merge3 : entity work.handshake_merge_dataless(arch) generic map(2, 1)
+// CHECK-DAG: merge4 : entity work.handshake_merge_dataless(arch) generic map(3, 0)
 // CHECK-DAG: merge5 : entity work.handshake_merge_{{[0-9]+}}(arch)
 // CHECK-DAG: merge6 : entity work.handshake_merge_{{[0-9]+}}(arch)
 // CHECK-DAG: join0 : entity work.handshake_join(arch) generic map(2)
@@ -47,8 +48,6 @@
 // FILES-NEXT: handshake_merge_{{[0-9]+}}.vhd
 // FILES-NEXT: handshake_merge_{{[0-9]+}}.vhd
 // FILES-NEXT: handshake_merge_dataless.vhd
-// FILES-NEXT: handshake_merge_notehb.vhd
-// FILES-NEXT: handshake_merge_notehb_dataless.vhd
 // FILES-NEXT: handshake_queue.vhd
 // FILES-NEXT: handshake_queue_{{[0-9]+}}.vhd
 // FILES-NOT:  handshake_{{(join|merge|queue)}}_{{[0-9]+}}.vhd
