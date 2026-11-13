@@ -115,6 +115,41 @@ public:
   }
 };
 
+// Trait for a unit that takes any number of inputs (a merge, a join): the
+// operands are "ins_0" to "ins_<N-1>", indexed even when there is one. The
+// unit's RTL declares its inputs as an array, and the index is what tells
+// the RTL emission that a port is an array's element: a lone "ins" would be
+// bound as a plain port, a vector against an array of one. The results are
+// named as SimpleNamedIO names them.
+template <typename ConcreteOp>
+class ArrayInputsNamedIO
+    : public mlir::OpTrait::TraitBase<ConcreteOp, ArrayInputsNamedIO> {
+public:
+  std::string getOperandName(unsigned idx) {
+    static_cast<ConcreteOp *>(this)->validateOperandIdx(idx);
+    return "ins_" + std::to_string(idx);
+  }
+  std::string getResultName(unsigned idx) {
+    return static_cast<ConcreteOp *>(this)->simpleResultName(idx);
+  }
+};
+
+// The same for a unit that gives any number of outputs (a fork): the results
+// are "outs_0" to "outs_<N-1>", indexed even when there is one. The operands
+// are named as SimpleNamedIO names them.
+template <typename ConcreteOp>
+class ArrayOutputsNamedIO
+    : public mlir::OpTrait::TraitBase<ConcreteOp, ArrayOutputsNamedIO> {
+public:
+  std::string getOperandName(unsigned idx) {
+    return static_cast<ConcreteOp *>(this)->simpleOperandName(idx);
+  }
+  std::string getResultName(unsigned idx) {
+    static_cast<ConcreteOp *>(this)->validateResultIdx(idx);
+    return "outs_" + std::to_string(idx);
+  }
+};
+
 // Trait that returns "lhs"/"rhs" and "result"
 // for the NamedIOInterface functions
 // so ops with this behaviour can just declare the trait

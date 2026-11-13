@@ -30,9 +30,10 @@ The audit is of the generators, not of `data/vhdl/`. Only six files under
 VHDL flow reads none of it. (Since this audit, the default configuration
 takes the hand-written generic entity of the units measured to be their
 generator's logic (thirteen kinds and three kinds of buffer), a generic
-entity written from the generator's logic for eighteen more (the init, the
-sequential multiplier, the merge, the mux, the control merge, the join, the
-blocker, the queue, the bundle and the unbundle among them)
+entity written from the generator's logic for twenty-two more (the init, the
+sequential multiplier and the four sequential dividers, the merge, the mux,
+the control merge, the join, the blocker, the queue, the bundle and the
+unbundle among them)
 (`data/vhdl/handshake/generic`), and one for each arith unit on raw wires; a
 unit that carries an extra signal is still generated.) That leaves 87 generator types named by the
 default configuration, of which one (`rigidifier`) has no generator, plus the

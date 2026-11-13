@@ -438,6 +438,8 @@ The `arch-name` option, when present, must map to a string which overrides the d
 }
 ```
 
+One entity may have several architectures, each a component of its own: the four sequential dividers are one entity, `handshake_divider_sequential`, whose entries name the architectures `divui`, `divsi`, `remui` and `remsi`. The option is for VHDL components. Verilog has no architectures, and the Verilog emission writes the name in place of the module's, so an entry that sets it does not export to Verilog.
+
 #### `use-json-config`
 
 > [!NOTE]
@@ -519,6 +521,8 @@ end entity;
 We would need to name its data inputs `dataInputs_0` and `dataInputs_1` during instantiation in this case.
 
 In both cases, the base name `dataInputs` is part of the specification of `handshake.mux`, the matching MLIR operation. Within the IR, these ports are always named following the `flat` convention: `dataInputs_0` and `dataInputs_1`. During RTL emission, they will be converted to the first hierarchical form by default, or left as is if the `io-kind` is explicitly set to `flat`.
+
+The convention holds for an array of one. A merge, a first, a mux, a control merge, a join or a blocker of a single input names it `ins_0`, and a fork of a single output names it `outs_0`: the index is what tells the emission that the port is an array's element, and the same name is what the units' modules define in every backend. A unit whose port is not an array names a lone operand `ins` and a lone result `outs` (a buffer, a fork's input, a control merge's data output).
 
 #### `io-signals`
 

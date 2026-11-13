@@ -177,6 +177,29 @@
     "name": "handshake.divsi",
     "parameters": [
       {
+        "name": "IMPL",
+        "type": "string",
+        "eq": "sequential",
+        "generic": false
+      },
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/generic/handshake_divider_sequential.vhd",
+    "module-name": "handshake_divider_sequential",
+    "arch-name": "divsi",
+    "dependencies": [
+      "join"
+    ]
+  },
+  {
+    "name": "handshake.divsi",
+    "parameters": [
+      {
         "name": "LATENCY",
         "type": "unsigned"
       },
@@ -210,6 +233,29 @@
     "name": "handshake.remsi",
     "parameters": [
       {
+        "name": "IMPL",
+        "type": "string",
+        "eq": "sequential",
+        "generic": false
+      },
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/generic/handshake_divider_sequential.vhd",
+    "module-name": "handshake_divider_sequential",
+    "arch-name": "remsi",
+    "dependencies": [
+      "join"
+    ]
+  },
+  {
+    "name": "handshake.remsi",
+    "parameters": [
+      {
         "name": "LATENCY",
         "type": "unsigned"
       },
@@ -243,6 +289,29 @@
     "name": "handshake.remui",
     "parameters": [
       {
+        "name": "IMPL",
+        "type": "string",
+        "eq": "sequential",
+        "generic": false
+      },
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/generic/handshake_divider_sequential.vhd",
+    "module-name": "handshake_divider_sequential",
+    "arch-name": "remui",
+    "dependencies": [
+      "join"
+    ]
+  },
+  {
+    "name": "handshake.remui",
+    "parameters": [
+      {
         "name": "LATENCY",
         "type": "unsigned"
       },
@@ -270,6 +339,29 @@
     "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t remui -p bitwidth=$BITWIDTH latency=$LATENCY impl='\"$IMPL\"' extra_signals=$EXTRA_SIGNALS",
     "dependencies": [
       "vitis_hls_cores"
+    ]
+  },
+  {
+    "name": "handshake.divui",
+    "parameters": [
+      {
+        "name": "IMPL",
+        "type": "string",
+        "eq": "sequential",
+        "generic": false
+      },
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/generic/handshake_divider_sequential.vhd",
+    "module-name": "handshake_divider_sequential",
+    "arch-name": "divui",
+    "dependencies": [
+      "join"
     ]
   },
   {

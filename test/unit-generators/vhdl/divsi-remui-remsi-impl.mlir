@@ -1,9 +1,15 @@
 // RUN: %export-vhdl
+// RUN: python3 %dynamatic_src_root/tools/unit-generators/vhdl/vhdl-unit-generator.py -n handshake_divsi_0 -o %t/handshake_divsi_0.vhd -t divsi -p bitwidth=32 latency=35 "impl='sequential'" 'extra_signals={}'
+// RUN: python3 %dynamatic_src_root/tools/unit-generators/vhdl/vhdl-unit-generator.py -n handshake_remui_0 -o %t/handshake_remui_0.vhd -t remui -p bitwidth=32 latency=35 "impl='sequential'" 'extra_signals={}'
+// RUN: python3 %dynamatic_src_root/tools/unit-generators/vhdl/vhdl-unit-generator.py -n handshake_remsi_0 -o %t/handshake_remsi_0.vhd -t remsi -p bitwidth=32 latency=35 "impl='sequential'" 'extra_signals={}'
 // RUN: FileCheck %s -input-file %t/handshake_divsi_0.vhd --check-prefix=DIVSI-SEQ --implicit-check-not=vitis_hls_wrapper
 // RUN: FileCheck %s -input-file %t/handshake_divsi_1.vhd --check-prefix=DIVSI-PIPE
 // RUN: FileCheck %s -input-file %t/handshake_remui_0.vhd --check-prefix=REMUI-SEQ --implicit-check-not=vitis_hls_wrapper --implicit-check-not=lhs_mag
 // RUN: FileCheck %s -input-file %t/handshake_remsi_0.vhd --check-prefix=REMSI-SEQ --implicit-check-not=vitis_hls_wrapper
 // RUN: FileCheck %s -input-file %t/handshake_remsi_1.vhd --check-prefix=REMSI-PIPE
+
+// The sequential units are generated directly: the export gives a
+// sequential divider the generic entity (generic-units-6-export.mlir).
 
 // The sequential signed division and the two remainders. One register set
 // stepped BITWIDTH times, the quotient register leaving a division and the

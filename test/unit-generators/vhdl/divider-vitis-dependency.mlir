@@ -5,12 +5,14 @@
 // divider entries carried "dependencies": ["vitis_hls_cores"] whatever the
 // implementation, so an export whose dividers are all sequential shipped
 // vitis_hls_cores.vhd although nothing instantiated it. The pipelined unit
-// still gets it (divui-impl.mlir, divsi-remui-remsi-impl.mlir).
+// still gets it (divui-impl.mlir, divsi-remui-remsi-impl.mlir). The four
+// sequential units are now one generic entity, which depends on the join
+// alone.
 
-// CHECK: handshake_divsi_0.vhd
-// CHECK: handshake_divui_0.vhd
-// CHECK: handshake_remsi_0.vhd
-// CHECK: handshake_remui_0.vhd
+// CHECK-NOT: vitis_hls_cores.vhd
+// CHECK: handshake_divider_sequential.vhd
+// CHECK-NOT: handshake_{{(div|rem)}}
+// CHECK: join.vhd
 // CHECK-NOT: vitis_hls_cores.vhd
 module {
   hw.module @test(in %a : !handshake.channel<i32>, in %b : !handshake.channel<i32>, in %c : !handshake.channel<i32>, in %d : !handshake.channel<i32>, in %e : !handshake.channel<i32>, in %f : !handshake.channel<i32>, in %g : !handshake.channel<i32>, in %h : !handshake.channel<i32>, in %clk : i1, in %rst : i1, out out0 : !handshake.channel<i32>, out out1 : !handshake.channel<i32>, out out2 : !handshake.channel<i32>, out out3 : !handshake.channel<i32>) {
