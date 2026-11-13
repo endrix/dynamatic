@@ -4,8 +4,9 @@
 // A ONE-ELEMENT memory. Two things went wrong at this size and nothing else
 // covered it, so both are checked here.
 //
-// The RTL config wraps INITIAL_VALUES in parentheses and the generator reads
-// the result with `ast.literal_eval`. `(0)` is an int in Python, not a
+// The generator wraps INITIAL_VALUES in parentheses (it reads it from the
+// parameters file export-rtl writes) and reads the result with
+// `ast.literal_eval`. `(0)` is an int in Python, not a
 // one-element tuple, so the generator died with "TypeError: 'int' object is
 // not iterable" -- which is why HandshakeToHW emits a TRAILING comma.
 //

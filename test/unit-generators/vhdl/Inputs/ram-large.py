@@ -1,7 +1,8 @@
 """Writes ram-large.mlir's input: two 70,000-word memories, too large for
 their initial values to go on the generator's command line (Linux takes at
-most 128 KiB in one argument; each list here is about 400 KB). handshake_ram_0
-holds i % 251 at word i, handshake_ram_1 zeros, so it also gets an SRAM view."""
+most 128 KiB in one argument with 4 KiB pages; the lists here are 249 KB and
+140 KB). handshake_ram_0 holds i % 251 at word i, handshake_ram_1 zeros, so it
+also gets an SRAM view."""
 N = 70000
 content = "".join(f"{i % 251}," for i in range(N))
 zeros = "0," * N

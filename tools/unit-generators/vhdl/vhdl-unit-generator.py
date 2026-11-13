@@ -26,7 +26,8 @@ def parse_parameters(param_list):
         param_dict = {}
         if param_list is not None:
             for pair in param_list:
-                key, value = pair.split("=")
+                # On the first "=": a value may hold one (values_json is a path).
+                key, value = pair.split("=", 1)
                 param_dict[key.strip()] = ast.literal_eval(value.strip())
         return param_dict
     except ValueError:

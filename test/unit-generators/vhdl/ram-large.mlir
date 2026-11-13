@@ -13,8 +13,9 @@
 // reach the generator in the parameters file export-rtl writes for the unit
 // (`use-json-config`), read as the command line's were.
 //
-// The input (Inputs/ram-large.py) is two 70,000-word memories, about 400 KB
-// of initial values each.
+// The input (Inputs/ram-large.py) is two 70,000-word memories, with 249 KB
+// and 140 KB of initial values. The old command line fails it where pages are
+// 4 KiB (the limit is 32 pages); with 64 KiB pages it would not have.
 
 // The content, word for word: i % 251 at word i.
 // CONTENT:      signal ram : ram_type := (0 => "00000000",
