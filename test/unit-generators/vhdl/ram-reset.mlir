@@ -4,6 +4,7 @@
 // RUN: FileCheck %s -input-file %t/handshake_ram_0.vhd --check-prefix=FPGA
 // RUN: unset RAM_RESET_CONTENT; %export-vhdl
 // RUN: FileCheck %s -input-file %t/handshake_ram_0.vhd --check-prefix=FPGA
+// RUN: FileCheck %s -input-file %t/handshake_ram_0.vhd --check-prefix=HEADER
 
 // A MEMORY RESETS TO WHAT IT DECLARES, WHEN THE TARGET ASKS. A declared
 // initial value is a simulator's and an FPGA bitstream's; a cell library has
@@ -27,6 +28,13 @@
 // CHECK: if (rst = '1') then
 // CHECK-NEXT: ram <= ram_init;
 // CHECK-NEXT: elsif (storeEn = '1') then
+
+
+// The header comment, the generator's parameters in the order the RTL config
+// gives them: the initial values, which reach the generator in the parameters
+// file export-rtl writes (`values_json`), stand where the config's command
+// line once put them.
+// HEADER: {{^}}-- handshake_ram_0 : ram({'data_width': 32, 'addr_width': 32, 'size': 2, 'values': (5, -3), 'sram_threshold': 64,
 
 module {
   hw.module @test(in %clk : i1, in %rst : i1, in %loadEn : i1, in %loadAddr : i32,

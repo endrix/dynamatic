@@ -1269,8 +1269,9 @@ ModuleDiscriminator::ModuleDiscriminator(handshake::RAMOp *op,
     } else {
       assert(false && "Unsupported constant type!");
     }
-    // A TRAILING comma, because the RTL config wraps this in parentheses and
-    // the generator reads the result with `ast.literal_eval`. `(0)` is an int
+    // A TRAILING comma, because the RAM generator wraps this in parentheses
+    // (it reads it from the parameters file export-rtl writes, values_json)
+    // and reads the result with `ast.literal_eval`. `(0)` is an int
     // in Python, not a one-element tuple, so a single-element memory fails
     // with "TypeError: 'int' object is not iterable" from inside the
     // generator -- a long way from here, and only ever for size 1.

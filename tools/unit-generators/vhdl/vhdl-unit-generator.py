@@ -26,12 +26,33 @@ def parse_parameters(param_list):
         param_dict = {}
         if param_list is not None:
             for pair in param_list:
-                key, value = pair.split("=")
+                # On the first "=": a value may hold one (values_json is a path).
+                key, value = pair.split("=", 1)
                 param_dict[key.strip()] = ast.literal_eval(value.strip())
         return param_dict
     except ValueError:
         raise ValueError(
             "Invalid parameter format. Use key=value key=value,...\n")
+
+
+def values_from_json(parameters):
+    """`values_json=<file>` in place of `values=(...)`: a memory's initial
+    values from the parameters file export-rtl writes for the unit before it
+    runs the generator (the RTL config's `use-json-config`), INITIAL_VALUES as
+    HandshakeToHW gives it ("a,b,c,"), read as `values="($INITIAL_VALUES)"`
+    was. A command line cannot carry a large memory's content: Linux takes at
+    most 128 KiB in one argument, and a 147,456-word memory's zeros alone are
+    295 KB, so the shell never started the generator (std::system's status
+    32512, the shell's 127). The entry takes the place `values` had, so the
+    unit, its header included, is the one the inline values gave."""
+    if "values_json" not in parameters:
+        return parameters
+    import json
+    with open(parameters["values_json"]) as f:
+        text = json.load(f)["INITIAL_VALUES"]
+    return {("values" if key == "values_json" else key):
+            (ast.literal_eval(f"({text})") if key == "values_json" else value)
+            for key, value in parameters.items()}
 
 
 def main(generators):
@@ -55,7 +76,7 @@ def main(generators):
     args = parser.parse_args()
 
     try:
-        parameters = parse_parameters(args.parameters)
+        parameters = values_from_json(parse_parameters(args.parameters))
     except ValueError as e:
         sys.stderr.write(f"Error parsing parameters: {e}")
         sys.exit(1)
