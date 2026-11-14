@@ -2,7 +2,9 @@
 -- data/vhdl/handshake/generic, used by handshake-generic-seq-ghdl.mlir.
 -- The init: the token it holds at reset is INITIAL_VALUE, then it is a
 -- one-slot buffer. The multiplier: the low W bits of the product, for random
--- operands under random back-pressure, at the step S.
+-- operands under random back-pressure, at the step S; with IW above 0, the
+-- multiplier's bits from IW up are zero (the unit's ITER_WIDTH) and a
+-- multiply takes ceil(IW / S) cycles instead of ceil(W / S).
 -- Fails (severity failure) on a wrong result.
 library ieee;
 use ieee.std_logic_1164.all;
@@ -13,12 +15,23 @@ entity tb is
     W : positive := 8;
     S : positive := 3;
     V : string := "5"; -- the init's value, in decimal
-    BITS : string := "00000101" -- the same in W bits
+    BITS : string := "00000101"; -- the same in W bits
+    IW : natural := 0 -- the multiplier's ITER_WIDTH, 0 for every bit
   );
 end entity;
 
 architecture sim of tb is
   subtype word is std_logic_vector(W - 1 downto 0);
+  -- The multiplier bits a multiply steps over, and its cycles.
+  function bits_of(iw, w : natural) return natural is
+  begin
+    if iw = 0 then
+      return w;
+    end if;
+    return iw;
+  end function;
+  constant MB : natural := bits_of(IW, W);
+  constant ITERS : natural := (MB + S - 1) / S;
   signal clk : std_logic := '0';
   signal rst : std_logic := '1';
   signal i_in, i_out, a, b, p : word := (others => '0');
@@ -44,7 +57,7 @@ begin
     port map(clk, rst, i_in, i_iv, i_ir, i_out, i_ov, i_or);
   u_init0 : entity work.handshake_init_dataless(arch)
     port map(clk, rst, d_iv, d_ir, d_ov, d_or);
-  u_mul : entity work.handshake_muli_sequential(arch) generic map(S, W)
+  u_mul : entity work.handshake_muli_sequential(arch) generic map(S, W, IW)
     port map(clk, rst, a, av, ar, b, bv, br, p, pv, pr);
 
   process
@@ -119,6 +132,10 @@ begin
       xa := fresh; xb := fresh;
       if i = 1 then xa := (others => '1'); xb := (others => '1'); end if;
       if i = 2 then xb := (others => '0'); end if;
+      -- The multiplier's bits from IW up are zero.
+      for k in MB to W - 1 loop
+        xb(k) := '0';
+      end loop;
       want := std_logic_vector(resize(unsigned(xa) * unsigned(xb), W));
       a <= xa; b <= xb;
       step;
@@ -135,11 +152,11 @@ begin
       av <= '0'; bv <= '0';
       waited := 0;
       while pv = '0' loop
-        check(waited <= (W + S - 1) / S + 1, "muli, latency");
+        check(waited <= ITERS + 1, "muli, latency");
         tick; wait for 1 ns;
         waited := waited + 1;
       end loop;
-      check(waited = (W + S - 1) / S, "muli, cycles of a multiply");
+      check(waited = ITERS, "muli, cycles of a multiply");
       check(p = want, "muli, product");
       -- Held until taken, and nothing new accepted meanwhile.
       av <= '1'; bv <= '1';

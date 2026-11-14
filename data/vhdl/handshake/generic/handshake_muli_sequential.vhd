@@ -5,6 +5,15 @@
 -- `sequential` implementation) writes. That multiplier carries no extra
 -- signals; its latency is ceil(DATA_TYPE / STEP) + 1 cycles, which the
 -- operation's LATENCY states and nothing here reads.
+--
+-- ITER_WIDTH, when it is given (above 0), is how many low bits of the
+-- multiplier `rhs` can be set: the bits from ITER_WIDTH up are zero, as they
+-- are when the operand is the zero extension of an ITER_WIDTH-bit value (a
+-- 32 x 32 product in 64 bits). The unit then steps over those bits only,
+-- ceil(ITER_WIDTH / STEP) iterations, and its latency is
+-- ceil(ITER_WIDTH / STEP) + 1 cycles; a multiplier with a bit set from
+-- ITER_WIDTH up is multiplied by its low ceil(ITER_WIDTH / STEP) * STEP bits.
+-- 0, the default, is DATA_TYPE: every bit, as without it.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -12,8 +21,9 @@ use ieee.numeric_std.all;
 
 entity handshake_muli_sequential is
   generic (
-    STEP      : integer;
-    DATA_TYPE : integer
+    STEP       : integer;
+    DATA_TYPE  : integer;
+    ITER_WIDTH : natural := 0
   );
   port (
     clk          : in  std_logic;
@@ -46,7 +56,17 @@ architecture arch of handshake_muli_sequential is
     return bits;
   end function;
 
-  constant ITERATIONS : positive := (DATA_TYPE + STEP - 1) / STEP;
+  -- The multiplier bits the unit steps over: ITER_WIDTH, or every bit.
+  function iter_bits(iw, w : natural) return natural is
+  begin
+    if iw = 0 then
+      return w;
+    end if;
+    return iw;
+  end function;
+
+  constant BITS       : natural  := iter_bits(ITER_WIDTH, DATA_TYPE);
+  constant ITERATIONS : positive := (BITS + STEP - 1) / STEP;
   constant PADDED     : positive := ITERATIONS * STEP;
 
   signal join_valid, accept, idle : std_logic;
@@ -60,6 +80,10 @@ begin
   assert STEP >= 1 and STEP <= DATA_TYPE
     report "handshake_muli_sequential: a step of " & integer'image(STEP)
       & " for a width of " & integer'image(DATA_TYPE)
+    severity failure;
+  assert ITER_WIDTH <= DATA_TYPE
+    report "handshake_muli_sequential: an iteration width of "
+      & integer'image(ITER_WIDTH) & " for a width of " & integer'image(DATA_TYPE)
     severity failure;
 
   -- the operands are taken together, when nothing is running and no

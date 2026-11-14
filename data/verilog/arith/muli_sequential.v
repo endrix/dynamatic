@@ -9,12 +9,21 @@
 // bits a cycle cost STEP rows of adders. This is the same unit the VHDL
 // generator writes for IMPL = "sequential"
 // (tools/unit-generators/vhdl/generators/handshake/muli.py).
+// ITER_WIDTH, when it is given (above 0), is how many low bits of the
+// multiplier `rhs` can be set: the bits from ITER_WIDTH up are zero, as they
+// are when the operand is the zero extension of an ITER_WIDTH-bit value (a
+// 32 x 32 product in 64 bits). The unit then steps over those bits only:
+// ceil(ITER_WIDTH / STEP) + 1 cycles a multiply. 0, the default, is
+// DATA_TYPE: every bit, as without it. The same as the generic VHDL entity
+// (data/vhdl/handshake/generic/handshake_muli_sequential.vhd).
 module muli_sequential #(
   parameter DATA_TYPE = 32,
   // a STEP above DATA_TYPE is one iteration with a STEP-wide partial
   // product, wider than asked; the VHDL generator refuses it, this file
   // takes it
-  parameter STEP = 1
+  parameter STEP = 1,
+  // the multiplier bits stepped over; 0 is every bit
+  parameter ITER_WIDTH = 0
 )(
   // inputs
   input  clk,
@@ -31,7 +40,8 @@ module muli_sequential #(
   output rhs_ready
 );
 
-  localparam ITERATIONS = (DATA_TYPE + STEP - 1) / STEP;
+  localparam BITS = (ITER_WIDTH == 0) ? DATA_TYPE : ITER_WIDTH;
+  localparam ITERATIONS = (BITS + STEP - 1) / STEP;
   localparam PADDED = ITERATIONS * STEP;
   localparam COUNT_WIDTH = $clog2(ITERATIONS + 1);
 

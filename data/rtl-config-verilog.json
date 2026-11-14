@@ -563,6 +563,38 @@
         "name": "STEP",
         "type": "unsigned",
         "lb": 1
+      },
+      {
+        "name": "ITER_WIDTH",
+        "type": "unsigned",
+        "lb": 1
+      }
+    ],
+    "generic": "$DYNAMATIC/data/verilog/arith/muli_sequential.v",
+    "dependencies": [
+      "join_type"
+    ],
+    "hdl": "verilog"
+  },
+  {
+    "name": "handshake.muli",
+    "parameters": [
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      },
+      {
+        "name": "IMPL",
+        "type": "string",
+        "eq": "sequential",
+        "generic": false
+      },
+      {
+        "name": "STEP",
+        "type": "unsigned",
+        "lb": 1
       }
     ],
     "generic": "$DYNAMATIC/data/verilog/arith/muli_sequential.v",
