@@ -58,6 +58,18 @@ module muli_sequential #(
 
   wire [DATA_TYPE + STEP - 1 : 0] partial;
 
+  // the multiplier at the PADDED bits stepped over: its low bits when
+  // ITER_WIDTH leaves the rest (zero by contract) unread, zero-extended when
+  // STEP does not divide the width
+  wire [PADDED - 1 : 0] rhs_padded;
+  generate
+    if (PADDED <= DATA_TYPE) begin : rhs_low
+      assign rhs_padded = rhs[PADDED - 1 : 0];
+    end else begin : rhs_wide
+      assign rhs_padded = {{(PADDED - DATA_TYPE){1'b0}}, rhs};
+    end
+  endgenerate
+
   // the operands are taken together, when nothing is running and no
   // product is waiting (or it goes this cycle)
   assign idle = (~busy) & ((~done) | result_ready);
@@ -86,7 +98,7 @@ module muli_sequential #(
         done <= 1'b0;
       if (accept) begin
         a_reg <= lhs;
-        b_reg <= rhs;
+        b_reg <= rhs_padded;
         acc   <= 0;
         count <= 0;
         busy  <= 1'b1;
