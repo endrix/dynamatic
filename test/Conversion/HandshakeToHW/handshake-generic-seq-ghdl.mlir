@@ -7,16 +7,26 @@
 // RUN: cd %t && ghdl --elab-run --std=08 tb -gW=32 -gS=16 -gV=4294967295 -gBITS=11111111111111111111111111111111 2>&1 | FileCheck %s
 // RUN: cd %t && ghdl --elab-run --std=08 tb -gW=33 -gS=4 -gV=4294967296 -gBITS=100000000000000000000000000000000 2>&1 | FileCheck %s
 // RUN: cd %t && ghdl --elab-run --std=08 tb -gW=70 -gS=16 -gV=590295810358705651712 -gBITS=1000000000000000000000000000000000000000000000000000000000000000000000 2>&1 | FileCheck %s
+// RUN: cd %t && ghdl --elab-run --std=08 tb -gW=64 -gS=1 -gIW=32 -gV=1 -gBITS=0000000000000000000000000000000000000000000000000000000000000001 2>&1 | FileCheck %s
+// RUN: cd %t && ghdl --elab-run --std=08 tb -gW=64 -gS=8 -gIW=32 -gV=1 -gBITS=0000000000000000000000000000000000000000000000000000000000000001 2>&1 | FileCheck %s
+// RUN: cd %t && ghdl --elab-run --std=08 tb -gW=33 -gS=4 -gIW=5 -gV=4294967296 -gBITS=100000000000000000000000000000000 2>&1 | FileCheck %s
+// RUN: cd %t && ghdl --elab-run --std=08 tb -gW=16 -gS=16 -gIW=3 -gV=3 -gBITS=0000000000000011 2>&1 | FileCheck %s
+// RUN: cd %t && ghdl --elab-run --std=08 tb -gW=8 -gS=3 -gIW=8 -gV=5 -gBITS=00000101 2>&1 | FileCheck %s
 // RUN: cd %t && not ghdl --elab-run --std=08 tb -gW=8 -gS=3 -gV=256 -gBITS=00000000 2>&1 | FileCheck %s --check-prefix=WIDE
 // RUN: cd %t && not ghdl --elab-run --std=08 tb -gW=8 -gS=3 -gV=4101 -gBITS=00000101 2>&1 | FileCheck %s --check-prefix=WRAP
 // RUN: cd %t && not ghdl --elab-run --std=08 tb -gW=8 -gS=9 -gV=5 -gBITS=00000101 2>&1 | FileCheck %s --check-prefix=STEP
+// RUN: cd %t && not ghdl --elab-run --std=08 tb -gW=8 -gS=3 -gIW=9 -gV=5 -gBITS=00000101 2>&1 | FileCheck %s --check-prefix=ITER
 
 // The generic init and sequential multiplier (data/vhdl/handshake/generic),
 // simulated: the init's value from its decimal string at widths below and
 // above 32 and 64 bits, the multiplier's product, latency and handshake at
-// several steps. A wrong result stops the run before the summary line.
+// several steps, and with an ITER_WIDTH (IW): a 32-bit multiplier in 64 bits
+// at 1 and 8 bits a cycle, an iteration width that is no multiple of the
+// step, a step wider than it, and one equal to the width. A wrong result or
+// a wrong number of cycles stops the run before the summary line.
 
 // CHECK: checks as expected
 // WIDE: handshake_init: INITIAL_VALUE 256 does not fit the width
 // WRAP: handshake_init: INITIAL_VALUE 4101 does not fit the width
 // STEP: handshake_muli_sequential: a step of 9 for a width of 8
+// ITER: handshake_muli_sequential: an iteration width of 9 for a width of 8

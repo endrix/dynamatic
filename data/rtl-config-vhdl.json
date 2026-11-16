@@ -475,6 +475,37 @@
         "type": "dataflow",
         "data-lb": 1,
         "extra-eq": 0
+      },
+      {
+        "name": "ITER_WIDTH",
+        "type": "unsigned",
+        "lb": 1
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/generic/handshake_muli_sequential.vhd",
+    "dependencies": [
+      "join"
+    ]
+  },
+  {
+    "name": "handshake.muli",
+    "parameters": [
+      {
+        "name": "IMPL",
+        "type": "string",
+        "eq": "sequential",
+        "generic": false
+      },
+      {
+        "name": "STEP",
+        "type": "unsigned",
+        "lb": 1
+      },
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
       }
     ],
     "generic": "$DYNAMATIC/data/vhdl/handshake/generic/handshake_muli_sequential.vhd",

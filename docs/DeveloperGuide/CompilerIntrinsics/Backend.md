@@ -259,6 +259,20 @@ frontend put on the op, and `LATENCY` comes from the op's latency attribute.
 The three RTL configurations then read the same three parameters, each in the
 way its own units are written.
 
+A sequential multiplier may also name `ITER_WIDTH`: how many low bits of its
+multiplier (`rhs`) can be set, every bit above them zero, as they are when
+the operand is the zero extension of a narrower value (a 32 x 32 product
+computed in 64 bits). The unit then steps over those bits only,
+ceil(`ITER_WIDTH` / `STEP`) iterations instead of ceil(width / `STEP`), and
+the op's `LATENCY` is the one that says so. `HandshakeToHW` passes it through
+as the op carries it, an unsigned integer. The generic VHDL entity
+(`data/vhdl/handshake/generic/handshake_muli_sequential.vhd`) and the Verilog
+module take it as their last generic, 0 by default (every bit), and each
+configuration has an entry naming it ahead of the entry that does not, so an
+op without it matches as before. The VHDL generator does not take it: an op
+reaches the generator only with extra signals, which its sequential
+multiplier refuses.
+
 - `rtl-config-vhdl.json` has one entry per op. The generator is given
   `impl` and `step`, and `tools/unit-generators/vhdl/generators/handshake/`
   dispatches on `impl` and writes the entity.
