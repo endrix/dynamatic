@@ -1,17 +1,18 @@
 -- The eager fork of the VHDL library (data/vhdl/handshake/dataless/fork.vhd,
--- entity fork_dataless) in lockstep with the fork the unit generator writes
--- (entity fork_ref, of SIZE outputs), used by fork-phase-ghdl.mlir. The
--- generator's fork has one register per output; from three outputs on, the
--- library's stores the same state against a phase. Both get the same
--- ins_valid, outs_ready and rst, drawn at random with no regard for the
--- protocol (a valid may be withdrawn, a reset may fall anywhere), and must
--- agree on ins_ready and outs_valid in every cycle.
+-- entity fork_dataless) and the fork the unit generator writes (entity
+-- fork_gen, of SIZE outputs), each in lockstep with the fork that keeps one
+-- register per output (fork-per-output.vhd), used by fork-phase-ghdl.mlir.
+-- From three outputs on, the library's fork and the generator's store that
+-- state against a phase. The three get the same ins_valid, outs_ready and
+-- rst, drawn at random with no regard for the protocol (a valid may be
+-- withdrawn, a reset may fall anywhere), and must agree on ins_ready and
+-- outs_valid in every cycle.
 --
 -- The stimulus has to reach the cases the two forms store differently: a
 -- token some outputs take before the others (a torn cycle), a token that
 -- completes after one, a valid withdrawn from a torn token, and a reset that
--- falls on one. Fails (severity failure) on a disagreement, or when one of
--- these cases was never reached.
+-- falls on one. Fails (severity failure) on a disagreement, or, from two
+-- outputs on, when one of these cases was never reached.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.math_real.all;
@@ -24,8 +25,8 @@ architecture sim of tb is
   signal clk, rst : std_logic := '1';
   signal iv : std_logic := '0';
   signal ordy : std_logic_vector(SIZE - 1 downto 0) := (others => '0');
-  signal lib_ir, ref_ir : std_logic;
-  signal lib_ov, ref_ov : std_logic_vector(SIZE - 1 downto 0);
+  signal lib_ir, gen_ir, ref_ir : std_logic;
+  signal lib_ov, gen_ov, ref_ov : std_logic_vector(SIZE - 1 downto 0);
 begin
   clk <= not clk after 5 ns;
 
@@ -33,7 +34,11 @@ begin
     port map (clk => clk, rst => rst, ins_valid => iv, ins_ready => lib_ir,
               outs_valid => lib_ov, outs_ready => ordy);
 
-  ref : entity work.fork_ref
+  gen : entity work.fork_gen
+    port map (clk => clk, rst => rst, ins_valid => iv, ins_ready => gen_ir,
+              outs_valid => gen_ov, outs_ready => ordy);
+
+  ref : entity work.fork_per_output generic map (SIZE => SIZE)
     port map (clk => clk, rst => rst, ins_valid => iv, ins_ready => ref_ir,
               outs_valid => ref_ov, outs_ready => ordy);
 
@@ -44,7 +49,7 @@ begin
     -- some outputs have taken the token on `ins`, the others have not
     variable torn : boolean := false;
     variable taken : boolean;
-    variable disagreements, tokens, torn_cycles : natural := 0;
+    variable lib_differs, gen_differs, tokens, torn_cycles : natural := 0;
     variable after_torn, withdrawn, resets : natural := 0;
   begin
     -- two cycles of reset
@@ -71,13 +76,21 @@ begin
       wait for 1 ns;
 
       if lib_ir /= ref_ir or lib_ov /= ref_ov then
-        if disagreements = 0 then
-          report "first disagreement in cycle " & integer'image(c);
+        if lib_differs = 0 then
+          report "the library's fork first differs in cycle "
+                 & integer'image(c);
         end if;
-        disagreements := disagreements + 1;
+        lib_differs := lib_differs + 1;
+      end if;
+      if gen_ir /= ref_ir or gen_ov /= ref_ov then
+        if gen_differs = 0 then
+          report "the generator's fork first differs in cycle "
+                 & integer'image(c);
+        end if;
+        gen_differs := gen_differs + 1;
       end if;
 
-      -- what this cycle is, read on the generator's fork
+      -- what this cycle is, read on the fork with one register per output
       taken := false;
       for i in ordy'range loop
         if ref_ov(i) = '1' and ordy(i) = '1' then taken := true; end if;
@@ -108,9 +121,15 @@ begin
         report "no valid withdrawn from a torn token" severity failure;
       assert resets > 0 report "no reset on a torn token" severity failure;
     end if;
-    assert disagreements = 0
-      report "SIZE=" & integer'image(SIZE) & ": "
-             & integer'image(disagreements) & " cycles disagree"
+    assert lib_differs = 0
+      report "SIZE=" & integer'image(SIZE)
+             & ": the library's fork differs in "
+             & integer'image(lib_differs) & " cycles"
+      severity failure;
+    assert gen_differs = 0
+      report "SIZE=" & integer'image(SIZE)
+             & ": the generator's fork differs in "
+             & integer'image(gen_differs) & " cycles"
       severity failure;
     report "SIZE=" & integer'image(SIZE) & ": " & integer'image(CYCLES)
            & " cycles agree, " & integer'image(tokens) & " tokens, "

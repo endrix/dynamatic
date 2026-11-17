@@ -28,10 +28,14 @@
 --                         any other holds in both.
 --
 -- outs_valid and ins_ready read nothing else, so the two forms are one unit
--- at their ports. The second costs one flip-flop more.
+-- at their ports. The second costs one flip-flop more and an xor between
+-- the registers and the ports, and the phase drives every output's xor where
+-- the completion drove every output's register: the fan-out moves from the
+-- end of the paths into the fork to the start of the paths out of it.
 --
 -- One and two outputs keep the first form: the completion drives at most two
--- registers there, and the timing data are measured on it at two outputs.
+-- registers there. The unit generator's fork is this logic at every size
+-- (tools/unit-generators/vhdl/generators/handshake/fork.py).
 
 library ieee;
 use ieee.std_logic_1164.all;

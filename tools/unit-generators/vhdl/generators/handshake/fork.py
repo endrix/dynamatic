@@ -21,7 +21,15 @@ def generate_fork(name, params):
         return _generate_fork(name, size, bitwidth)
 
 
+# From this many outputs on, the fork keeps its state against a phase
+# (data/vhdl/handshake/dataless/fork.vhd says why, and is the same logic).
+PHASE_MIN = 3
+
+
 def _generate_fork_dataless(name, size):
+    if size >= PHASE_MIN:
+        return _generate_fork_dataless_phase(name, size)
+
     or_n_name = f"{name}_or_n"
     regblock_name = f"{name}_regblock"
 
@@ -84,6 +92,72 @@ end architecture;
 """
 
     return dependencies + entity + architecture
+
+
+def _generate_fork_dataless_phase(name, size):
+    entity = f"""
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
+-- Entity of fork_dataless
+entity {name} is
+  port (
+    clk : in std_logic;
+    rst : in std_logic;
+    -- input channel
+    ins_valid : in  std_logic;
+    ins_ready : out std_logic;
+    -- output channels
+    outs_valid : out std_logic_vector({size} - 1 downto 0);
+    outs_ready : in  std_logic_vector({size} - 1 downto 0)
+  );
+end entity;
+"""
+
+    # transmit(i), "output i still owes the token", is emitted(i) xor phase:
+    # an output's transfer writes its own emitted(i), the token's completion
+    # flips the phase alone, and a cycle without a valid input makes every
+    # output owe again.
+    architecture = f"""
+-- Architecture of fork_dataless
+architecture arch of {name} is
+  signal phase        : std_logic;
+  signal emitted      : std_logic_vector({size} - 1 downto 0);
+  signal transmit     : std_logic_vector({size} - 1 downto 0);
+  signal blockStop    : std_logic_vector({size} - 1 downto 0);
+  signal anyBlockStop : std_logic;
+  signal complete     : std_logic;
+begin
+  transmit  <= emitted xor ({size} - 1 downto 0 => phase);
+  blockStop <= transmit and not outs_ready;
+  anyBlockStop <= '0' when blockStop = ({size} - 1 downto 0 => '0') else '1';
+  ins_ready  <= not anyBlockStop;
+  outs_valid <= transmit and ({size} - 1 downto 0 => ins_valid);
+  complete   <= ins_valid and not anyBlockStop;
+
+  process (clk)
+  begin
+    if rising_edge(clk) then
+      if rst = '1' then
+        phase   <= '0';
+        emitted <= (others => '1');
+      else
+        phase <= phase xor complete;
+        for i in 0 to {size} - 1 loop
+          if ins_valid = '0' then
+            emitted(i) <= not phase;
+          elsif transmit(i) = '1' and outs_ready(i) = '1' then
+            emitted(i) <= phase;
+          end if;
+        end loop;
+      end if;
+    end if;
+  end process;
+end architecture;
+"""
+
+    return entity + architecture
 
 
 def _generate_fork(name, size, bitwidth):
