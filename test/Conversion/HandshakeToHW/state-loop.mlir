@@ -112,16 +112,72 @@ handshake.func @transparent_slot(%d: !handshake.channel<i8>, %go: !handshake.con
 
 // -----
 
-// A FIFO of two slots: the token is in one of them, and which is a state
-// of its own. (A ONE_SLOT_BREAK_DV buffer of two slots does not verify.)
-// CHECK-LABEL: hw.module @two_slots(
+// Any other slot of one slot that registers the data: the units are the
+// loop's with a ONE_SLOT_BREAK_DV slot and no other. (A slot that registers
+// the ready too holds the token a cycle longer; an init named beside one
+// would put out another value.)
+// CHECK-LABEL: hw.module @ready_registered_slot(
 // CHECK-NOT: STATE_LOOP
-handshake.func @two_slots(%d: !handshake.channel<i8>, %go: !handshake.control<>, ...)
+handshake.func @ready_registered_slot(%d: !handshake.channel<i8>, %go: !handshake.control<>, ...)
     -> (!handshake.channel<i8>)
     attributes {argNames = ["d", "go"], resNames = ["q"]} {
   %b = bundle %c, %next : _ to <i8>
   %i = init %b {hw.parameters = {INIT_VALUE = 5 : i8}} : <i8>
-  %s = buffer %i, bufferType = FIFO_BREAK_DV, numSlots = 2, dvLatency = 1 : <i8>
+  %s = buffer %i, bufferType = ONE_SLOT_BREAK_DVR, numSlots = 1, dvLatency = 1 : <i8>
+  %c, %value = unbundle %s : <i8> to _
+  %dc, %dd = unbundle %d : <i8> to _
+  %next = arith.addi %value, %dd : i8
+  %j = join %dc, %go : <>
+  %q = bundle %j, %value : _ to <i8>
+  end %q : <i8>
+}
+
+// -----
+
+// CHECK-LABEL: hw.module @fifo_slot(
+// CHECK-NOT: STATE_LOOP
+handshake.func @fifo_slot(%d: !handshake.channel<i8>, %go: !handshake.control<>, ...)
+    -> (!handshake.channel<i8>)
+    attributes {argNames = ["d", "go"], resNames = ["q"]} {
+  %b = bundle %c, %next : _ to <i8>
+  %i = init %b {hw.parameters = {INIT_VALUE = 5 : i8}} : <i8>
+  %s = buffer %i, bufferType = FIFO_BREAK_DV, numSlots = 1, dvLatency = 1 : <i8>
+  %c, %value = unbundle %s : <i8> to _
+  %dc, %dd = unbundle %d : <i8> to _
+  %next = arith.addi %value, %dd : i8
+  %j = join %dc, %go : <>
+  %q = bundle %j, %value : _ to <i8>
+  end %q : <i8>
+}
+
+// -----
+
+// CHECK-LABEL: hw.module @shift_register_slot(
+// CHECK-NOT: STATE_LOOP
+handshake.func @shift_register_slot(%d: !handshake.channel<i8>, %go: !handshake.control<>, ...)
+    -> (!handshake.channel<i8>)
+    attributes {argNames = ["d", "go"], resNames = ["q"]} {
+  %b = bundle %c, %next : _ to <i8>
+  %i = init %b {hw.parameters = {INIT_VALUE = 5 : i8}} : <i8>
+  %s = buffer %i, bufferType = SHIFT_REG_BREAK_DV, numSlots = 1, dvLatency = 1 : <i8>
+  %c, %value = unbundle %s : <i8> to _
+  %dc, %dd = unbundle %d : <i8> to _
+  %next = arith.addi %value, %dd : i8
+  %j = join %dc, %go : <>
+  %q = bundle %j, %value : _ to <i8>
+  end %q : <i8>
+}
+
+// -----
+
+// CHECK-LABEL: hw.module @counter_slot(
+// CHECK-NOT: STATE_LOOP
+handshake.func @counter_slot(%d: !handshake.channel<i8>, %go: !handshake.control<>, ...)
+    -> (!handshake.channel<i8>)
+    attributes {argNames = ["d", "go"], resNames = ["q"]} {
+  %b = bundle %c, %next : _ to <i8>
+  %i = init %b {hw.parameters = {INIT_VALUE = 5 : i8}} : <i8>
+  %s = buffer %i, bufferType = COUNTER_BUFFER, numSlots = 1, dvLatency = 1 : <i8>
   %c, %value = unbundle %s : <i8> to _
   %dc, %dd = unbundle %d : <i8> to _
   %next = arith.addi %value, %dd : i8
@@ -170,8 +226,10 @@ handshake.func @no_slot(%d: !handshake.channel<i8>, %go: !handshake.control<>, .
 
 // -----
 
-// A loop in a kill domain, its init and its slot reset by a commit's kill:
-// they keep the units of any channel.
+// A loop in a kill domain keeps the units of any channel. Its four units
+// are in the domain together or not at all: where the slot alone is marked,
+// the closure brings in the init (and the bundle and the unbundle), and both
+// are reset by the commit's kill.
 // CHECK-LABEL: hw.module @killed(
 // CHECK:         hw.instance "init0" @{{.*}}(ins: {{.*}}, clk: %clk: i1, rst: %commit0.kill: i1)
 // CHECK:         hw.instance "buffer0" @{{.*}}(ins: {{.*}}, clk: %clk: i1, rst: %commit0.kill: i1)
@@ -193,8 +251,29 @@ handshake.func @killed(%d: !handshake.channel<i8>, %go: !handshake.control<>, %d
 
 // -----
 
-// The name is the lowering's own: one that came with the IR, on a slot and
-// an init of no loop, is removed, and a loop that came without is named.
+// CHECK-LABEL: hw.module @killed_slot(
+// CHECK:         hw.instance "init0" @{{.*}}(ins: {{.*}}, clk: %clk: i1, rst: %commit0.kill: i1)
+// CHECK:         hw.instance "buffer0" @{{.*}}(ins: {{.*}}, clk: %clk: i1, rst: %commit0.kill: i1)
+// CHECK-NOT: STATE_LOOP
+handshake.func @killed_slot(%d: !handshake.channel<i8>, %go: !handshake.control<>, %dec: !handshake.channel<i3>, ...)
+    -> (!handshake.channel<i8>, !handshake.channel<i3>)
+    attributes {argNames = ["d", "go", "dec"], resNames = ["q", "dec_out"]} {
+  %b = bundle %c, %next : _ to <i8>
+  %i = init %b {handshake.name = "init0", hw.parameters = {INIT_VALUE = 5 : i8}} : <i8>
+  %s = buffer %i, bufferType = ONE_SLOT_BREAK_DV, numSlots = 1, dvLatency = 1 {handshake.name = "buffer0", handshake.kill_domain = 0 : ui32} : <i8>
+  %c, %value = unbundle %s : <i8> to _
+  %dc, %dd = unbundle %d : <i8> to _
+  %next = arith.addi %value, %dd : i8
+  %j = join %dc, %go : <>
+  %q = bundle %j, %value : _ to <i8>
+  %decision, %kill = commit %dec {handshake.name = "commit0", handshake.kill_source = 0 : ui32} : <i3>
+  end %q, %decision : <i8>, <i3>
+}
+
+// -----
+
+// The name is the lowering's own: one that came with the IR, on an init and
+// a slot of no loop, is removed.
 // CHECK-LABEL: hw.module @named_from_outside(
 // CHECK:         hw.instance "init0" @[[LOOSE_INIT:handshake_init_[0-9]+]](
 // CHECK:         hw.instance "buffer0" @[[LOOSE_SLOT:handshake_buffer_[0-9]+]](
@@ -205,4 +284,50 @@ handshake.func @named_from_outside(%d: !handshake.channel<i8>, ...) -> (!handsha
   %i = init %d {handshake.name = "init0", hw.parameters = {INIT_VALUE = 5 : i8, STATE_LOOP = 1 : ui32}} : <i8>
   %q = buffer %i, bufferType = ONE_SLOT_BREAK_DV, numSlots = 1, dvLatency = 1 {handshake.name = "buffer0", hw.parameters = {STATE_LOOP = 1 : ui32}} : <i8>
   end %q : <i8>
+}
+
+// -----
+
+// Two functions in one module, one instantiating the other: the loops of
+// both are named, and their inits and slots, of one type and reset value,
+// are one module each. An init and a slot of the same parameters on a
+// channel of their own, in the same function as a loop, are other modules.
+// CHECK-LABEL: hw.module @inner(
+// CHECK:         hw.instance "init0" @[[LOOP_INIT:handshake_init_[0-9]+]](
+// CHECK:         hw.instance "buffer0" @[[LOOP_SLOT:handshake_buffer_[0-9]+]](
+// CHECK-LABEL: hw.module @outer(
+// CHECK:         hw.instance "init1" @[[LOOP_INIT]](
+// CHECK:         hw.instance "buffer1" @[[LOOP_SLOT]](
+// CHECK:         hw.instance "init2" @[[OWN_INIT:handshake_init_[0-9]+]](
+// CHECK:         hw.instance "buffer2" @[[OWN_SLOT:handshake_buffer_[0-9]+]](
+// CHECK-DAG: hw.module.extern @[[LOOP_INIT]]({{.*}}hw.parameters = {DATA_TYPE = !handshake.channel<i8>, INITIAL_VALUE = "5", INIT_VALUE = 5 : i8, STATE_LOOP = 1 : ui32}}
+// CHECK-DAG: hw.module.extern @[[LOOP_SLOT]]({{.*}}NUM_SLOTS = 1 : ui32, STATE_LOOP = 1 : ui32}}
+// CHECK-DAG: hw.module.extern @[[OWN_INIT]]({{.*}}hw.parameters = {DATA_TYPE = !handshake.channel<i8>, INITIAL_VALUE = "5", INIT_VALUE = 5 : i8}}
+// CHECK-DAG: hw.module.extern @[[OWN_SLOT]]({{.*}}NUM_SLOTS = 1 : ui32}}
+handshake.func @inner(%d: !handshake.channel<i8>, ...) -> (!handshake.channel<i8>)
+    attributes {argNames = ["d"], resNames = ["q"]} {
+  %b = bundle %c, %next : _ to <i8>
+  %i = init %b {handshake.name = "init0", hw.parameters = {INIT_VALUE = 5 : i8}} : <i8>
+  %s = buffer %i, bufferType = ONE_SLOT_BREAK_DV, numSlots = 1, dvLatency = 1 {handshake.name = "buffer0"} : <i8>
+  %c, %value = unbundle %s : <i8> to _
+  %dc, %dd = unbundle %d : <i8> to _
+  %next = arith.addi %value, %dd : i8
+  %q = bundle %dc, %value : _ to <i8>
+  end %q : <i8>
+}
+
+handshake.func @outer(%d: !handshake.channel<i8>, ...) -> (!handshake.channel<i8>, !handshake.channel<i8>)
+    attributes {argNames = ["d"], resNames = ["q", "r"]} {
+  %b = bundle %c, %next : _ to <i8>
+  %i = init %b {handshake.name = "init1", hw.parameters = {INIT_VALUE = 5 : i8}} : <i8>
+  %s = buffer %i, bufferType = ONE_SLOT_BREAK_DV, numSlots = 1, dvLatency = 1 {handshake.name = "buffer1"} : <i8>
+  %c, %value = unbundle %s : <i8> to _
+  %d0, %d1 = fork [2] %d : <i8>
+  %dc, %dd = unbundle %d0 : <i8> to _
+  %next = arith.addi %value, %dd : i8
+  %q = bundle %dc, %value : _ to <i8>
+  %pi = init %d1 {handshake.name = "init2", hw.parameters = {INIT_VALUE = 5 : i8}} : <i8>
+  %ps = buffer %pi, bufferType = ONE_SLOT_BREAK_DV, numSlots = 1, dvLatency = 1 {handshake.name = "buffer2"} : <i8>
+  %r = instance @inner(%ps) : (!handshake.channel<i8>) -> (!handshake.channel<i8>)
+  end %q, %r : <i8>, <i8>
 }

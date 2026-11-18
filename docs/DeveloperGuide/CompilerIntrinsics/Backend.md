@@ -344,20 +344,22 @@ unit outside the loop sees or drives the valid or the ready of its three
 channels. The token is then in the slot at every cycle but the first after
 reset: the init, emptied in that cycle, is never filled again, the slot
 loads at every clock, and the logic of both that waits for a transfer
-computes constants. A synthesis tool does not find them, since it takes an
-argument over cycles: every state bit keeps an enable in front of its
-flip-flop, and every loop its own valid logic.
+computes constants. Seeing that takes an argument over cycles, which the
+synthesis recipes in use (yosys, abc) do not make: every state bit keeps an
+enable in front of its flip-flop, and every loop its own valid logic.
 
 `HandshakeToHW` finds these loops on the function it lowers (`markStateLoops`,
 after the kill domains are closed) and writes `STATE_LOOP = 1` into the
 `hw.parameters` of the init and of the slot. The shape above is all the
 condition: what computes the next value, and in how many cycles, is outside
 the loop. A loop one step away from it keeps the units of any channel: a
-control read elsewhere too, a transparent slot, two slots, a second buffer,
-a loop in a kill domain (`test/Conversion/HandshakeToHW/state-loop.mlir` has
-each). The name is the lowering's own: it is found at the last moment, so
-that no pass can open a loop between the finding and the choice of the
-units, and a `STATE_LOOP` that came with the IR is removed.
+control read elsewhere too, a slot of any other type (a transparent one,
+one that registers the ready too, a FIFO, a shift register or a counter of
+one slot), a second buffer, a loop in a kill domain
+(`test/Conversion/HandshakeToHW/state-loop.mlir` has each). The name is the
+lowering's own: it is found at the last moment, so that no pass can open a
+loop between the finding and the choice of the units, and a `STATE_LOOP`
+that came with the IR on an init or a buffer is removed.
 
 The VHDL configuration has one entry for each of the two, ahead of the
 generic init and buffer, constrained to `STATE_LOOP` eq 1:
@@ -371,14 +373,17 @@ In the loop, every port of the two carries at every cycle what the generic
 unit's carries; outside one they are not an init and not a buffer, which is
 why only the lowering names them. `lower-handshake-to-hw{state-registers=false}`
 names none, and the circuit is the same cycle for cycle either way
-(`test/Conversion/HandshakeToHW/state-loop-ghdl.mlir` holds the two exports
-of one function together).
+(`test/Conversion/HandshakeToHW/state-loop-units-ghdl.mlir` holds the two
+loops together at every wire, `state-loop-ghdl.mlir` the two exports of one
+function).
 
 The two entries are not their generator's logic, unlike the other generic
 entities listed ahead of a generator: they are less of it. The timing
-characterization skips them as it skips every generic entry of a generated
-unit, and the buffer placer, which runs before the lowering, sees an init
-and a buffer: its model of the loop is the generic units', an upper bound.
+characterization does not measure them: the buffer's is skipped as every
+generic entry of a generated unit is, and no init is measured at all. The
+buffer placer runs before the lowering and sees a buffer of that type: its
+model of the slot is the generic buffer's, an upper bound. It has no model
+of an init, in a loop or out of one.
 
 The Verilog and SMV configurations name no init, so no state loop reaches
 them; their buffer entries do not read `STATE_LOOP`.

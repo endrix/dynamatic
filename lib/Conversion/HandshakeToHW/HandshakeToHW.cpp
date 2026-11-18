@@ -3553,20 +3553,24 @@ static void setStateLoopParam(Operation *op, bool inLoop) {
 /// so nothing outside the loop sees or drives the valid or the ready of any
 /// of its three channels. Then the token is in the slot at every cycle but
 /// the first after reset: the init, emptied in that cycle, is never filled
-/// again (its output's ready is the slot's, which is the init's own), the
-/// slot loads at every clock, and the logic of both that waits for a
-/// transfer computes constants -- which no synthesis tool finds, since it
-/// takes an argument over cycles. `handshake_init_state` and
-/// `handshake_buffer_state` are the two units with that logic left out; they
-/// are an init and a buffer in such a loop only.
+/// again (the slot's ins_ready is `not outputValid or outs_ready`, and that
+/// outs_ready is the init's own ins_ready, so the slot takes whatever the
+/// init offers), the slot loads at every clock, and the logic of both that
+/// waits for a transfer computes constants. Seeing that takes an argument
+/// over cycles, which the synthesis recipes in use (yosys, abc) do not make.
+/// `handshake_init_state` and `handshake_buffer_state` are the two units
+/// with that logic left out; they are an init and a buffer in such a loop
+/// only, and with a slot of that type only: beside a slot that also
+/// registers the ready, the init would put out another value.
 ///
 /// The loop's shape is all the condition: what computes the next value, and
 /// in how many cycles, is outside it. (That each of the three channels and
 /// the control has one reader is the materialized function's, which the
 /// lowering has checked; a slot of that type has one slot, by the buffer's
-/// own verifier.) A loop in a kill domain keeps the generic units: no state
-/// register is in one today, and the two units were held against the
-/// generic ones under the module's reset.
+/// own verifier.) A loop in a kill domain keeps the generic units. The
+/// closure puts the four units of a loop in a domain together, so they
+/// would share the commit's kill as their reset; but no state register is
+/// in a domain today, and the two units have not been run under a kill.
 static handshake::BufferOp getStateLoopSlot(handshake::InitOp initOp) {
   auto channelType = dyn_cast<handshake::ChannelType>(initOp.getType());
   if (!channelType || channelType.getDataBitWidth() == 0 ||
@@ -3612,8 +3616,9 @@ static handshake::BufferOp getStateLoopSlot(handshake::InitOp initOp) {
 }
 
 /// Names the init and the slot of every state register's loop of the
-/// function (`getStateLoopSlot`) in their hw.parameters, and no other unit:
-/// the name is the lowering's own, and one that came with the IR is removed.
+/// function (`getStateLoopSlot`) in their hw.parameters, and no other init
+/// or buffer: the name is the lowering's own, and one that came with the IR
+/// on an init or a buffer is removed (no other unit's RTL reads it).
 /// The loops are found here, on the function as it is lowered, so that no
 /// pass can run between the finding and the choice of the units and open a
 /// loop that was found closed.

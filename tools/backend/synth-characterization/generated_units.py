@@ -8,7 +8,9 @@
 # design contains, so a characterization for a design flow reads this config.
 # Where this config lists a generic entity ahead of a unit's generator, the
 # entity is the generator's logic without extra signals, and the unit is
-# measured from the generator (main.py, generated_entries).
+# measured from the generator (main.py, generated_entries). The units of a
+# state register's loop (STATE_LOOP) are the exception: less than their
+# generator's logic, not measured, and bounded by the generic unit's model.
 #
 # A generator entry has no generics. export-rtl fills its command's variables
 # -- from the operation's attributes (the entry's `parameters`: SIZE,
