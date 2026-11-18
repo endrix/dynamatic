@@ -80,7 +80,15 @@ def HandshakeToHW
       "instrumentII", "instrument-ii", "bool", "false",
       "Instrument the generated netlist with a simulation-only monitor per "
       "loop that reports the initiation of each of its iterations during "
-      "simulation.">];
+      "simulation.">,
+    Option<
+      "stateRegisters", "state-registers", "bool", "true",
+      "Give the init and the one-slot buffer of a state register's loop "
+      "(bundle, init, ONE_SLOT_BREAK_DV slot, unbundle, the unbundle's "
+      "control read by the bundle alone) the units with the logic of the "
+      "loop only: a register that loads at every clock. Off, they are the "
+      "init and the buffer of any other channel; the circuit is the same "
+      "cycle for cycle either way.">];
 }
 
 //===----------------------------------------------------------------------===//

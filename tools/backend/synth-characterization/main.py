@@ -250,7 +250,10 @@ def run_characterization(json_input, json_output, dynamatic_dir, synth_tool, clo
         # divider).
         # A generic entity listed ahead of the unit's generator is the
         # generator's logic without extra signals (rtl-config-vhdl.json): the
-        # unit is measured once, from the generator.
+        # unit is measured once, from the generator. (One generic entry is
+        # not: the buffer of a state register's loop, STATE_LOOP, is less
+        # than its generator's logic. It is not measured, and the buffer's
+        # model bounds it.)
         if generic and generated_entries(dataflow_units, unit_name):
             continue
         if generated_units.bakes_types(unit_info):

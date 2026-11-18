@@ -617,6 +617,36 @@
     "name": "handshake.buffer",
     "parameters": [
       {
+        "name": "STATE_LOOP",
+        "type": "unsigned",
+        "eq": 1,
+        "generic": false
+      },
+      {
+        "name": "BUFFER_TYPE",
+        "type": "string",
+        "eq": "ONE_SLOT_BREAK_DV",
+        "generic": false
+      },
+      {
+        "name": "NUM_SLOTS",
+        "type": "unsigned",
+        "eq": 1,
+        "generic": false
+      },
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/generic/handshake_buffer_state.vhd"
+  },
+  {
+    "name": "handshake.buffer",
+    "parameters": [
+      {
         "name": "BUFFER_TYPE",
         "type": "string",
         "eq": "ONE_SLOT_BREAK_DV",
@@ -1617,6 +1647,28 @@
   {
     "name": "handshake.shrsi",
     "generator": "python $DYNAMATIC/tools/unit-generators/vhdl/vhdl-unit-generator.py -n $MODULE_NAME -o $OUTPUT_DIR/$MODULE_NAME.vhd -t shrsi -p bitwidth=$BITWIDTH extra_signals=$EXTRA_SIGNALS"
+  },
+  {
+    "name": "handshake.init",
+    "parameters": [
+      {
+        "name": "STATE_LOOP",
+        "type": "unsigned",
+        "eq": 1,
+        "generic": false
+      },
+      {
+        "name": "INITIAL_VALUE",
+        "type": "string"
+      },
+      {
+        "name": "DATA_TYPE",
+        "type": "dataflow",
+        "data-lb": 1,
+        "extra-eq": 0
+      }
+    ],
+    "generic": "$DYNAMATIC/data/vhdl/handshake/generic/handshake_init_state.vhd"
   },
   {
     "name": "handshake.init",

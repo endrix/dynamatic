@@ -3514,6 +3514,129 @@ static LogicalResult wireKillDomains(hw::HWModuleOp hwModOp) {
   return success();
 }
 
+/// The hw.parameters entry by which the init and the slot of a state
+/// register's loop are given their own units (`markStateLoops`).
+static constexpr llvm::StringLiteral STATE_LOOP_PARAM("STATE_LOOP");
+
+/// Writes or removes `STATE_LOOP` in the operation's hw.parameters, which
+/// `ModuleDiscriminator` copies into its module's.
+static void setStateLoopParam(Operation *op, bool inLoop) {
+  auto paramsAttr = op->getAttrOfType<DictionaryAttr>(RTL_PARAMETERS_ATTR_NAME);
+  if (!inLoop && !(paramsAttr && paramsAttr.contains(STATE_LOOP_PARAM)))
+    return;
+  MLIRContext *ctx = op->getContext();
+  SmallVector<NamedAttribute> params;
+  if (paramsAttr)
+    for (NamedAttribute param : paramsAttr)
+      if (param.getName() != STATE_LOOP_PARAM)
+        params.push_back(param);
+  if (inLoop)
+    params.emplace_back(
+        StringAttr::get(ctx, STATE_LOOP_PARAM),
+        IntegerAttr::get(IntegerType::get(ctx, 32, IntegerType::Unsigned), 1));
+  if (params.empty())
+    op->removeAttr(RTL_PARAMETERS_ATTR_NAME);
+  else
+    op->setAttr(RTL_PARAMETERS_ATTR_NAME, DictionaryAttr::get(ctx, params));
+}
+
+/// The slot of the state register's loop the init is in, or null.
+///
+/// A state variable of an actor is a token that never leaves a closed loop:
+///
+///   %b = bundle %c, %next        : _ to <iN>     the next value, a bare wire
+///   %i = init %b                 : <iN>          the value at reset
+///   %s = buffer %i, ONE_SLOT_BREAK_DV, 1 slot    the register
+///   %c, %value = unbundle %s     : <iN> to _     the value read, a bare wire
+///
+/// The control `%c` goes from the unbundle to the bundle and nowhere else,
+/// so nothing outside the loop sees or drives the valid or the ready of any
+/// of its three channels. Then the token is in the slot at every cycle but
+/// the first after reset: the init, emptied in that cycle, is never filled
+/// again (the slot's ins_ready is `not outputValid or outs_ready`, and that
+/// outs_ready is the init's own ins_ready, so the slot takes whatever the
+/// init offers), the slot loads at every clock, and the logic of both that
+/// waits for a transfer computes constants. Seeing that takes an argument
+/// over cycles, which the synthesis recipes in use (yosys, abc) do not make.
+/// `handshake_init_state` and `handshake_buffer_state` are the two units
+/// with that logic left out; they are an init and a buffer in such a loop
+/// only, and with a slot of that type only: beside a slot that also
+/// registers the ready, the init would put out another value.
+///
+/// The loop's shape is all the condition: what computes the next value, and
+/// in how many cycles, is outside it. (That each of the three channels and
+/// the control has one reader is the materialized function's, which the
+/// lowering has checked; a slot of that type has one slot, by the buffer's
+/// own verifier.) A loop in a kill domain keeps the generic units. The
+/// closure puts the four units of a loop in a domain together, so they
+/// would share the commit's kill as their reset; but no state register is
+/// in a domain today, and the two units have not been run under a kill.
+static handshake::BufferOp getStateLoopSlot(handshake::InitOp initOp) {
+  auto channelType = dyn_cast<handshake::ChannelType>(initOp.getType());
+  if (!channelType || channelType.getDataBitWidth() == 0 ||
+      channelType.getNumExtraSignals() != 0)
+    return nullptr;
+
+  // The bundle of a control and the next value into the init, and nothing
+  // handed back upstream (a channel with `space` is a port's, not a state's)
+  auto bundleOp = initOp.getOperand().getDefiningOp<handshake::BundleOp>();
+  if (!bundleOp || bundleOp->getNumOperands() != 2 ||
+      bundleOp->getNumResults() != 1 || !bundleOp->getResult(0).hasOneUse())
+    return nullptr;
+
+  // The slot, alone on the init's output
+  if (!initOp.getResult().hasOneUse())
+    return nullptr;
+  auto bufferOp =
+      dyn_cast<handshake::BufferOp>(*initOp.getResult().getUsers().begin());
+  if (!bufferOp ||
+      bufferOp.getBufferType() != handshake::BufferType::ONE_SLOT_BREAK_DV)
+    return nullptr;
+
+  // The unbundle, alone on the slot's output: a control and the value
+  if (!bufferOp.getResult().hasOneUse())
+    return nullptr;
+  auto unbundleOp =
+      dyn_cast<handshake::UnbundleOp>(*bufferOp.getResult().getUsers().begin());
+  if (!unbundleOp || unbundleOp->getNumOperands() != 1 ||
+      unbundleOp->getNumResults() != 2)
+    return nullptr;
+
+  // The control closes the loop: read once, by the bundle
+  Value control = unbundleOp->getResult(0);
+  if (!isa<handshake::ControlType>(control.getType()) || !control.hasOneUse() ||
+      bundleOp->getOperand(0) != control)
+    return nullptr;
+
+  for (Operation *op : {bundleOp.getOperation(), initOp.getOperation(),
+                        bufferOp.getOperation(), unbundleOp.getOperation()})
+    if (op->hasAttr(handshake::KILL_DOMAIN_ATTR))
+      return nullptr;
+  return bufferOp;
+}
+
+/// Names the init and the slot of every state register's loop of the
+/// function (`getStateLoopSlot`) in their hw.parameters, and no other init
+/// or buffer: the name is the lowering's own, and one that came with the IR
+/// on an init or a buffer is removed (no other unit's RTL reads it).
+/// The loops are found here, on the function as it is lowered, so that no
+/// pass can run between the finding and the choice of the units and open a
+/// loop that was found closed.
+static void markStateLoops(handshake::FuncOp funcOp, bool enable) {
+  llvm::SmallPtrSet<Operation *, 32> inLoop;
+  if (enable) {
+    for (handshake::InitOp initOp : funcOp.getOps<handshake::InitOp>()) {
+      if (handshake::BufferOp slotOp = getStateLoopSlot(initOp)) {
+        inLoop.insert(initOp);
+        inLoop.insert(slotOp);
+      }
+    }
+  }
+  for (Operation &op : funcOp.getOps())
+    if (isa<handshake::InitOp, handshake::BufferOp>(op))
+      setStateLoopParam(&op, inLoop.contains(&op));
+}
+
 namespace {
 
 /// Conversion pass driver. Every non-external handshake function
@@ -3554,6 +3677,8 @@ public:
       }
       if (failed(closeKillDomains(f)))
         return signalPassFailure();
+      // after the domains are closed: a unit may have joined one
+      markStateLoops(f, stateRegisters);
     }
 
     // Make sure all operations are named
