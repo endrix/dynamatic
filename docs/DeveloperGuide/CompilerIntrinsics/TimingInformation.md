@@ -685,16 +685,27 @@ them and RVT 1.41 to 1.63 times.
 A fork's ready stays shallow: 0.12 ns from port to port at 256 outputs on
 SLVT. From three outputs on, the fork keeps which outputs still owe the
 token against a phase (`data/vhdl/handshake/dataless/fork.vhd` says why;
-the generator writes the same logic), and the fork row is that form's. Its
-paths between a port and the registers are longer than those of a register
-per output, since the phase drives an XOR in front of every output: in the
-SLVT entry for 32 outputs, a register to `outs_valid` is 0.130 ns where it was 0.046,
-and `ins_valid` to a register 0.132 where it was 0.090, while `outs_ready`
-to a register is 0.095 where it was 0.119. That is the unit measured alone.
-What the form buys shows in a design, where the token's completion no
-longer drives every output's register at the end of the paths into the
-fork. The
-mux, first and control_merge grow in proportion to their inputs, not to
+the generator writes the same logic), so the row is that form's from its
+second column on. Against a register per output, which the entries held
+before, in the SLVT entries:
+
+- from port to port, the ready is shorter at most sizes from eight outputs
+  on, the stop no longer driving every register: 0.079 to 0.038 ns at 8
+  outputs and 0.096 to 0.068 at 32 (at 64 it is 0.096 to 0.102);
+- a register to `outs_valid` and to `ins_ready` is longer, the phase
+  driving an XOR in front of every output: 0.046 to 0.130 ns and 0.139 to
+  0.179 at 32 outputs;
+- `ins_valid` to a register is longer, `ins_valid` now choosing the next
+  value of every output's register: 0.090 to 0.132 ns at 32 outputs;
+- `outs_ready` to a register is shorter from eight outputs on (0.119 to
+  0.095 ns at 32), and equal at 64.
+
+On sky130 `outs_ready` to a register is longer at six of the eight sizes.
+That is the unit measured alone. What the form buys shows in a design,
+where the token's completion no longer drives every output's register at
+the end of the paths into the fork.
+
+The mux, first and control_merge grow in proportion to their inputs, not to
 the logarithm of them: their generators write the selection as a loop of
 `if`s over the inputs, and synthesis keeps the loop a chain. In the mux
 (`generators/handshake/mux.py`) the index matches one input at most, which
