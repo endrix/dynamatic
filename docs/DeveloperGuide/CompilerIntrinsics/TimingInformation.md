@@ -656,7 +656,9 @@ measurement can have one: ABC maps each size afresh, and a merge at 256
 inputs came out faster than at 128. So the characterization writes each
 sized entry's delays as the largest at its size or any smaller one
 (`report_parser.bound_sizes`). On the four models this raises 16 to 18 of
-the 54 sized entries, by at most 0.23 ns on ASAP7 and 1.5 ns on sky130.
+the 54 sized entries, by at most 0.23 ns on ASAP7 and 1.5 ns on sky130
+(counted before the fork's sizes were measured again in its phase form,
+below).
 
 What the sizes measured, the longest of an entry's delays (any port to any
 port, any of its widths), in ns, before that bound (first: the phase-3 unit,
@@ -674,14 +676,36 @@ before the racing units were measured):
 | | sky130 | 1.121 | 2.499 | 6.406 | 10.022 | 9.875 | 8.963 |
 | lazy_fork | ASAP7 SLVT | 0.010 | 0.048 | 0.115 | 0.186 | 0.230 | 0.536 |
 | | sky130 | 0.114 | 0.291 | 1.070 | 1.785 | 3.128 | 7.406 |
-| fork | ASAP7 SLVT | 0.017 | 0.079 | 0.096 | 0.081 | 0.136 | 0.091 |
-| | sky130 | 0.180 | 0.450 | 0.970 | 1.147 | 1.247 | 1.079 |
+| fork | ASAP7 SLVT | 0.017 | 0.033 | 0.068 | 0.102 | 0.100 | 0.119 |
+| | sky130 | 0.180 | 0.471 | 0.769 | 0.918 | 0.970 | 1.000 |
 
 Of the sized entries longer than 0.1 ns on SLVT, LVT is 1.09 to 1.25 times
 them and RVT 1.41 to 1.63 times.
 
-A fork's ready stays shallow: 256 outputs cost little more than eight. The
-mux, first and control_merge grow in proportion to their inputs, not to
+A fork's ready stays shallow: 0.12 ns from port to port at 256 outputs on
+SLVT. From three outputs on, the fork keeps which outputs still owe the
+token against a phase (`data/vhdl/handshake/dataless/fork.vhd` says why;
+the generator writes the same logic), so the row is that form's from its
+second column on. Against a register per output, which the entries held
+before, in the SLVT entries:
+
+- from port to port, the ready is shorter at most sizes from eight outputs
+  on, the stop no longer driving every register: 0.079 to 0.038 ns at 8
+  outputs and 0.096 to 0.068 at 32 (at 64 it is 0.096 to 0.102);
+- a register to `outs_valid` and to `ins_ready` is longer, the phase
+  driving an XOR in front of every output: 0.046 to 0.130 ns and 0.139 to
+  0.179 at 32 outputs;
+- `ins_valid` to a register is longer, `ins_valid` now choosing the next
+  value of every output's register: 0.090 to 0.132 ns at 32 outputs;
+- `outs_ready` to a register is shorter from eight outputs on (0.119 to
+  0.095 ns at 32), and equal at 64.
+
+On sky130 `outs_ready` to a register is longer at six of the eight sizes.
+That is the unit measured alone. What the form buys shows in a design,
+where the token's completion no longer drives every output's register at
+the end of the paths into the fork.
+
+The mux, first and control_merge grow in proportion to their inputs, not to
 the logarithm of them: their generators write the selection as a loop of
 `if`s over the inputs, and synthesis keeps the loop a chain. In the mux
 (`generators/handshake/mux.py`) the index matches one input at most, which
