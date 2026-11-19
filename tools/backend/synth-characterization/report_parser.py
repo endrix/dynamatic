@@ -391,6 +391,21 @@ def extract_rpt_data(map_unit_to_list_unit_chars, json_output,
         write_stages(stages, json_output)
 
 
+def port_delay_at(delays, width):
+    """
+    A port model's delay at `width` as TimingDatabase reads it
+    (TimingModel::PortModel::validDelayAt): at the smallest width at or above
+    it, or at the widest when there is none.
+
+    Args:
+        delays (dict): width (a string) -> ns, one signal of a port model.
+        width (str): the width read.
+    """
+    widths = sorted(int(w) for w in delays)
+    at = next((w for w in widths if w >= int(width)), widths[-1])
+    return delays[str(at)]
+
+
 def bound_sizes(output_data):
     """
     Make every delay of a unit's sized entries grow with the size.
@@ -423,7 +438,16 @@ def bound_sizes(output_data):
                 for name in ("VR", "CV", "CR", "VC", "VD") + tuple(KILL_DELAYS.values()):
                     if name in delay and name in bound:
                         delay[name] = max(delay[name], bound[name])
-                # the port models, per signal and width
+                # the port models, per signal and width. Past the base size
+                # an entry is written at generated_units.SIZED_WIDTHS only,
+                # the size below it at more widths. At a width it was
+                # written at, an entry takes the larger of its own delay and
+                # the size below's there; at any other width of the size
+                # below, the larger of the size below's and its own at the
+                # next width it was written at, so bounded, which is where
+                # TimingDatabase would read it (port_delay_at). The size
+                # below's delay alone would time a 16-bit channel of a
+                # 32-way fork as a two-way fork's.
                 for port in ("inport", "outport"):
                     mine = output_data[key][port]
                     theirs = bound_ports[port]
@@ -435,9 +459,13 @@ def bound_sizes(output_data):
                     for signal in ("data", "valid", "ready", "kill"):
                         if signal not in theirs["delay"] or signal not in mine["delay"]:
                             continue
-                        for width, d in theirs["delay"][signal].items():
+                        below = theirs["delay"][signal]
+                        measured = {w: max(d, port_delay_at(below, w))
+                                    for w, d in mine["delay"][signal].items()}
+                        for width in list(measured) + [w for w in below if w not in measured]:
                             mine["delay"][signal][width] = max(
-                                mine["delay"][signal].get(width, d), d)
+                                port_delay_at(measured, width),
+                                port_delay_at(below, width))
             bound = delay
             bound_ports = {port: output_data[key][port]
                            for port in ("inport", "outport")}
