@@ -660,6 +660,18 @@ the 54 sized entries, by at most 0.23 ns on ASAP7 and 1.5 ns on sky130
 (counted before the fork's sizes were measured again in its phase form,
 below).
 
+The port models (see "A unit's registers") are bounded the same way, at
+each width of either size. A sized entry past the base size is measured at
+1, 8, 32 and 64 bits; the base size at more (2, 4 and 16, and 128 to 512
+for some units). At a width it was not measured at, an entry holds the
+larger of the size below's delay there and its own, bounded, at the next
+width it was measured at, which is where `TimingDatabase` would read that
+width without it. Before, such a width held the size below's delay alone,
+and so the base size's. On ASAP7 SLVT, a 32-way fork's register to
+`outs_valid` was 0.130 ns at 1, 8, 32 and 64 bits and 0.045 ns, the two-way
+fork's, at 2, 4 and 16; a 256-input mux's data input to a register 2.556 ns
+at 8 bits and 0.078 ns at 2.
+
 What the sizes measured, the longest of an entry's delays (any port to any
 port, any of its widths), in ns, before that bound (first: the phase-3 unit,
 before the racing units were measured):
