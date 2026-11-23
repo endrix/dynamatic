@@ -1252,6 +1252,15 @@ ModuleDiscriminator::ModuleDiscriminator(handshake::RAMOp *op,
   // takes 2, which is always safe.
   if (auto ramPorts = (*op)->getAttrOfType<IntegerAttr>("handshake.ram_ports"))
     addUnsigned("PORTS", ramPorts.getValue().getZExtValue());
+  // Whether the program stores every word of the memory before it loads it
+  // (streamblocks' handshake.ram_stored_before_load, from CalPy's
+  // `@memory(name, kind="ram", stored_before_load=True)`): no load reads the
+  // declared content, so the generator's SRAM view keeps no bit a word
+  // telling a word stored since reset from one that was not (ram.py,
+  // _with_written_bits). Only when said: a memory that does not say is the
+  // module it was, its parameters file included.
+  if ((*op)->hasAttrOfType<UnitAttr>("handshake.ram_stored_before_load"))
+    addUnsigned("STORED_BEFORE_LOAD", 1);
 
   if (auto initialValueAttr =
           dyn_cast<DenseElementsAttr>(op->getInitialValueAttr())) {
