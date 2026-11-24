@@ -31,7 +31,8 @@ def generate_ram(name, params):
     # a macro of the memory's own size from the name pattern and reads no
     # list: its view is one macro, never padded. Every view reads a word
     # never stored since reset as zero, its declared content
-    # (_with_written_bits). See _generate_ram_sram, _generate_ram_sram_dp,
+    # (_with_written_bits), unless `stored_before_load` says no load reads
+    # one (below). See _generate_ram_sram, _generate_ram_sram_dp,
     # _generate_ram_openram and _generate_ram_openram_tiled.
     sram_threshold = params.get("sram_threshold", 0)
     sram_interface = params.get("sram_interface", "fakeram")
@@ -50,6 +51,19 @@ def generate_ram(name, params):
     # See `_gen_write_body`. The value is 0 or 1; the command line is read
     # with ast.literal_eval, so `true` or `yes` is refused rather than read.
     reset_content = bool(params.get("reset_content", 0))
+    # STORED BEFORE LOADED: the program stores every word of the memory
+    # before it loads it, so no load reads the declared content, and the
+    # view is the macro alone, without the written bits that make a word
+    # never stored read as zero: `size` flip-flops and a `size`-way mux
+    # less. The RAM's STORED_BEFORE_LOAD parameter (HandshakeToHW's, from
+    # the front end's `handshake.ram_stored_before_load`, CalPy's
+    # `@memory(name, kind="ram", stored_before_load=True)`), which reaches
+    # the generator in the unit's parameters file (values_json). 0 or 1, as
+    # reset_content; absent, 0. It is the program's promise, not checked
+    # here. The flop model does not change: it has the reset either way.
+    stored_before_load = params.get("stored_before_load", 0)
+    if stored_before_load not in (0, 1):
+        raise ValueError(f"stored_before_load {stored_before_load!r} is not 0 or 1")
     code = _generate_ram(
         name,
         data_width,
@@ -75,7 +89,9 @@ def generate_ram(name, params):
                              "and none tiles it; the memory stays flops\n")
             return code
         view = _generate_ram_openram_tiled(name, data_width, addr_width, size, *tiling)
-    return code, {f"sram/{name}.vhd": _with_written_bits(view, size, data_width)}
+    if not stored_before_load:
+        view = _with_written_bits(view, size, data_width)
+    return code, {f"sram/{name}.vhd": view}
 
 
 def _with_written_bits(view: str, size: int, data_width: int) -> str:
@@ -96,7 +112,12 @@ def _with_written_bits(view: str, size: int, data_width: int) -> str:
     zero when it was not. A load and a store to one word in one cycle read
     the bit from before the store, as they read the old word. `size`
     flip-flops and a `size`-way mux, no cycle: the bit is ready when the
-    word is."""
+    word is.
+
+    Not for a memory whose program stores every word before it loads it
+    (`stored_before_load`): no load reads a word never stored, and the bits
+    would cost their flip-flops for nothing (AV1's entropy actor: 1.28 M of
+    them on three memories of 1,048,576, 147,456 and 83,235 words)."""
     arch = view.index("architecture arch of")
     head, body = view[:arch], view[arch:]
     # the view's own drive of loadData goes to `raw`, masked below

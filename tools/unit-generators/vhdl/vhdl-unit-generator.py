@@ -44,15 +44,26 @@ def values_from_json(parameters):
     most 128 KiB in one argument, and a 147,456-word memory's zeros alone are
     295 KB, so the shell never started the generator (std::system's status
     32512, the shell's 127). The entry takes the place `values` had, so the
-    unit, its header included, is the one the inline values gave."""
+    unit, its header included, is the one the inline values gave.
+
+    The same file gives the RAM's STORED_BEFORE_LOAD, which HandshakeToHW
+    sets only on a memory the front end says is stored before it is loaded,
+    as `stored_before_load`. From the file and not the command line: the
+    header prints every parameter the unit was generated with, so one on
+    the RAM's command line would be in every RAM's header, and a memory that
+    does not say would no longer be generated as it was."""
     if "values_json" not in parameters:
         return parameters
     import json
     with open(parameters["values_json"]) as f:
-        text = json.load(f)["INITIAL_VALUES"]
-    return {("values" if key == "values_json" else key):
-            (ast.literal_eval(f"({text})") if key == "values_json" else value)
-            for key, value in parameters.items()}
+        unit = json.load(f)
+    text = unit["INITIAL_VALUES"]
+    parameters = {("values" if key == "values_json" else key):
+                  (ast.literal_eval(f"({text})") if key == "values_json" else value)
+                  for key, value in parameters.items()}
+    if "STORED_BEFORE_LOAD" in unit:
+        parameters["stored_before_load"] = unit["STORED_BEFORE_LOAD"]
+    return parameters
 
 
 def main(generators):
