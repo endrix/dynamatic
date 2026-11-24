@@ -51,9 +51,10 @@ def generate_ram(name, params):
     # See `_gen_write_body`. The value is 0 or 1; the command line is read
     # with ast.literal_eval, so `true` or `yes` is refused rather than read.
     reset_content = bool(params.get("reset_content", 0))
-    # STORED BEFORE LOADED: the program stores every word of the memory
-    # before it loads it, so no load reads the declared content, and the
-    # view is the macro alone, without the written bits that make a word
+    # STORED BEFORE LOADED: no bit of a word the program has not stored
+    # since reset is used (it may load one and discard its bits), so no
+    # value it computes reads the declared content, and the view is the
+    # macro alone, without the written bits that make a word
     # never stored read as zero: `size` flip-flops and a `size`-way mux
     # less. The RAM's STORED_BEFORE_LOAD parameter (HandshakeToHW's, from
     # the front end's `handshake.ram_stored_before_load`, CalPy's
