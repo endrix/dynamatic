@@ -314,83 +314,221 @@ static ChannelVal modBitWidth(const MinimalValue &extVal, unsigned targetWidth,
   return cast<ChannelVal>(newOp->getResult(0));
 }
 
-/// Recursive version of isOperandInCycle which includes an additional
-/// parameter to keep track of which operations were already visited during
-/// backtracking to avoid looping forever. See overload's documentation for more
-/// details.
-static bool isOperandInCycle(Value val, Value res,
-                             DenseSet<Value> &mergedValues,
-                             VisitedOps &visitedOps) {
-  // Stop when we've reached the result of the merge-like operation
-  if (val == res)
-    return true;
-
-  // Stop when reaching function arguments
-  Operation *defOp = val.getDefiningOp();
-  if (!defOp)
-    return false;
-
-  // Stop when reaching an operation that was already backtracked through
-  if (auto [_, isNewOp] = visitedOps.insert(defOp); !isNewOp)
-    return true;
-
-  // Backtrack through operations that end up "forwarding" one of their
-  // inputs to the output.
-  // Notably, extension operations are not data-forwarding as they modify the
-  // data.
+/// The values an operation forwards unchanged to its result, which the search
+/// for forwarding cycles walks back through: the input of a buffer, a fork, a
+/// lazy fork or a branch, the data of a conditional branch, the data operands
+/// of a merge-like operation and the two values of a select. Returns whether
+/// the operation merges them (a merge-like operation or a select), whose
+/// operands outside a cycle are the values that enter it. An operation that
+/// forwards nothing (an extension, an arithmetic operation, ...) stops the
+/// walk.
+static bool getForwardedOperands(Operation *op,
+                                 SmallVectorImpl<Value> &operands) {
+  operands.clear();
   if (isa<handshake::BufferOp, handshake::ForkOp, handshake::LazyForkOp,
-          handshake::BranchOp>(defOp))
-    return isOperandInCycle(defOp->getOperand(0), res, mergedValues,
-                            visitedOps);
-  if (auto condOp = dyn_cast<handshake::ConditionalBranchOp>(defOp))
-    return isOperandInCycle(condOp.getDataOperand(), res, mergedValues,
-                            visitedOps);
-
-  auto recurseMergeLike = [&](ValueRange dataOperands) -> bool {
-    bool oneOprInCycle = false;
-    SmallVector<Value> mergeOperands;
-    for (Value mergeLikeOpr : dataOperands) {
-      VisitedOps nestedVisitedOps(visitedOps);
-      if (isOperandInCycle(mergeLikeOpr, res, mergedValues, nestedVisitedOps))
-        oneOprInCycle = true;
-      else
-        mergeOperands.push_back(mergeLikeOpr);
-    }
-
-    // If the merge-like operation is part of the cycle through one of its data
-    // operands, add other data operands not part of the cycle to the merged
-    // values
-    if (oneOprInCycle)
-      for (Value &outOfCycleOpr : mergeOperands)
-        mergedValues.insert(outOfCycleOpr);
-    return oneOprInCycle;
-  };
-
-  // Recursively explore data operands of merge-like operations to find cycles
-  if (auto mergeLikeOp = dyn_cast<handshake::MergeLikeOpInterface>(defOp))
-    return recurseMergeLike(mergeLikeOp.getDataOperands());
-  if (auto selectOp = dyn_cast<handshake::SelectOp>(defOp)) {
-    llvm::SmallVector<Value> vals = {selectOp.getTrueValue(),
-                                     selectOp.getFalseValue()};
-    return recurseMergeLike(vals);
+          handshake::BranchOp>(op)) {
+    operands.push_back(op->getOperand(0));
+    return false;
   }
-
+  if (auto condOp = dyn_cast<handshake::ConditionalBranchOp>(op)) {
+    operands.push_back(condOp.getDataOperand());
+    return false;
+  }
+  if (auto mergeLikeOp = dyn_cast<handshake::MergeLikeOpInterface>(op)) {
+    llvm::append_range(operands, mergeLikeOp.getDataOperands());
+    return true;
+  }
+  if (auto selectOp = dyn_cast<handshake::SelectOp>(op)) {
+    operands.push_back(selectOp.getTrueValue());
+    operands.push_back(selectOp.getFalseValue());
+    return true;
+  }
   return false;
 }
 
-/// Determines whether it is possible to backtrack the value to the result by
-/// only going through defining Handshake operations that act as "data
-/// forwarders" i.e, operations that forward one of their data inputs to one of
-/// their outputs without modification. If yes, then we say the value and result
-/// are in the same cycle and the function returns true; otherwise, the function
-/// returns false. When the function returns true, mergedValues represents the
-/// set of values that are fed inside the cycle through operands of merge-like
-/// operations that are on the path between value and result. When the function
-/// returns false, the value of mergedValues is undefined.
-static bool isOperandInCycle(Value val, Value res,
-                             DenseSet<Value> &mergedValues) {
-  VisitedOps visitedOps;
-  return isOperandInCycle(val, res, mergedValues, visitedOps);
+namespace {
+/// The forwarding cycles the data operands of a merge-like operation lie on.
+///
+/// Walking back from a value through the operations that forward one of their
+/// inputs unchanged (getForwardedOperands), the value is in a cycle when the
+/// walk can reach the merge-like operation's result, or can reach an
+/// operation that lies on a cycle of such operations (a block that branches
+/// to itself, the merge at its head). The values merged into the cycles are,
+/// for every merge-like operation or select the walk reaches that is itself
+/// in a cycle, those of its forwarded operands that are not.
+///
+/// Both are properties of the graph, not of the path a walk takes, so the
+/// graph is explored once: everything reachable back from the operands, its
+/// strongly connected components, and whether each operation is in a cycle,
+/// in time linear in the operations reached. A walk along every path instead
+/// takes time exponential in the number of if-else diamonds a value is
+/// forwarded through unchanged, every diamond doubling the paths.
+class ForwardingCycles {
+public:
+  /// Explores everything reachable back from the values, the walk stopping
+  /// at `res`, the merge-like operation's result.
+  ForwardingCycles(ValueRange values, Value res);
+
+  /// Whether the value is in a forwarding cycle.
+  bool inCycle(Value val) const {
+    if (val == res)
+      return true;
+    int n = nodeOf(val);
+    return n >= 0 && nodes[n].inCycle;
+  }
+
+  /// Adds to `mergedValues` the values merged into the cycles that the walk
+  /// back from any of `from` reaches.
+  void collectMergedValues(ArrayRef<Value> from,
+                           DenseSet<Value> &mergedValues) const;
+
+private:
+  struct Node {
+    Operation *op;
+    SmallVector<Value, 2> operands; // the values the operation forwards
+    bool merges = false;
+    bool inCycle = false;
+  };
+
+  Value res;
+  SmallVector<Node> nodes;
+  DenseMap<Operation *, unsigned> index;
+
+  /// The node of the operation defining the value, or -1 for the result the
+  /// walk stops at and for a block argument.
+  int nodeOf(Value val) const {
+    if (val == res)
+      return -1;
+    Operation *defOp = val.getDefiningOp();
+    if (!defOp)
+      return -1;
+    auto it = index.find(defOp);
+    return it == index.end() ? -1 : static_cast<int>(it->second);
+  }
+};
+} // namespace
+
+ForwardingCycles::ForwardingCycles(ValueRange values, Value res) : res(res) {
+  // Everything reachable back from the values
+  auto reach = [&](Value val) {
+    if (val == res)
+      return;
+    Operation *defOp = val.getDefiningOp();
+    if (!defOp || index.count(defOp))
+      return;
+    index[defOp] = nodes.size();
+    Node &node = nodes.emplace_back();
+    node.op = defOp;
+    node.merges = getForwardedOperands(defOp, node.operands);
+  };
+  for (Value val : values)
+    reach(val);
+  for (unsigned n = 0; n < nodes.size(); ++n)
+    for (unsigned i = 0, e = nodes[n].operands.size(); i < e; ++i)
+      reach(nodes[n].operands[i]);
+
+  // The strongly connected components (Tarjan's, without recursion: a chain
+  // of forwarders is as long as the function), an edge from an operation to
+  // the definition of each value it forwards. A component is emitted after
+  // every component it reaches, so whether its operations are in a cycle is
+  // known once their successors' is.
+  const unsigned unvisited = ~0u;
+  SmallVector<unsigned> order(nodes.size(), unvisited), low(nodes.size());
+  SmallVector<bool> onStack(nodes.size(), false);
+  SmallVector<unsigned> stack;
+  SmallVector<unsigned> component(nodes.size(), unvisited);
+  unsigned next = 0, components = 0;
+  struct Frame {
+    unsigned node;
+    unsigned operand;
+  };
+  SmallVector<Frame> frames;
+  for (unsigned root = 0; root < nodes.size(); ++root) {
+    if (order[root] != unvisited)
+      continue;
+    frames.push_back({root, 0});
+    order[root] = low[root] = next++;
+    stack.push_back(root);
+    onStack[root] = true;
+    while (!frames.empty()) {
+      Frame &frame = frames.back();
+      unsigned n = frame.node;
+      if (frame.operand < nodes[n].operands.size()) {
+        int m = nodeOf(nodes[n].operands[frame.operand++]);
+        if (m < 0)
+          continue;
+        if (order[m] == unvisited) {
+          order[m] = low[m] = next++;
+          stack.push_back(m);
+          onStack[m] = true;
+          frames.push_back({static_cast<unsigned>(m), 0});
+        } else if (onStack[m]) {
+          low[n] = std::min(low[n], order[m]);
+        }
+        continue;
+      }
+      frames.pop_back();
+      if (!frames.empty()) {
+        unsigned parent = frames.back().node;
+        low[parent] = std::min(low[parent], low[n]);
+      }
+      if (low[n] != order[n])
+        continue;
+      // n heads a component: its members are on the stack above it
+      SmallVector<unsigned> members;
+      unsigned w;
+      do {
+        w = stack.pop_back_val();
+        onStack[w] = false;
+        component[w] = components;
+        members.push_back(w);
+      } while (w != n);
+      // In a cycle: on one (a component of several operations, or one that
+      // forwards its own result), or reaching the result or an operation in
+      // a cycle
+      bool inCycle = members.size() > 1;
+      for (unsigned k = 0; k < members.size() && !inCycle; ++k) {
+        for (Value opr : nodes[members[k]].operands) {
+          if (opr == res) {
+            inCycle = true;
+            break;
+          }
+          int m = nodeOf(opr);
+          if (m >= 0 && (component[m] == components || nodes[m].inCycle)) {
+            inCycle = true;
+            break;
+          }
+        }
+      }
+      for (unsigned k : members)
+        nodes[k].inCycle = inCycle;
+      ++components;
+    }
+  }
+}
+
+void ForwardingCycles::collectMergedValues(
+    ArrayRef<Value> from, DenseSet<Value> &mergedValues) const {
+  SmallVector<bool> seen(nodes.size(), false);
+  SmallVector<unsigned> work;
+  auto visit = [&](Value val) {
+    int n = nodeOf(val);
+    if (n >= 0 && !seen[n]) {
+      seen[n] = true;
+      work.push_back(n);
+    }
+  };
+  for (Value val : from)
+    visit(val);
+  while (!work.empty()) {
+    const Node &node = nodes[work.pop_back_val()];
+    if (node.merges && node.inCycle)
+      for (Value opr : node.operands)
+        if (!inCycle(opr))
+          mergedValues.insert(opr);
+    for (Value opr : node.operands)
+      visit(opr);
+  }
 }
 
 /// Replaces an operation with two operands and one result of the same integer
@@ -1193,20 +1331,19 @@ struct ForwardCycleOpt : public OpRewritePattern<Op> {
     // For each operand, determine whether it is in a forwarding cycle. If yes,
     // keep track of other values coming in the cycle through merge-like ops
     OperandRange dataOperands = mergeLikeOp.getDataOperands();
-    SmallVector<bool> operandInCycle;
+    ForwardingCycles cycles(dataOperands, channelVal);
     DenseSet<ChannelVal> allMergedValues;
-    DenseSet<Value> mergedValues;
+    SmallVector<Value> inCycleOperands;
     for (Value oprd : dataOperands) {
-      mergedValues.clear();
-      bool inCycle = isOperandInCycle(oprd, channelVal, mergedValues);
-      operandInCycle.push_back(inCycle);
-      if (inCycle) {
-        for (Value &val : mergedValues)
-          allMergedValues.insert(cast<ChannelVal>(val));
-      } else {
+      if (cycles.inCycle(oprd))
+        inCycleOperands.push_back(oprd);
+      else
         allMergedValues.insert(cast<ChannelVal>(oprd));
-      }
     }
+    DenseSet<Value> mergedValues;
+    cycles.collectMergedValues(inCycleOperands, mergedValues);
+    for (Value val : mergedValues)
+      allMergedValues.insert(cast<ChannelVal>(val));
 
     // Determine the achievable optimized width for operands inside the cycle
     ExtWidth optWidth = computeDataForwardResult(
