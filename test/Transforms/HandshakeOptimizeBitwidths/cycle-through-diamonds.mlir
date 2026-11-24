@@ -173,3 +173,30 @@ handshake.func @cycleThroughSixtyFourDiamonds(%arg0: !handshake.channel<i8>, %in
   %back, %exit = cond_br %cond, %m63 : <i1>, <i32>
   end %exit : <i32>
 }
+
+// -----
+
+// A 32-bit argument enters the loop inside the cycle, through the mux. An
+// argument is not in the cycle -- it has no defining operation to walk -- but
+// a value merged into it, so the loop keeps the argument's 32 bits; only the
+// merge before the loop narrows. Reading an argument as in the cycle would
+// drop %w from the merged values and narrow the loop to 9 bits.
+
+// CHECK-LABEL:   handshake.func @wideArgumentEntersTheCycle(
+// CHECK:           %[[PRE:.*]] = merge %{{.*}}, %{{.*}} : <i9>
+// CHECK:           %[[EXT:.*]] = extsi %[[PRE]] : <i9> to <i32>
+// CHECK:           %[[HEAD:.*]], %{{.*}} = control_merge {{\[}}%[[EXT]], %[[BACK:.*]]]  : {{\[}}<i32>, <i32>] to <i32>, <i1>
+// CHECK:           %[[T:.*]], %{{.*}} = cond_br %{{.*}}, %[[HEAD]] : <i1>, <i32>
+// CHECK:           %[[MUX:.*]] = mux %{{.*}} {{\[}}%[[T]], %{{.*}}] : <i1>, {{\[}}<i32>, <i32>] to <i32>
+// CHECK:           %[[BACK]], %[[EXIT:.*]] = cond_br %{{.*}}, %[[MUX]] : <i1>, <i32>
+// CHECK:           end %[[EXIT]] : <i32>
+handshake.func @wideArgumentEntersTheCycle(%a8: !handshake.channel<i8>, %b8: !handshake.channel<i8>, %w: !handshake.channel<i32>, %index: !handshake.channel<i1>, %cond: !handshake.channel<i1>, %start: !handshake.control<>) -> !handshake.channel<i32> {
+  %e8 = extsi %a8 : <i8> to <i32>
+  %f8 = extui %b8 : <i8> to <i32>
+  %pre = merge %e8, %f8 : <i32>
+  %head, %hidx = control_merge [%pre, %back] : [<i32>, <i32>] to <i32>, <i1>
+  %t0, %f0 = cond_br %cond, %head : <i1>, <i32>
+  %m0 = mux %index [%t0, %w] : <i1>, [<i32>, <i32>] to <i32>
+  %back, %exit = cond_br %cond, %m0 : <i1>, <i32>
+  end %exit : <i32>
+}
