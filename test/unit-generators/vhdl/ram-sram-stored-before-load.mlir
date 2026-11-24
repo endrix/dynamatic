@@ -5,6 +5,11 @@
 // RUN: tail -n +2 %t/handshake_ram_0.vhd | sed 's/handshake_ram_0/RAM/g' > %t/flops0
 // RUN: tail -n +2 %t/handshake_ram_2.vhd | sed 's/handshake_ram_2/RAM/g' > %t/flops2
 // RUN: diff %t/flops0 %t/flops2
+// RUN: export RAM_RESET_CONTENT=1; %export-vhdl
+// RUN: FileCheck %s -input-file %t/handshake_ram_0.vhd --check-prefix=RESET
+// RUN: tail -n +2 %t/handshake_ram_0.vhd | sed 's/handshake_ram_0/RAM/g' > %t/rflops0
+// RUN: tail -n +2 %t/handshake_ram_2.vhd | sed 's/handshake_ram_2/RAM/g' > %t/rflops2
+// RUN: diff %t/rflops0 %t/rflops2
 
 // A MEMORY ITS PROGRAM STORES BEFORE IT LOADS. Every SRAM view keeps a bit a
 // word, so that a word never stored since reset reads as zero, the declared
@@ -51,7 +56,13 @@ module {
   // BITS: loadData <= raw when word_written = '1' else (others => '0');
 
   // The flop models of ram0 and ram2 are the same unit but for their names
-  // (the diff above): the reset the flop model has is not the view's.
+  // (the diffs above), with the flop model's reset of the content off and on
+  // (RAM_RESET_CONTENT, on in the cell-library flow, where the views are
+  // used): the reset the flop model has is not the view's.
+  // RESET-LABEL: architecture {{.*}} of handshake_ram_0
+  // RESET: write_proc
+  // RESET: if (rst = '1') then
+  // RESET-NEXT: ram <= ram_init;
   hw.module.extern @handshake_ram_0(in %loadEn : i1, in %loadAddr : i6, in %storeEn : i1, in %storeAddr : i6, in %storeData : i32, in %clk : i1, in %rst : i1, out loadData : i32) attributes {hw.name = "handshake.ram", hw.parameters = {ADDR_WIDTH = 6 : ui32, DATA_WIDTH = 32 : ui32, INITIAL_VALUES = "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,", SIZE = 64 : ui32, STORED_BEFORE_LOAD = 1 : ui32}}
   hw.module.extern @handshake_ram_1(in %loadEn : i1, in %loadAddr : i6, in %storeEn : i1, in %storeAddr : i6, in %storeData : i32, in %clk : i1, in %rst : i1, out loadData : i32) attributes {hw.name = "handshake.ram", hw.parameters = {ADDR_WIDTH = 6 : ui32, DATA_WIDTH = 32 : ui32, INITIAL_VALUES = "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,", PORTS = 1 : ui32, SIZE = 64 : ui32, STORED_BEFORE_LOAD = 1 : ui32}}
   hw.module.extern @handshake_ram_2(in %loadEn : i1, in %loadAddr : i6, in %storeEn : i1, in %storeAddr : i6, in %storeData : i32, in %clk : i1, in %rst : i1, out loadData : i32) attributes {hw.name = "handshake.ram", hw.parameters = {ADDR_WIDTH = 6 : ui32, DATA_WIDTH = 32 : ui32, INITIAL_VALUES = "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,", SIZE = 64 : ui32}}
