@@ -1252,10 +1252,11 @@ ModuleDiscriminator::ModuleDiscriminator(handshake::RAMOp *op,
   // takes 2, which is always safe.
   if (auto ramPorts = (*op)->getAttrOfType<IntegerAttr>("handshake.ram_ports"))
     addUnsigned("PORTS", ramPorts.getValue().getZExtValue());
-  // Whether the program stores every word of the memory before it loads it
-  // (streamblocks' handshake.ram_stored_before_load, from CalPy's
-  // `@memory(name, kind="ram", stored_before_load=True)`): no load reads the
-  // declared content, so the generator's SRAM view keeps no bit a word
+  // Whether no bit of a word of the memory not stored since reset reaches
+  // what the program does (streamblocks' handshake.ram_stored_before_load,
+  // from CalPy's `@memory(name, kind="ram", stored_before_load=True)`; such a
+  // word may be loaded and its bits shifted or masked away): the declared
+  // content is never used, so the generator's SRAM view keeps no bit a word
   // telling a word stored since reset from one that was not (ram.py,
   // _with_written_bits). Only when said: a memory that does not say is the
   // module it was, its parameters file included.
