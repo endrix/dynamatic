@@ -31,8 +31,8 @@ def generate_ram(name, params):
     # a macro of the memory's own size from the name pattern and reads no
     # list: its view is one macro, never padded. Every view reads a word
     # never stored since reset as zero, its declared content
-    # (_with_written_bits), unless `stored_before_load` says no load reads
-    # one (below). See _generate_ram_sram, _generate_ram_sram_dp,
+    # (_with_written_bits), unless `stored_before_load` says no bit of one
+    # is used (below). See _generate_ram_sram, _generate_ram_sram_dp,
     # _generate_ram_openram and _generate_ram_openram_tiled.
     sram_threshold = params.get("sram_threshold", 0)
     sram_interface = params.get("sram_interface", "fakeram")
@@ -51,9 +51,10 @@ def generate_ram(name, params):
     # See `_gen_write_body`. The value is 0 or 1; the command line is read
     # with ast.literal_eval, so `true` or `yes` is refused rather than read.
     reset_content = bool(params.get("reset_content", 0))
-    # STORED BEFORE LOADED: the program stores every word of the memory
-    # before it loads it, so no load reads the declared content, and the
-    # view is the macro alone, without the written bits that make a word
+    # STORED BEFORE LOADED: no bit of a word the program has not stored
+    # since reset reaches what it does (it may load one and shift or mask
+    # its bits away), so the declared content is never used, and the view
+    # is the macro alone, without the written bits that make a word
     # never stored read as zero: `size` flip-flops and a `size`-way mux
     # less. The RAM's STORED_BEFORE_LOAD parameter (HandshakeToHW's, from
     # the front end's `handshake.ram_stored_before_load`, CalPy's
@@ -98,7 +99,7 @@ def _with_written_bits(view: str, size: int, data_width: int) -> str:
     """A view that reads a word never stored since reset as zero.
 
     A view is written only for a memory whose declared content is all
-    zeros (_is_sram), and a program may load a word before it stores one,
+    zeros (_is_sram), and a program may use a word before it stores one,
     relying on that zero: MPEG-4 texture's 832 x 13 RAM in the inverse AC
     prediction loads seven words before any store reaches them. The flop
     model has the zero from its reset (reset_content); a macro powers up
@@ -114,8 +115,9 @@ def _with_written_bits(view: str, size: int, data_width: int) -> str:
     flip-flops and a `size`-way mux, no cycle: the bit is ready when the
     word is.
 
-    Not for a memory whose program stores every word before it loads it
-    (`stored_before_load`): no load reads a word never stored, and the bits
+    Not for a memory whose program uses no bit of a word before it stores
+    it (`stored_before_load`; it may load one and shift or mask its bits
+    away): nothing uses a word never stored, and the bits
     would cost their flip-flops for nothing (AV1's entropy actor: 1.28 M of
     them on three memories of 1,048,576, 147,456 and 83,235 words)."""
     arch = view.index("architecture arch of")

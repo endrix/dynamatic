@@ -14,7 +14,8 @@
 // A MEMORY ITS PROGRAM STORES BEFORE IT LOADS. Every SRAM view keeps a bit a
 // word, so that a word never stored since reset reads as zero, the declared
 // content a macro does not have at power-up (ram-sram.mlir). A memory whose
-// program never loads a word it has not stored says so (STORED_BEFORE_LOAD
+// program lets no bit of a word it has not stored reach what it does (it
+// may load one and shift or mask its bits away) says so (STORED_BEFORE_LOAD
 // = 1, from the front end's handshake.ram_stored_before_load, CalPy's
 // `@memory(name, kind="ram", stored_before_load=True)`), and its view is the
 // macro alone: no bits, no mux, loadData the macro's read data. The
